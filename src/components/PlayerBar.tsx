@@ -4,6 +4,7 @@ import { useStore } from "@/lib/store";
 import { formatTime } from "@/lib/format";
 import { DualDeckStage } from "@/components/DualDeckStage";
 import { TrackThumbnail } from "@/components/TrackThumbnail";
+import { genreFamilies } from "@/data/styles";
 
 const CROSSFADE_PRESETS = [5, 10, 15, 20, 30];
 
@@ -25,6 +26,10 @@ export function PlayerBar() {
   const crossfadeOverrideSec = useStore((s) => s.crossfadeOverrideSec);
   const setCrossfadeOverride = useStore((s) => s.setCrossfadeOverride);
   const toggleQueuePanel = useStore((s) => s.toggleQueuePanel);
+  const styleGenreHint = useStore((s) => s.styleGenreHint);
+  const setStyleGenreHint = useStore((s) => s.setStyleGenreHint);
+  const analyzingTrackIds = useStore((s) => s.analyzingTrackIds);
+  const nextTrackAnalyzing = queue[0] ? analyzingTrackIds.has(queue[0].id) : false;
 
   const durationSec = currentTrack?.durationSec ?? 0;
   const progressPercent =
@@ -128,12 +133,29 @@ export function PlayerBar() {
         <button
           type="button"
           onClick={requestMixNow}
-          disabled={!currentTrack || queue.length === 0 || isTransitioning}
+          disabled={!currentTrack || queue.length === 0 || isTransitioning || nextTrackAnalyzing}
           className="text-xs font-semibold px-3 py-1.5 rounded-full border border-border text-muted hover:text-foreground disabled:opacity-30"
-          title="Crossfade into the next queued track now (M)"
+          title={
+            nextTrackAnalyzing
+              ? "Analyzing next track's beat/tempo…"
+              : "Beatmatch and mix into the next queued track now (M)"
+          }
         >
-          {isTransitioning ? "Mixing…" : "Mix Now"}
+          {isTransitioning ? "Mixing…" : nextTrackAnalyzing ? "Analyzing…" : "Mix Now"}
         </button>
+        <select
+          value={styleGenreHint ?? "auto"}
+          onChange={(e) => setStyleGenreHint(e.target.value === "auto" ? null : e.target.value)}
+          title="Style influence for chosen transitions"
+          className="hidden sm:block bg-transparent border border-border rounded-full text-xs text-muted px-2 py-1.5 outline-none"
+        >
+          <option value="auto">Style: Auto</option>
+          {genreFamilies.map((g) => (
+            <option key={g.id} value={g.id}>
+              {g.name}
+            </option>
+          ))}
+        </select>
         <select
           value={crossfadeOverrideSec ?? "auto"}
           onChange={(e) =>

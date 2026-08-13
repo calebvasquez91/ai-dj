@@ -4,6 +4,7 @@ import { useParams, useRouter } from "next/navigation";
 import { useStore } from "@/lib/store";
 import { formatTime } from "@/lib/format";
 import { TrackThumbnail } from "@/components/TrackThumbnail";
+import { shuffle } from "@/lib/shuffle";
 
 export default function PlaylistPage() {
   const params = useParams<{ id: string }>();
@@ -51,13 +52,24 @@ export default function PlaylistPage() {
         </p>
       ) : (
         <>
-          <button
-            type="button"
-            onClick={() => playTrackList(playlist.tracks, 0)}
-            className="self-start rounded-full bg-accent text-white text-sm font-semibold px-5 py-2 hover:bg-accent-strong"
-          >
-            ▶ Play
-          </button>
+          <div className="flex items-center gap-3">
+            <button
+              type="button"
+              onClick={() => playTrackList(playlist.tracks, 0)}
+              className="self-start rounded-full bg-accent text-white text-sm font-semibold px-5 py-2 hover:bg-accent-strong"
+            >
+              ▶ Play
+            </button>
+            <button
+              type="button"
+              onClick={() => playTrackList(shuffle(playlist.tracks), 0)}
+              disabled={playlist.tracks.length < 2}
+              className="self-start rounded-full border border-border text-sm font-semibold px-5 py-2 hover:bg-surface-hover disabled:opacity-40"
+              title="Play this playlist in a random order"
+            >
+              🔀 Shuffle Play
+            </button>
+          </div>
 
           <div className="flex flex-col gap-1">
             {playlist.tracks.map((track, index) => (

@@ -5,12 +5,14 @@ import { useSearchParams } from "next/navigation";
 import { useStore } from "@/lib/store";
 import { filesToTracks } from "@/lib/localAudio";
 import { TrackList } from "@/components/TrackList";
+import { shuffle } from "@/lib/shuffle";
 
 function LibraryContent() {
   const inputRef = useRef<HTMLInputElement>(null);
   const [loading, setLoading] = useState(false);
   const localLibrary = useStore((s) => s.localLibrary);
   const addLocalTracks = useStore((s) => s.addLocalTracks);
+  const playTrackList = useStore((s) => s.playTrackList);
   const query = (useSearchParams().get("q") ?? "").trim().toLowerCase();
 
   const filtered = query
@@ -38,14 +40,25 @@ function LibraryContent() {
     <div className="p-6 flex flex-col gap-4">
       <div className="flex items-center justify-between gap-4">
         <h1 className="text-2xl font-bold">Local Files</h1>
-        <button
-          type="button"
-          onClick={() => inputRef.current?.click()}
-          disabled={loading}
-          className="rounded-full bg-accent text-white text-sm font-semibold px-4 py-2 hover:bg-accent-strong disabled:opacity-50 shrink-0"
-        >
-          {loading ? "Adding…" : "+ Add Files"}
-        </button>
+        <div className="flex items-center gap-3 shrink-0">
+          <button
+            type="button"
+            onClick={() => playTrackList(shuffle(filtered), 0)}
+            disabled={filtered.length < 2}
+            className="rounded-full border border-border text-sm font-semibold px-4 py-2 hover:bg-surface-hover disabled:opacity-40"
+            title="Play these tracks in a random order"
+          >
+            🔀 Shuffle Play
+          </button>
+          <button
+            type="button"
+            onClick={() => inputRef.current?.click()}
+            disabled={loading}
+            className="rounded-full bg-accent text-white text-sm font-semibold px-4 py-2 hover:bg-accent-strong disabled:opacity-50"
+          >
+            {loading ? "Adding…" : "+ Add Files"}
+          </button>
+        </div>
         <input
           ref={inputRef}
           type="file"

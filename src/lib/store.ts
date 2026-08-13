@@ -1,6 +1,7 @@
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
 import type { Playlist, Track } from "@/types/music";
+import type { TrackAnalysis } from "@/lib/audio-analysis";
 
 const MAX_HISTORY = 50;
 
@@ -18,6 +19,9 @@ interface PlayerState {
   isTransitioning: boolean;
   sidebarOpen: boolean;
   queuePanelOpen: boolean;
+  trackAnalysis: Record<string, TrackAnalysis>;
+  analyzingTrackIds: Set<string>;
+  styleGenreHint: string | null;
 
   playlists: Playlist[];
   localLibrary: Track[];
@@ -40,6 +44,10 @@ interface PlayerState {
   setSidebarOpen: (open: boolean) => void;
   toggleQueuePanel: () => void;
   addLocalTracks: (tracks: Track[]) => void;
+  setTrackAnalysis: (trackId: string, analysis: TrackAnalysis) => void;
+  startAnalyzing: (trackId: string) => void;
+  stopAnalyzing: (trackId: string) => void;
+  setStyleGenreHint: (genreId: string | null) => void;
 
   createPlaylist: () => string;
   renamePlaylist: (playlistId: string, name: string) => void;
@@ -69,6 +77,9 @@ export const useStore = create<PlayerState>()(
       isTransitioning: false,
       sidebarOpen: false,
       queuePanelOpen: false,
+      trackAnalysis: {},
+      analyzingTrackIds: new Set<string>(),
+      styleGenreHint: null,
 
       playlists: [],
       localLibrary: [],
@@ -105,6 +116,17 @@ export const useStore = create<PlayerState>()(
       toggleQueuePanel: () => set((s) => ({ queuePanelOpen: !s.queuePanelOpen })),
       addLocalTracks: (tracks) =>
         set((s) => ({ localLibrary: [...s.localLibrary, ...tracks] })),
+      setTrackAnalysis: (trackId, analysis) =>
+        set((s) => ({ trackAnalysis: { ...s.trackAnalysis, [trackId]: analysis } })),
+      startAnalyzing: (trackId) =>
+        set((s) => ({ analyzingTrackIds: new Set(s.analyzingTrackIds).add(trackId) })),
+      stopAnalyzing: (trackId) =>
+        set((s) => {
+          const next = new Set(s.analyzingTrackIds);
+          next.delete(trackId);
+          return { analyzingTrackIds: next };
+        }),
+      setStyleGenreHint: (genreId) => set({ styleGenreHint: genreId }),
 
       next: () => {
         const { queue, currentTrack, history } = get();
