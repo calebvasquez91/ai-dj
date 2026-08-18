@@ -16,7 +16,9 @@ export type TransitionCategory =
   | "effects"
   | "scratch"
   | "vocal"
-  | "digital";
+  | "digital"
+  | "brake"
+  | "riser";
 
 export interface TransitionEntry {
   id: string;
@@ -110,34 +112,51 @@ export const transitions: TransitionEntry[] = [
     exampleDjs: ["Jeff Mills", "Ben Klock"],
   },
 
-  // Scratch-based (data/persona only — not executed)
+  // Scratch-based — simulated as a rhythmic stutter-gate (real turntable
+  // scratch gestures need physical input we don't have; this is a
+  // best-effort approximation of the *feel*, not the technique itself).
   {
     id: "scratch-transition",
     name: "Scratch Transition",
     category: "scratch",
-    description: "A turntablist scratches the incoming track's intro in over the outgoing track's tail before dropping it in fully.",
+    description: "Simulated: a rapid stutter-gate alternation standing in for a turntablist scratching the incoming track's intro in over the outgoing track's tail.",
     idealBpmDeltaMax: Infinity,
     idealGenres: ["hip-hop"],
-    executable: false,
+    executable: true,
     exampleDjs: ["Q-Bert", "DJ Craze", "Mix Master Mike"],
   },
   {
     id: "beat-juggle-transition",
     name: "Beat Juggle Transition",
     category: "scratch",
-    description: "Rapidly alternating between two copies of a record to construct a live rhythmic bridge into the next track.",
+    description: "Simulated: a rhythmic stutter-gate bouncing between the outgoing and incoming track, standing in for juggling two copies of a record live.",
     idealBpmDeltaMax: Infinity,
     idealGenres: ["hip-hop"],
-    executable: false,
+    executable: true,
     exampleDjs: ["DJ Jazzy Jeff", "Q-Bert"],
   },
 
-  // Vocal / layering-based (data/persona only — not executed)
+  // Brake-based
+  {
+    id: "spinback",
+    name: "Spinback / Brake",
+    category: "brake",
+    description: "The outgoing track audibly slows to a stop like a record braked by hand, then the incoming track drops in at full tempo.",
+    idealBpmDeltaMax: Infinity,
+    idealGenres: ["reggae", "hip-hop", "breakbeat"],
+    executable: true,
+    exampleDjs: ["Grandmaster Flash", "Kool Herc"],
+  },
+
+  // Vocal / layering-based (data/persona only — not executed: isolating a
+  // clean vocal or instrumental stem from an arbitrary track needs a
+  // source-separation model, which is out of scope for this app's
+  // client-side audio stack).
   {
     id: "vocal-layering",
     name: "Vocal Layering",
     category: "vocal",
-    description: "Layers the incoming track's vocal or acapella over the outgoing track's instrumental before the full switch.",
+    description: "Layers the incoming track's vocal or acapella over the outgoing track's instrumental before the full switch. Needs an isolated vocal stem, which this app can't extract on its own — data/persona only.",
     idealBpmDeltaMax: 0.05,
     idealGenres: ["house"],
     executable: false,
@@ -147,7 +166,7 @@ export const transitions: TransitionEntry[] = [
     id: "acapella-mashup",
     name: "Acapella Mashup",
     category: "vocal",
-    description: "Drops an isolated vocal from one track over the instrumental of another to bridge two otherwise unrelated records.",
+    description: "Drops an isolated vocal from one track over the instrumental of another to bridge two otherwise unrelated records. Needs stem-separated audio, which this app can't extract on its own — data/persona only.",
     idealBpmDeltaMax: 0.1,
     idealGenres: ["breakbeat"],
     executable: false,
@@ -164,5 +183,15 @@ export const transitions: TransitionEntry[] = [
     idealGenres: [],
     executable: true,
     exampleDjs: ["David Guetta", "Fisher", "John Summit"],
+  },
+  {
+    id: "riser-uplift",
+    name: "Riser / Uplifter",
+    category: "riser",
+    description: "A synthesized rising noise sweep builds tension under the outgoing track's tail before a hard drop into the incoming track, festival-build style.",
+    idealBpmDeltaMax: Infinity,
+    idealGenres: ["trance", "hardstyle"],
+    executable: true,
+    exampleDjs: ["Hardwell", "Martin Garrix", "Tiësto"],
   },
 ];

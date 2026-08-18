@@ -2,11 +2,26 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useStore } from "@/lib/store";
-import { AUTO_DJ_OFF_FADE_SEC, equalPowerCurves, planSimpleFade, planTransition, type TransitionPlan } from "@/lib/mix-engine";
+import {
+  AUTO_DJ_OFF_FADE_SEC,
+  MAX_ACTIVE_PLAY_SEC,
+  brakeGainCurves,
+  equalPowerCurves,
+  planSimpleFade,
+  planTransition,
+  stutterGateCurves,
+  type TransitionPlan,
+} from "@/lib/mix-engine";
 import { analyzeTrackFromUrl, fallbackAnalysis, type TrackAnalysis } from "@/lib/audio-analysis";
 import type { Track } from "@/types/music";
 
 type DeckId = "A" | "B";
+
+interface RiserNodes {
+  source: AudioBufferSourceNode;
+  gain: GainNode;
+  filter: BiquadFilterNode;
+}
 
 interface ActiveTransition {
   fromDeckId: DeckId;
@@ -15,8 +30,13 @@ interface ActiveTransition {
   durationMs: number;
   tempoSync: boolean;
   tempoRatioStart: number;
+  effect: TransitionPlan["effect"];
   tickIntervalId: ReturnType<typeof setInterval> | null;
+  riserNodes: RiserNodes | null;
 }
+
+/** Real brakes don't slow linearly to a full stop — they decelerate hard early and crawl at the end. An ease-out curve (not linear) captures that. */
+const BRAKE_MIN_RATE = 0.15;
 
 interface DeckNodes {
   source: MediaElementAudioSourceNode;
@@ -81,6 +101,20 @@ export function DualDeckStage() {
     nodes.delaySend.gain.setValueAtTime(0, now);
   }, []);
 
+  const stopRiserNodes = useCallback((riserNodes: RiserNodes | null) => {
+    if (!riserNodes) return;
+    const ctx = audioCtxRef.current;
+    try {
+      if (ctx) {
+        riserNodes.gain.gain.cancelScheduledValues(ctx.currentTime);
+        riserNodes.gain.gain.setValueAtTime(0, ctx.currentTime);
+      }
+      riserNodes.source.stop();
+    } catch {
+      // Already stopped/scheduled to stop — harmless.
+    }
+  }, []);
+
   const cancelTransition = useCallback(() => {
     const t = transitionRef.current;
     if (!t) return;
@@ -90,12 +124,15 @@ export function DualDeckStage() {
       toEl.pause();
       toEl.playbackRate = 1;
     }
+    const fromEl = deckEl(t.fromDeckId);
+    if (fromEl) fromEl.playbackRate = 1;
+    stopRiserNodes(t.riserNodes);
     resetDeckNodes(t.toDeckId, 0);
     resetDeckNodes(t.fromDeckId, 1);
     loadedTrackId.current[t.toDeckId] = null;
     transitionRef.current = null;
     useStore.getState().setIsTransitioning(false);
-  }, [deckEl, resetDeckNodes]);
+  }, [deckEl, resetDeckNodes, stopRiserNodes]);
 
   // Background analysis: as soon as a track is reachable (now playing or
   // queued), estimate its BPM/beat-grid/energy-onset/key so a mix engine
@@ -203,24 +240,24 @@ export function DualDeckStage() {
       useStore.getState().next();
     }
 
-    function applyFilterAutomation(plan: TransitionPlan, fromDeckId: DeckId, toDeckId: DeckId) {
+    function applyTransitionEffect(plan: TransitionPlan, fromDeckId: DeckId, toDeckId: DeckId) {
       const ctx = audioCtxRef.current;
       const fromNodes = deckNodesRef.current[fromDeckId];
       const toNodes = deckNodesRef.current[toDeckId];
       if (!ctx || !fromNodes || !toNodes) return;
       const now = ctx.currentTime;
 
-      if (plan.filterAutomation === "highpass-sweep") {
+      if (plan.effect === "highpass-sweep") {
         fromNodes.filter.type = "highpass";
         fromNodes.filter.frequency.cancelScheduledValues(now);
         fromNodes.filter.frequency.setValueAtTime(20, now);
         fromNodes.filter.frequency.linearRampToValueAtTime(300, now + plan.windowSec * 0.5);
-      } else if (plan.filterAutomation === "lowpass-sweep") {
+      } else if (plan.effect === "lowpass-sweep") {
         toNodes.filter.type = "lowpass";
         toNodes.filter.frequency.cancelScheduledValues(now);
         toNodes.filter.frequency.setValueAtTime(200, now);
         toNodes.filter.frequency.linearRampToValueAtTime(20000, now + plan.windowSec);
-      } else if (plan.filterAutomation === "echo-tail") {
+      } else if (plan.effect === "echo-tail") {
         fromNodes.delaySend.gain.cancelScheduledValues(now);
         fromNodes.delaySend.gain.setValueAtTime(0, now + plan.windowSec * 0.6);
         fromNodes.delaySend.gain.linearRampToValueAtTime(
@@ -228,6 +265,41 @@ export function DualDeckStage() {
           now + plan.windowSec
         );
       }
+      // "brake" and "stutter-gate" are expressed entirely through the main
+      // gain curves chosen in startTransition(); "riser" is an independent
+      // synthesized layer added there too. Neither needs filter automation.
+    }
+
+    /** Synthesizes a classic EDM riser: a filtered noise sweep that builds in pitch and volume under the outgoing track's tail, then cuts out just past the drop. Needs no bundled audio asset — it's generated on the fly. */
+    function startRiserLayer(ctx: AudioContext, windowSec: number): RiserNodes | null {
+      const masterGain = masterGainRef.current;
+      if (!masterGain) return null;
+      const sampleCount = Math.max(1, Math.floor(ctx.sampleRate * windowSec));
+      const buffer = ctx.createBuffer(1, sampleCount, ctx.sampleRate);
+      const data = buffer.getChannelData(0);
+      for (let i = 0; i < sampleCount; i++) data[i] = Math.random() * 2 - 1;
+
+      const source = ctx.createBufferSource();
+      source.buffer = buffer;
+      const filter = ctx.createBiquadFilter();
+      filter.type = "lowpass";
+      const gain = ctx.createGain();
+
+      source.connect(filter);
+      filter.connect(gain);
+      gain.connect(masterGain);
+
+      const now = ctx.currentTime;
+      filter.frequency.setValueAtTime(150, now);
+      filter.frequency.exponentialRampToValueAtTime(9000, now + windowSec);
+      gain.gain.setValueAtTime(0.0001, now);
+      gain.gain.exponentialRampToValueAtTime(0.55, now + windowSec * 0.92);
+      gain.gain.linearRampToValueAtTime(0, now + windowSec + 0.15);
+
+      source.start(now);
+      source.stop(now + windowSec + 0.2);
+
+      return { source, filter, gain };
     }
 
     function startTransition(nextTrack: Track, plan: TransitionPlan) {
@@ -241,43 +313,64 @@ export function DualDeckStage() {
       const toNodes = deckNodesRef.current[toDeckId];
       if (!ctx || !fromEl || !toEl || !fromNodes || !toNodes) return;
 
+      // A brake/spinback dies to a full stop and drops the next track in
+      // fresh at its native tempo — no tempo-matching, since the whole
+      // point is a clean break, not a blend.
+      const startsTempoSynced = plan.effect !== "brake" && plan.tempoSync;
+
       loadedTrackId.current[toDeckId] = nextTrack.id;
       toEl.src = nextTrack.sourceUrl;
       toEl.currentTime = plan.incomingEntryOffsetSec;
-      toEl.playbackRate = plan.tempoSync ? plan.tempoRatioStart : 1;
+      toEl.playbackRate = startsTempoSynced ? plan.tempoRatioStart : 1;
       toNodes.gain.gain.setValueAtTime(0, ctx.currentTime);
       toEl.play().catch(() => {});
 
       const now = ctx.currentTime;
-      const { outCurve, inCurve } = equalPowerCurves();
+      const { outCurve, inCurve } =
+        plan.effect === "brake"
+          ? brakeGainCurves()
+          : plan.effect === "stutter-gate"
+            ? stutterGateCurves()
+            : equalPowerCurves();
       fromNodes.gain.gain.cancelScheduledValues(now);
       toNodes.gain.gain.cancelScheduledValues(now);
       fromNodes.gain.gain.setValueCurveAtTime(outCurve, now, plan.windowSec);
       toNodes.gain.gain.setValueCurveAtTime(inCurve, now, plan.windowSec);
-      applyFilterAutomation(plan, fromDeckId, toDeckId);
+      applyTransitionEffect(plan, fromDeckId, toDeckId);
+      const riserNodes = plan.effect === "riser" ? startRiserLayer(ctx, plan.windowSec) : null;
 
       const transition: ActiveTransition = {
         fromDeckId,
         toDeckId,
         startTime: performance.now(),
         durationMs: Math.max(1, plan.windowSec) * 1000,
-        tempoSync: plan.tempoSync,
+        tempoSync: startsTempoSynced,
         tempoRatioStart: plan.tempoRatioStart,
+        effect: plan.effect,
         tickIntervalId: null,
+        riserNodes,
       };
       transitionRef.current = transition;
       useStore.getState().setIsTransitioning(true);
 
       // Gain/filter automation is native (AudioParam-scheduled) and keeps
       // running even if this JS timer is delayed. The timer's only audio
-      // duty is the incoming deck's tempo-sync playbackRate ramp, since
-      // HTMLMediaElement.playbackRate isn't an automatable AudioParam.
+      // duties are things HTMLMediaElement.playbackRate can't do as an
+      // AudioParam: the incoming deck's tempo-sync ramp, or — for a brake
+      // — the outgoing deck's slow-down ramp.
       const tick = () => {
         const t = transitionRef.current;
         if (!t) return;
         const elapsed = performance.now() - t.startTime;
         const progress = Math.min(1, elapsed / t.durationMs);
-        if (t.tempoSync) {
+        if (t.effect === "brake") {
+          const fromDeckEl = deckEl(t.fromDeckId);
+          if (fromDeckEl) {
+            // Ease-out: decelerates hard early, crawls near the end, like a hand-braked record.
+            const eased = 1 - Math.pow(1 - progress, 3);
+            fromDeckEl.playbackRate = 1 - eased * (1 - BRAKE_MIN_RATE);
+          }
+        } else if (t.tempoSync) {
           const toDeckEl = deckEl(t.toDeckId);
           if (toDeckEl) {
             toDeckEl.playbackRate = t.tempoRatioStart + (1 - t.tempoRatioStart) * progress;
@@ -339,13 +432,21 @@ export function DualDeckStage() {
         next: { track: nextTrack, analysis: getAnalysis(nextTrack.id) },
         genreHint: state.styleGenreHint,
         overrideSec: state.crossfadeOverrideSec,
+        currentElapsedSec: currentTime,
       });
       const clampedWindow = Math.min(
         plan.windowSec,
         duration / 2,
         Math.max(1, nextTrack.durationSec - plan.incomingEntryOffsetSec)
       );
-      if (duration - currentTime <= clampedWindow) {
+      // Two independent triggers: the classic "near the natural end of the
+      // file" case, and a hard ceiling on active playback time so a track
+      // never rides past MAX_ACTIVE_PLAY_SEC regardless of how long the
+      // file actually is — without this, a 5-6 minute track would just
+      // play through almost to its real end before Auto-DJ ever kicked in.
+      const nearNaturalEnd = duration - currentTime <= clampedWindow;
+      const pastActiveCap = currentTime >= MAX_ACTIVE_PLAY_SEC - clampedWindow;
+      if (nearNaturalEnd || pastActiveCap) {
         startTransition(nextTrack, { ...plan, windowSec: clampedWindow });
       }
     }
@@ -364,11 +465,13 @@ export function DualDeckStage() {
       const track = state.currentTrack;
       const nextTrack = state.queue[0];
       if (!track || !nextTrack) return;
+      const activeEl = deckEl(activeDeckRef.current);
       const plan = planTransition({
         current: { track, analysis: getAnalysis(track.id) },
         next: { track: nextTrack, analysis: getAnalysis(nextTrack.id) },
         genreHint: state.styleGenreHint,
         overrideSec: state.crossfadeOverrideSec,
+        currentElapsedSec: activeEl?.currentTime ?? null,
       });
       startTransition(nextTrack, plan);
     });
@@ -386,11 +489,12 @@ export function DualDeckStage() {
       if (transitionRef.current?.tickIntervalId != null) {
         clearInterval(transitionRef.current.tickIntervalId);
       }
+      stopRiserNodes(transitionRef.current?.riserNodes ?? null);
       transitionRef.current = null;
       elA?.removeEventListener("ended", onEndedA);
       elB?.removeEventListener("ended", onEndedB);
     };
-  }, [deckEl, resetDeckNodes]);
+  }, [deckEl, resetDeckNodes, stopRiserNodes]);
 
   // External track changes (library/queue click, next/previous, playlist
   // play) land here. Transitions we drive ourselves already have the new
