@@ -128,6 +128,7 @@ export function DeckView() {
   const styleGenreHint = useStore((s) => s.styleGenreHint);
   const crossfadeOverrideSec = useStore((s) => s.crossfadeOverrideSec);
   const isTransitioning = useStore((s) => s.isTransitioning);
+  const djMode = useStore((s) => s.djMode);
 
   const nextTrack = queue[0] ?? null;
   const currentAnalysis = currentTrack ? trackAnalysis[currentTrack.id] : undefined;
@@ -141,8 +142,9 @@ export function DeckView() {
       genreHint: styleGenreHint,
       overrideSec: crossfadeOverrideSec,
       currentElapsedSec: currentTimeSec,
+      djMode,
     });
-  }, [currentTrack, nextTrack, currentAnalysis, nextAnalysis, styleGenreHint, crossfadeOverrideSec, currentTimeSec]);
+  }, [currentTrack, nextTrack, currentAnalysis, nextAnalysis, styleGenreHint, crossfadeOverrideSec, currentTimeSec, djMode]);
 
   if (!open) return null;
 

@@ -15,6 +15,7 @@ export function TrackList({
 }) {
   const playTrackList = useStore((s) => s.playTrackList);
   const currentTrack = useStore((s) => s.currentTrack);
+  const setTrackPlayPreference = useStore((s) => s.setTrackPlayPreference);
 
   return (
     <div className="flex flex-col gap-1">
@@ -37,6 +38,44 @@ export function TrackList({
             <p className="text-xs text-muted truncate">{track.artist}</p>
           </div>
           <span className="text-xs text-muted">{formatTime(track.durationSec)}</span>
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              setTrackPlayPreference(track.id, track.playPreference === "must" ? undefined : "must");
+            }}
+            className={`px-1 text-sm leading-none transition-opacity ${
+              track.playPreference === "must"
+                ? "text-accent-yellow"
+                : "text-muted opacity-0 group-hover:opacity-100 focus:opacity-100"
+            }`}
+            title={
+              track.playPreference === "must"
+                ? "Must-Play — click to clear"
+                : "Mark Must-Play (guaranteed + first in Shuffle Play)"
+            }
+          >
+            ★
+          </button>
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              setTrackPlayPreference(track.id, track.playPreference === "do-not" ? undefined : "do-not");
+            }}
+            className={`px-1 text-sm leading-none transition-opacity ${
+              track.playPreference === "do-not"
+                ? "text-accent-pink"
+                : "text-muted opacity-0 group-hover:opacity-100 focus:opacity-100"
+            }`}
+            title={
+              track.playPreference === "do-not"
+                ? "Do-Not-Play — excluded from Shuffle Play (click to clear). A direct click here still plays it."
+                : "Mark Do-Not-Play (excluded from Shuffle Play)"
+            }
+          >
+            🚫
+          </button>
           <AddToPlaylistButton track={track} />
           {onRemove && (
             <button

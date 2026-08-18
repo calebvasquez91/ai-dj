@@ -269,6 +269,90 @@ describe("planTransition — Tempo Ramp", () => {
   });
 });
 
+describe("planTransition — untrustworthy tempo data", () => {
+  it("does not claim tempo-sync or attempt a tempo ratio when both tracks' BPM confidence is too low to trust, even if the numbers happen to match", () => {
+    const plan = planTransition({
+      current: { track: makeTrack("a", 240), analysis: makeAnalysis({ bpm: 120, bpmConfidence: 0.05 }) },
+      next: { track: makeTrack("b", 240), analysis: makeAnalysis({ bpm: 120, bpmConfidence: 0.05 }) },
+    });
+    expect(plan.tempoSync).toBe(false);
+    expect(plan.tempoRatioStart).toBe(1);
+  });
+
+  it("still trusts a confident, genuinely matched pair", () => {
+    const plan = planTransition({
+      current: { track: makeTrack("a", 240), analysis: makeAnalysis({ bpm: 128, bpmConfidence: 0.8 }) },
+      next: { track: makeTrack("b", 240), analysis: makeAnalysis({ bpm: 128, bpmConfidence: 0.8 }) },
+    });
+    expect(plan.tempoSync).toBe(true);
+  });
+});
+
+describe("planTransition — BPM mismatch penalty scales with severity", () => {
+  it("heavily penalizes tempo-sensitive techniques for a genuinely large mismatch, even with a favorable genre hint", () => {
+    const plan = planTransition({
+      current: { track: makeTrack("a", 240), analysis: makeAnalysis({ bpm: 90 }) },
+      next: { track: makeTrack("b", 240), analysis: makeAnalysis({ bpm: 137 }) },
+      genreHint: "house",
+    });
+    expect(["blend", "eq-filter", "eq-kill"]).not.toContain(plan.category);
+  });
+});
+
+describe("planTransition — anti-repetition", () => {
+  it("avoids repeating the same transition immediately after it was just used, when another scores similarly", () => {
+    const args = {
+      current: { track: makeTrack("a", 240), analysis: makeAnalysis({ bpm: 128, keyConfidence: 0 }) },
+      next: { track: makeTrack("b", 240), analysis: makeAnalysis({ bpm: 128, keyConfidence: 0 }) },
+    };
+    const first = planTransition(args);
+    expect(first.transitionId).toBe("auto-sync-blend");
+    const second = planTransition({ ...args, recentTransitionIds: [first.transitionId] });
+    expect(second.transitionId).not.toBe("auto-sync-blend");
+  });
+});
+
+describe("planTransition — DJ Set Modes", () => {
+  // Identical BPM (128/128) and no genre hint means every transition passes
+  // its own idealBpmDeltaMax check equally, so the mode bias alone decides
+  // the winner — an unambiguous way to test each mode's steering.
+  function matchedPairPlan(djMode: Parameters<typeof planTransition>[0]["djMode"]) {
+    return planTransition({
+      current: { track: makeTrack("a", 240), analysis: makeAnalysis({ bpm: 128, keyConfidence: 0 }) },
+      next: { track: makeTrack("b", 240), analysis: makeAnalysis({ bpm: 128, keyConfidence: 0 }) },
+      djMode,
+    });
+  }
+
+  it("defaults to auto-sync-blend with no mode bias", () => {
+    expect(matchedPairPlan("auto").transitionId).toBe("auto-sync-blend");
+  });
+
+  it("Wedding mode avoids flashy effects and favors a clean digital blend", () => {
+    const plan = matchedPairPlan("wedding");
+    expect(plan.transitionId).toBe("auto-sync-blend");
+    expect(["scratch", "tag-sample", "riser", "brake"]).not.toContain(plan.category);
+  });
+
+  it("Chill mode favors a long smooth blend", () => {
+    const plan = matchedPairPlan("chill");
+    expect(plan.category).toBe("blend");
+  });
+
+  it("Party mode leans into a crowd-hype tag/sample moment", () => {
+    expect(matchedPairPlan("party").transitionId).toBe("tag-drop");
+  });
+
+  it("Open Format mode leans into a tempo ramp for bold bridging", () => {
+    expect(matchedPairPlan("open-format").transitionId).toBe("tempo-ramp-blend");
+  });
+
+  it("Club mode favors a clean beatmatched technique over scratch/brake/riser", () => {
+    const plan = matchedPairPlan("club");
+    expect(["blend", "eq-filter", "digital"]).toContain(plan.category);
+  });
+});
+
 describe("stutterGateCurves", () => {
   it("only ever has one deck audible at a time", () => {
     const { outCurve, inCurve } = stutterGateCurves(32, 8);

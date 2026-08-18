@@ -5,7 +5,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { useStore } from "@/lib/store";
 import { formatTime } from "@/lib/format";
 import { TrackThumbnail } from "@/components/TrackThumbnail";
-import { shuffle } from "@/lib/shuffle";
+import { shuffleForPlay } from "@/lib/shuffle";
 
 function PlaylistContent() {
   const id = useSearchParams().get("id") ?? "";
@@ -18,6 +18,7 @@ function PlaylistContent() {
   const moveTrackInPlaylist = useStore((s) => s.moveTrackInPlaylist);
   const playTrackList = useStore((s) => s.playTrackList);
   const currentTrack = useStore((s) => s.currentTrack);
+  const setTrackPlayPreference = useStore((s) => s.setTrackPlayPreference);
 
   if (!playlist) {
     return (
@@ -63,10 +64,10 @@ function PlaylistContent() {
             </button>
             <button
               type="button"
-              onClick={() => playTrackList(shuffle(playlist.tracks), 0)}
-              disabled={playlist.tracks.length < 2}
+              onClick={() => playTrackList(shuffleForPlay(playlist.tracks), 0)}
+              disabled={playlist.tracks.filter((t) => t.playPreference !== "do-not").length < 2}
               className="btn-retro-outline self-start"
-              title="Play this playlist in a random order"
+              title="Play this playlist in a random order — skips Do-Not-Play tracks, puts Must-Play tracks first"
             >
               🔀 Shuffle Play
             </button>
@@ -106,6 +107,38 @@ function PlaylistContent() {
                   className="flex items-center gap-1"
                   onClick={(e) => e.stopPropagation()}
                 >
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setTrackPlayPreference(track.id, track.playPreference === "must" ? undefined : "must")
+                    }
+                    className={`px-1 text-sm leading-none ${
+                      track.playPreference === "must" ? "text-accent-yellow" : "text-muted hover:text-foreground"
+                    }`}
+                    title={
+                      track.playPreference === "must"
+                        ? "Must-Play — click to clear"
+                        : "Mark Must-Play (guaranteed + first in Shuffle Play)"
+                    }
+                  >
+                    ★
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setTrackPlayPreference(track.id, track.playPreference === "do-not" ? undefined : "do-not")
+                    }
+                    className={`px-1 text-sm leading-none ${
+                      track.playPreference === "do-not" ? "text-accent-pink" : "text-muted hover:text-foreground"
+                    }`}
+                    title={
+                      track.playPreference === "do-not"
+                        ? "Do-Not-Play — excluded from Shuffle Play (click to clear). A direct click here still plays it."
+                        : "Mark Do-Not-Play (excluded from Shuffle Play)"
+                    }
+                  >
+                    🚫
+                  </button>
                   <button
                     type="button"
                     onClick={() => moveTrackInPlaylist(playlist.id, index, "up")}

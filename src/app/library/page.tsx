@@ -6,7 +6,7 @@ import { useStore } from "@/lib/store";
 import { filesToTracks } from "@/lib/localAudio";
 import { deleteAudioFile } from "@/lib/audioDb";
 import { TrackList } from "@/components/TrackList";
-import { shuffle } from "@/lib/shuffle";
+import { shuffleForPlay } from "@/lib/shuffle";
 
 function LibraryContent() {
   const inputRef = useRef<HTMLInputElement>(null);
@@ -25,6 +25,7 @@ function LibraryContent() {
           t.artist.toLowerCase().includes(query)
       )
     : localLibrary;
+  const shufflableCount = filtered.filter((t) => t.playPreference !== "do-not").length;
 
   async function handleFilesSelected(e: React.ChangeEvent<HTMLInputElement>) {
     const files = Array.from(e.target.files ?? []);
@@ -51,10 +52,10 @@ function LibraryContent() {
         <div className="flex items-center gap-3 shrink-0">
           <button
             type="button"
-            onClick={() => playTrackList(shuffle(filtered), 0)}
-            disabled={filtered.length < 2}
+            onClick={() => playTrackList(shuffleForPlay(filtered), 0)}
+            disabled={shufflableCount < 2}
             className="btn-retro-outline"
-            title="Play these tracks in a random order"
+            title="Play these tracks in a random order — skips Do-Not-Play tracks, puts Must-Play tracks first"
           >
             🔀 Shuffle Play
           </button>

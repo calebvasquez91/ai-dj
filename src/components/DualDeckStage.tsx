@@ -72,6 +72,11 @@ export function DualDeckStage() {
   } | null>(null);
   const loadedTrackId = useRef<Record<DeckId, string | null>>({ A: null, B: null });
   const transitionRef = useRef<ActiveTransition | null>(null);
+  // Last few transitionIds actually used, most recent last — fed back into
+  // planTransition so it doesn't keep picking the same technique every time
+  // several score similarly (which without this, tends to collapse to
+  // whichever blend-style option wins ties by default).
+  const recentTransitionIdsRef = useRef<string[]>([]);
   const activeDeckRef = useRef<DeckId>("A");
   const analyzingRef = useRef<Set<string>>(new Set());
 
@@ -400,6 +405,8 @@ export function DualDeckStage() {
       const toNodes = deckNodesRef.current[toDeckId];
       if (!ctx || !fromEl || !toEl || !fromNodes || !toNodes) return;
 
+      recentTransitionIdsRef.current = [...recentTransitionIdsRef.current, plan.transitionId].slice(-3);
+
       // A brake/spinback dies to a full stop and drops the next track in
       // fresh at its native tempo — no tempo-matching, since the whole
       // point is a clean break, not a blend. A Tempo Ramp deliberately
@@ -530,6 +537,8 @@ export function DualDeckStage() {
         genreHint: state.styleGenreHint,
         overrideSec: state.crossfadeOverrideSec,
         currentElapsedSec: currentTime,
+        djMode: state.djMode,
+        recentTransitionIds: recentTransitionIdsRef.current,
       });
       const clampedWindow = Math.min(
         plan.windowSec,
@@ -585,6 +594,8 @@ export function DualDeckStage() {
         genreHint: state.styleGenreHint,
         overrideSec: state.crossfadeOverrideSec,
         currentElapsedSec: activeEl?.currentTime ?? null,
+        djMode: state.djMode,
+        recentTransitionIds: recentTransitionIdsRef.current,
       });
       startTransition(nextTrack, plan);
     });

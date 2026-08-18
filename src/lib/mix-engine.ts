@@ -12,6 +12,17 @@ export const MAX_ACTIVE_PLAY_SEC = 150;
 /** How close (fractional, after best-octave adjustment) two BPMs need to be to tempo-sync, roughly a real turntable's pitch-fader range. */
 const TEMPO_SYNC_MAX_DELTA = 0.08;
 
+/**
+ * How confident the tempo estimate needs to be before we bet a
+ * precision-dependent technique (a blend, an EQ mix, a tempo ramp) on it.
+ * This is stricter than audio-analysis's own MIN_TEMPO_CONFIDENCE (0.15,
+ * which only decides "is this real data or the 120 BPM fallback") —
+ * two tracks that *both* fell back to that same neutral 120 would
+ * otherwise read as a perfect bpmDelta-of-0 tempo match and get blended,
+ * even though nothing about their real tempos is actually known.
+ */
+const MIN_TEMPO_CONFIDENCE_FOR_TRUST = 0.35;
+
 function clamp(value: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, value));
 }
@@ -214,18 +225,100 @@ export function camelotCompatibility(a: string | null, b: string | null): number
   return 0;
 }
 
+// ---------------------------------------------------------------------------
+// DJ Set Modes — a vibe/context preset that biases which transition
+// *techniques* get chosen. There's no song-selection engine here (that
+// would need real metadata this app doesn't have — genre tags, popularity,
+// crowd sensing), so modes work on the one lever this engine actually
+// controls: steering Wedding/Chill away from flashy, risky effects and
+// toward clean blends, while Party/Open-Format lean into bigger, bolder
+// moments. Soft score bonuses/penalties, not hard exclusions — per the
+// "AI is an assistant, never the boss" principle, a mode should make a
+// technique unlikely, not impossible, if it's truly the only thing that fits.
+// ---------------------------------------------------------------------------
+
+export type DjSetMode = "auto" | "club" | "wedding" | "party" | "chill" | "open-format";
+
+const MODE_CATEGORY_BIAS: Record<DjSetMode, Partial<Record<TransitionCategory, number>>> = {
+  auto: {},
+  club: {
+    blend: 4,
+    "eq-filter": 4,
+    "eq-kill": 3,
+    digital: 3,
+    scratch: -4,
+    brake: -3,
+    riser: -2,
+  },
+  wedding: {
+    blend: 6,
+    digital: 6,
+    cut: 2,
+    "eq-filter": 2,
+    scratch: -10,
+    "tag-sample": -10,
+    riser: -8,
+    brake: -8,
+    reverb: -6,
+    drop: -6,
+  },
+  party: {
+    "tag-sample": 6,
+    riser: 5,
+    drop: 4,
+    effects: 3,
+    digital: 2,
+  },
+  chill: {
+    blend: 6,
+    reverb: 4,
+    "eq-filter": 3,
+    "tempo-ramp": 2,
+    brake: -6,
+    scratch: -10,
+    "tag-sample": -10,
+    riser: -8,
+    drop: -6,
+  },
+  "open-format": {
+    "tempo-ramp": 6,
+    brake: 4,
+    cut: 3,
+    drop: 2,
+  },
+};
+
+/**
+ * Score for how well a transition's BPM tolerance fits the actual gap.
+ * Within tolerance is a flat +10 regardless of technique (a hard cut
+ * doesn't care if it's 1% or 40% off). Outside tolerance, the penalty
+ * scales with how far over — a technique built around tight tempo-sync
+ * (a blend, an EQ mix) should score sharply worse the more mismatched the
+ * pair actually is, instead of a flat -5 that genre/persona bonuses can
+ * easily paper over regardless of how badly the tempos actually clash.
+ */
+function bpmFitScore(bpmDelta: number, idealBpmDeltaMax: number): number {
+  if (bpmDelta <= idealBpmDeltaMax) return 10;
+  if (!Number.isFinite(idealBpmDeltaMax)) return 10;
+  const excessRatio = (bpmDelta - idealBpmDeltaMax) / Math.max(idealBpmDeltaMax, 0.01);
+  return Math.max(-25, -5 - excessRatio * 15);
+}
+
 export interface TransitionContext {
   bpmDelta: number;
   tempoSync: boolean;
   genreHint: string | null;
   personaDjNames: string[];
   camelotScore?: number; // 0-2, from camelotCompatibility() — omit/0 when key confidence is too low to trust
+  djMode?: DjSetMode;
+  /** transitionIds used for the last few transitions, most recent last — discourages picking the exact same technique over and over when several score similarly. */
+  recentTransitionIds?: string[];
 }
 
 function scoreTransition(t: TransitionEntry, ctx: TransitionContext): number {
   if (!t.executable) return -Infinity;
   let score = 0;
-  score += ctx.bpmDelta <= t.idealBpmDeltaMax ? 10 : -5;
+  score += bpmFitScore(ctx.bpmDelta, t.idealBpmDeltaMax);
   if (ctx.genreHint) {
     if (t.idealGenres.includes(ctx.genreHint)) score += 6;
     else if (t.idealGenres.length > 0) score -= 2;
@@ -233,6 +326,8 @@ function scoreTransition(t: TransitionEntry, ctx: TransitionContext): number {
   if (ctx.personaDjNames.some((name) => t.exampleDjs.includes(name))) score += 8;
   if (t.idealGenres.length === 0) score += 1;
   score += (ctx.camelotScore ?? 0) * 3;
+  score += MODE_CATEGORY_BIAS[ctx.djMode ?? "auto"][t.category] ?? 0;
+  if (ctx.recentTransitionIds?.includes(t.id)) score -= 7;
   return score;
 }
 
@@ -268,17 +363,21 @@ interface PlanTransitionArgs {
   overrideSec?: number | null;
   /** The outgoing track's current playback position, if known — enables phase-locking the incoming track's entry point to the outgoing track's current beat position (not just its own beat grid), so the downbeats actually land together instead of just matching tempo. */
   currentElapsedSec?: number | null;
+  djMode?: DjSetMode;
+  /** transitionIds used for the last few transitions, most recent last — discourages repeating the exact same technique back-to-back. */
+  recentTransitionIds?: string[];
 }
 
 function buildRationale(
   t: TransitionEntry,
   genreHint: string | null,
   tempoSync: boolean,
-  camelotScore: number
+  camelotScore: number,
+  hasConfidentTempo: boolean
 ): string {
   const genre = genreHint ? genreFamilies.find((g) => g.id === genreHint) : null;
   const djNames = (genre?.exampleDjs.length ? genre.exampleDjs : t.exampleDjs).slice(0, 2).join(" & ");
-  const tempoNote = tempoSync ? "tempo-synced" : "beat-aligned";
+  const tempoNote = tempoSync ? "tempo-synced" : hasConfidentTempo ? "beat-aligned" : "tempo unclear, played safe";
   const harmonicNote = camelotScore >= 2 ? " Same key." : camelotScore === 1 ? " Harmonically compatible keys." : "";
   const base = djNames
     ? `${t.name}, ${genreHint ? `channeling ${djNames}'s ${genre?.name ?? ""} energy` : `in the style of ${djNames}`} — ${tempoNote}. ${t.description}`
@@ -300,9 +399,22 @@ export function planTransition({
   genreHint = null,
   overrideSec = null,
   currentElapsedSec = null,
+  djMode = "auto",
+  recentTransitionIds = [],
 }: PlanTransitionArgs): TransitionPlan {
   const bpmDelta = Math.abs(bestTempoRatio(current.analysis.bpm, next.analysis.bpm) - 1);
-  const tempoSync = bpmDelta <= TEMPO_SYNC_MAX_DELTA;
+  // Two tracks that both fell back to the same neutral 120 BPM (low
+  // confidence, not real data) would otherwise read as a perfect
+  // bpmDelta-of-0 match. Require real confidence on both sides before
+  // trusting the numbers enough to call it tempo-synced or feed them to
+  // scoring as-is — an inflated "we don't actually know" delta pushes
+  // precision-dependent techniques (blends, EQ mixes) to score the way
+  // they should when the tempo match is fabricated, not real.
+  const hasConfidentTempo =
+    current.analysis.bpmConfidence >= MIN_TEMPO_CONFIDENCE_FOR_TRUST &&
+    next.analysis.bpmConfidence >= MIN_TEMPO_CONFIDENCE_FOR_TRUST;
+  const tempoSync = hasConfidentTempo && bpmDelta <= TEMPO_SYNC_MAX_DELTA;
+  const scoringBpmDelta = hasConfidentTempo ? bpmDelta : Math.max(bpmDelta, TEMPO_SYNC_MAX_DELTA + 0.05);
   const genreFamily = genreHint ? genreFamilies.find((g) => g.id === genreHint) : null;
   const personaDjNames = genreFamily?.exampleDjs ?? [];
   const camelotScore =
@@ -311,7 +423,15 @@ export function planTransition({
       ? camelotCompatibility(current.analysis.camelotKey, next.analysis.camelotKey)
       : 0;
 
-  const transition = chooseTransition({ bpmDelta, tempoSync, genreHint, personaDjNames, camelotScore });
+  const transition = chooseTransition({
+    bpmDelta: scoringBpmDelta,
+    tempoSync,
+    genreHint,
+    personaDjNames,
+    camelotScore,
+    djMode,
+    recentTransitionIds,
+  });
 
   const windowBeats = windowBeatsForTransition(transition, tempoSync, bpmDelta);
   const effectiveBpm = current.analysis.bpm > 0 ? current.analysis.bpm : 120;
@@ -324,7 +444,10 @@ export function planTransition({
   // A Tempo Ramp deliberately bridges a wider gap than normal tempoSync
   // allows, gradually, across its unusually long window — everything else
   // only attempts a tempo-ratio adjustment when tracks are already close.
-  const attemptsTempoRatio = tempoSync || transition.category === "tempo-ramp";
+  // Either way, only worth attempting when the tempo readings are actually
+  // trustworthy — ramping toward a fabricated ratio is worse than not
+  // ramping at all.
+  const attemptsTempoRatio = hasConfidentTempo && (tempoSync || transition.category === "tempo-ramp");
   const tempoRatioStart = attemptsTempoRatio
     ? bestTempoRatio(current.analysis.bpm, next.analysis.bpm)
     : 1;
@@ -368,7 +491,7 @@ export function planTransition({
     tempoSync,
     tempoRatioStart,
     effect: TRANSITION_EFFECT_BY_ID[transition.id] ?? "none",
-    rationale: buildRationale(transition, genreHint, tempoSync, camelotScore),
+    rationale: buildRationale(transition, genreHint, tempoSync, camelotScore, hasConfidentTempo),
   };
 }
 

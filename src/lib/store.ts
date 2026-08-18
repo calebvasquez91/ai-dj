@@ -2,6 +2,7 @@ import { create } from "zustand";
 import { persist } from "zustand/middleware";
 import type { Playlist, Track } from "@/types/music";
 import type { TrackAnalysis } from "@/lib/audio-analysis";
+import type { DjSetMode } from "@/lib/mix-engine";
 
 const MAX_HISTORY = 50;
 
@@ -23,6 +24,7 @@ interface PlayerState {
   trackAnalysis: Record<string, TrackAnalysis>;
   analyzingTrackIds: Set<string>;
   styleGenreHint: string | null;
+  djMode: DjSetMode;
 
   playlists: Playlist[];
   localLibrary: Track[];
@@ -54,6 +56,8 @@ interface PlayerState {
   startAnalyzing: (trackId: string) => void;
   stopAnalyzing: (trackId: string) => void;
   setStyleGenreHint: (genreId: string | null) => void;
+  setDjMode: (mode: DjSetMode) => void;
+  setTrackPlayPreference: (trackId: string, preference: Track["playPreference"]) => void;
 
   createPlaylist: () => string;
   renamePlaylist: (playlistId: string, name: string) => void;
@@ -87,6 +91,7 @@ export const useStore = create<PlayerState>()(
       trackAnalysis: {},
       analyzingTrackIds: new Set<string>(),
       styleGenreHint: null,
+      djMode: "auto",
 
       playlists: [],
       localLibrary: [],
@@ -159,6 +164,20 @@ export const useStore = create<PlayerState>()(
           return { analyzingTrackIds: next };
         }),
       setStyleGenreHint: (genreId) => set({ styleGenreHint: genreId }),
+      setDjMode: (mode) => set({ djMode: mode }),
+      // Only localLibrary is the source of truth for curation flags, but
+      // patch every place a matching track object might already live so a
+      // badge shown elsewhere (queue, playlists, deck view) stays in sync.
+      setTrackPlayPreference: (trackId, preference) =>
+        set((s) => {
+          const patch = (t: Track) => (t.id === trackId ? { ...t, playPreference: preference } : t);
+          return {
+            localLibrary: s.localLibrary.map(patch),
+            playlists: s.playlists.map((p) => ({ ...p, tracks: p.tracks.map(patch) })),
+            queue: s.queue.map(patch),
+            currentTrack: s.currentTrack ? patch(s.currentTrack) : s.currentTrack,
+          };
+        }),
 
       next: () => {
         const { queue, currentTrack, history } = get();

@@ -5,8 +5,18 @@ import { formatTime } from "@/lib/format";
 import { DualDeckStage } from "@/components/DualDeckStage";
 import { TrackThumbnail } from "@/components/TrackThumbnail";
 import { genreFamilies } from "@/data/styles";
+import type { DjSetMode } from "@/lib/mix-engine";
 
 const CROSSFADE_PRESETS = [5, 10, 15, 20, 30];
+
+const DJ_MODES: { id: DjSetMode; label: string; title: string }[] = [
+  { id: "auto", label: "Mode: Auto", title: "No bias — pick whatever scores best" },
+  { id: "club", label: "Club", title: "Favors beatmatched, EQ-driven blends over flashy effects" },
+  { id: "wedding", label: "Wedding", title: "Favors clean, safe blends; avoids scratches, risers, and other flashy effects" },
+  { id: "party", label: "Party", title: "Leans into crowd-hype moments — tags, risers, drops" },
+  { id: "chill", label: "Chill", title: "Favors long, smooth blends and reverb washes; avoids anything abrupt" },
+  { id: "open-format", label: "Open Format", title: "Leans into bold genre/tempo bridges — tempo ramps, brakes, hard cuts" },
+];
 
 export function PlayerBar() {
   const currentTrack = useStore((s) => s.currentTrack);
@@ -29,6 +39,8 @@ export function PlayerBar() {
   const toggleDeckView = useStore((s) => s.toggleDeckView);
   const styleGenreHint = useStore((s) => s.styleGenreHint);
   const setStyleGenreHint = useStore((s) => s.setStyleGenreHint);
+  const djMode = useStore((s) => s.djMode);
+  const setDjMode = useStore((s) => s.setDjMode);
   const analyzingTrackIds = useStore((s) => s.analyzingTrackIds);
   const nextTrackAnalyzing = queue[0] ? analyzingTrackIds.has(queue[0].id) : false;
 
@@ -153,6 +165,18 @@ export function PlayerBar() {
         >
           {isTransitioning ? "Mixing…" : nextTrackAnalyzing ? "Analyzing…" : "Mix Now"}
         </button>
+        <select
+          value={djMode}
+          onChange={(e) => setDjMode(e.target.value as DjSetMode)}
+          title="DJ set mode — biases which transition techniques get chosen"
+          className="hidden sm:block bg-surface border-2 border-border rounded-full text-xs text-muted px-2 py-1.5 outline-none"
+        >
+          {DJ_MODES.map((m) => (
+            <option key={m.id} value={m.id} title={m.title}>
+              {m.label}
+            </option>
+          ))}
+        </select>
         <select
           value={styleGenreHint ?? "auto"}
           onChange={(e) => setStyleGenreHint(e.target.value === "auto" ? null : e.target.value)}
