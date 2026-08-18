@@ -26,6 +26,7 @@ export function PlayerBar() {
   const crossfadeOverrideSec = useStore((s) => s.crossfadeOverrideSec);
   const setCrossfadeOverride = useStore((s) => s.setCrossfadeOverride);
   const toggleQueuePanel = useStore((s) => s.toggleQueuePanel);
+  const toggleDeckView = useStore((s) => s.toggleDeckView);
   const styleGenreHint = useStore((s) => s.styleGenreHint);
   const setStyleGenreHint = useStore((s) => s.setStyleGenreHint);
   const analyzingTrackIds = useStore((s) => s.analyzingTrackIds);
@@ -117,6 +118,15 @@ export function PlayerBar() {
       </div>
 
       <div className="flex items-center gap-2 justify-end shrink-0">
+        <button
+          type="button"
+          onClick={toggleDeckView}
+          disabled={!currentTrack}
+          className="text-accent-purple hover:text-accent-pink disabled:opacity-40 disabled:text-muted px-1"
+          title="Show the DJ decks — tempo, key, and what's lined up next"
+        >
+          🎛
+        </button>
         <button
           type="button"
           onClick={toggleQueuePanel}

@@ -13,12 +13,17 @@ export type TransitionCategory =
   | "cut"
   | "blend"
   | "eq-filter"
+  | "eq-kill"
+  | "reverb"
   | "effects"
   | "scratch"
   | "vocal"
   | "digital"
   | "brake"
-  | "riser";
+  | "riser"
+  | "drop"
+  | "tempo-ramp"
+  | "tag-sample";
 
 export interface TransitionEntry {
   id: string;
@@ -193,5 +198,77 @@ export const transitions: TransitionEntry[] = [
     idealGenres: ["trance", "hardstyle"],
     executable: true,
     exampleDjs: ["Hardwell", "Martin Garrix", "Tiësto"],
+  },
+
+  // EQ-kill — manual, stepped channel-EQ cuts (abrupt, discrete jumps),
+  // as distinct from the continuous sweeps above.
+  {
+    id: "eq-kill-mix",
+    name: "EQ Kill Mix",
+    category: "eq-kill",
+    description: "Manually snaps the outgoing track's bass out, then its mids/highs, in abrupt discrete steps via the channel EQ rather than a smooth filter sweep — classic house/techno mixer technique.",
+    idealBpmDeltaMax: 0.08,
+    idealGenres: ["house", "techno"],
+    executable: true,
+    exampleDjs: ["Ben Klock", "Charlotte de Witte"],
+  },
+
+  // Reverb-based
+  {
+    id: "reverb-wash",
+    name: "Reverb Wash",
+    category: "reverb",
+    description: "The outgoing track washes out into a dense, blurred reverb tail while the incoming track enters clean underneath. Approximated here with a short, high-feedback delay network rather than a true convolution reverb.",
+    idealBpmDeltaMax: Infinity,
+    idealGenres: ["downtempo", "synthwave"],
+    executable: true,
+    exampleDjs: ["DJ Shadow", "Jean-Michel Jarre"],
+  },
+
+  // Big-moment
+  {
+    id: "double-drop",
+    name: "Double Drop",
+    category: "drop",
+    description: "Times the incoming track's drop to land at the exact moment the outgoing track hits its own drop — the two hit together, signature EDM-set move.",
+    idealBpmDeltaMax: 0.08,
+    idealGenres: ["dubstep", "hardstyle", "dnb"],
+    executable: true,
+    exampleDjs: ["Skrillex", "Excision"],
+  },
+  {
+    id: "tag-drop",
+    name: "Tag / Sample Transition",
+    category: "tag-sample",
+    description: "A synthesized horn/siren stab hits right at the transition point to mask the seam — standing in for a vocal tag or air-horn sample, radio/dancehall/hip-hop style.",
+    idealBpmDeltaMax: Infinity,
+    idealGenres: ["hip-hop", "reggae"],
+    executable: true,
+    exampleDjs: ["DJ Premier", "Diplo"],
+  },
+
+  // Tempo-based
+  {
+    id: "tempo-ramp-blend",
+    name: "Tempo Ramp",
+    category: "tempo-ramp",
+    description: "Gradually shifts tempo across an extended blend instead of matching it instantly, letting the set's BPM drift over an unusually long overlap — a technique long-form techno and drum & bass sets both lean on.",
+    idealBpmDeltaMax: 0.25,
+    idealGenres: ["techno", "dnb"],
+    executable: true,
+    exampleDjs: ["Carl Cox", "Armin van Buuren"],
+  },
+
+  // Turntablism variant of the stutter-gate simulation above — faster,
+  // more clipped toggling standing in for crossfader transform-switch chops.
+  {
+    id: "transform-chop",
+    name: "Transform Chop",
+    category: "scratch",
+    description: "Simulated: a rapid, tightly-clipped stutter-gate standing in for a crossfader transform-switch chop between the two tracks.",
+    idealBpmDeltaMax: Infinity,
+    idealGenres: ["hip-hop"],
+    executable: true,
+    exampleDjs: ["DJ Craze", "Mix Master Mike"],
   },
 ];

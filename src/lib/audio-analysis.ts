@@ -23,6 +23,10 @@ export interface TrackAnalysis {
   energyOnsetSec: number; // best-effort "past the cold intro" entry point
   key: string | null; // e.g. "C major" / "A minor", null if low confidence
   keyConfidence: number; // 0-1
+  camelotKey: string | null; // Camelot wheel notation (e.g. "8A") for harmonic-mixing compatibility, derived from `key`
+  breakdownAtSec: number | null; // best-effort low-energy breakdown section, for Breakdown Mixing
+  dropAtSec: number | null; // best-effort high-energy "drop" moment, for Double Drop alignment
+  waveformPeaks: number[]; // compact 0-1 normalized peak array for waveform display
   fallback: boolean; // true if this used the neutral-BPM fallback path
 }
 
@@ -40,6 +44,10 @@ export function fallbackAnalysis(): TrackAnalysis {
     energyOnsetSec: 0,
     key: null,
     keyConfidence: 0,
+    camelotKey: null,
+    breakdownAtSec: null,
+    dropAtSec: null,
+    waveformPeaks: [],
     fallback: true,
   };
 }
@@ -151,21 +159,29 @@ function findBeatGridOffset(
 }
 
 // ---------------------------------------------------------------------------
-// Energy-onset heuristic — best-effort "past the cold intro" marker.
-// Not structural/phrase detection; a sustained-energy threshold crossing.
+// Energy-onset / breakdown / drop heuristics — all best-effort sustained-
+// threshold crossings over a smoothed energy envelope, not true structural
+// (arrangement-aware) analysis. Good enough to pick a sensible "past the
+// cold intro" entry point, a plausible low-energy breakdown to mix into,
+// and a plausible high-energy "drop" moment to align two tracks around.
 // ---------------------------------------------------------------------------
+
+function smoothEnvelope(envelope: Float32Array, windowSize: number): Float32Array {
+  const smoothed = new Float32Array(envelope.length);
+  for (let i = 0; i < envelope.length; i++) {
+    const start = Math.max(0, i - windowSize + 1);
+    let sum = 0;
+    for (let j = start; j <= i; j++) sum += envelope[j];
+    smoothed[i] = sum / (i - start + 1);
+  }
+  return smoothed;
+}
 
 function findEnergyOnset(envelope: Float32Array, envelopeRateHz: number): number {
   if (envelope.length === 0) return 0;
 
   const smoothWindow = Math.max(1, Math.round(envelopeRateHz * 1)); // ~1s smoothing
-  const smoothed = new Float32Array(envelope.length);
-  for (let i = 0; i < envelope.length; i++) {
-    const start = Math.max(0, i - smoothWindow + 1);
-    let sum = 0;
-    for (let j = start; j <= i; j++) sum += envelope[j];
-    smoothed[i] = sum / (i - start + 1);
-  }
+  const smoothed = smoothEnvelope(envelope, smoothWindow);
 
   const sorted = Float32Array.from(smoothed).sort();
   const loudLevel = sorted[Math.floor(sorted.length * 0.75)] || 0;
@@ -183,6 +199,69 @@ function findEnergyOnset(envelope: Float32Array, envelopeRateHz: number): number
     }
   }
   return 0;
+}
+
+/** Best-effort "drop" heuristic for Double Drop-style alignment: the loudest sustained plateau in the track. Not true drop/structural detection — a proxy. */
+function findEnergyPeak(envelope: Float32Array, envelopeRateHz: number): number | null {
+  if (envelope.length === 0) return null;
+  const smoothWindow = Math.max(1, Math.round(envelopeRateHz * 1));
+  const smoothed = smoothEnvelope(envelope, smoothWindow);
+  let bestIdx = 0;
+  let bestVal = -Infinity;
+  for (let i = 0; i < smoothed.length; i++) {
+    if (smoothed[i] > bestVal) {
+      bestVal = smoothed[i];
+      bestIdx = i;
+    }
+  }
+  if (bestVal <= 0) return null;
+  return bestIdx / envelopeRateHz;
+}
+
+/** Best-effort "breakdown" heuristic for Breakdown Mixing: the first sustained low-energy dip after the track's energy onset. Not true structural detection — a proxy. */
+function findBreakdown(envelope: Float32Array, envelopeRateHz: number, afterSec: number): number | null {
+  if (envelope.length === 0) return null;
+  const smoothWindow = Math.max(1, Math.round(envelopeRateHz * 1));
+  const smoothed = smoothEnvelope(envelope, smoothWindow);
+  const sorted = Float32Array.from(smoothed).sort();
+  const loudLevel = sorted[Math.floor(sorted.length * 0.75)] || 0;
+  if (loudLevel <= 0) return null;
+
+  const startIdx = Math.max(0, Math.round(afterSec * envelopeRateHz));
+  const sustainWindow = Math.max(1, Math.round(envelopeRateHz * 2));
+  for (let i = startIdx; i < smoothed.length; i++) {
+    if (smoothed[i] > loudLevel * 0.35) continue; // looking for a genuine dip, not just a quiet instant
+    const end = Math.min(smoothed.length, i + sustainWindow);
+    let sustainSum = 0;
+    for (let j = i; j < end; j++) sustainSum += smoothed[j];
+    const sustainAvg = sustainSum / Math.max(1, end - i);
+    if (sustainAvg <= loudLevel * 0.35) {
+      return i / envelopeRateHz;
+    }
+  }
+  return null;
+}
+
+/** Downsamples the energy envelope into a small, 0-1 normalized peak array for waveform rendering — cheap to compute since it reuses the envelope already built for tempo/onset analysis, no extra decoding needed. */
+function downsampleForWaveform(envelope: Float32Array, points = 240): number[] {
+  const peaks = new Array<number>(points).fill(0);
+  if (envelope.length === 0) return peaks;
+  const chunk = envelope.length / points;
+  let maxVal = 0;
+  for (let p = 0; p < points; p++) {
+    const start = Math.floor(p * chunk);
+    const end = Math.max(start + 1, Math.floor((p + 1) * chunk));
+    let peak = 0;
+    for (let i = start; i < end && i < envelope.length; i++) {
+      if (envelope[i] > peak) peak = envelope[i];
+    }
+    peaks[p] = peak;
+    if (peak > maxVal) maxVal = peak;
+  }
+  if (maxVal > 0) {
+    for (let p = 0; p < points; p++) peaks[p] /= maxVal;
+  }
+  return peaks;
 }
 
 // ---------------------------------------------------------------------------
@@ -333,6 +412,28 @@ function estimateKey(
 }
 
 // ---------------------------------------------------------------------------
+// Camelot wheel — maps an estimated key to Camelot notation (e.g. "8A") for
+// harmonic-mixing compatibility scoring. Camelot numbers follow the circle
+// of fifths (each +7 semitones/perfect-fifth step advances the number by
+// one); a minor key shares its relative major's number with the "A" letter
+// in place of "B" (relative major = minor tonic + 3 semitones).
+// ---------------------------------------------------------------------------
+
+const MAJOR_CAMELOT_NUMBER_BY_SEMITONE = [8, 3, 10, 5, 12, 7, 2, 9, 4, 11, 6, 1];
+
+export function camelotForKey(key: string | null): string | null {
+  if (!key) return null;
+  const match = key.match(/^([A-G]#?)\s+(major|minor)$/);
+  if (!match) return null;
+  const semitone = PITCH_CLASSES.indexOf(match[1]);
+  if (semitone < 0) return null;
+  const isMinor = match[2] === "minor";
+  const idx = isMinor ? (semitone + 3) % 12 : semitone;
+  const number = MAJOR_CAMELOT_NUMBER_BY_SEMITONE[idx];
+  return `${number}${isMinor ? "A" : "B"}`;
+}
+
+// ---------------------------------------------------------------------------
 // Public entry points
 // ---------------------------------------------------------------------------
 
@@ -352,6 +453,9 @@ export function analyzeSamples(
 
   const beatGridOffsetSec = findBeatGridOffset(onsetEnvelope, envelopeRateHz);
   const energyOnsetSec = findEnergyOnset(envelope, envelopeRateHz);
+  const breakdownAtSec = findBreakdown(envelope, envelopeRateHz, energyOnsetSec);
+  const dropAtSec = findEnergyPeak(envelope, envelopeRateHz);
+  const waveformPeaks = downsampleForWaveform(envelope);
   const { key, confidence: keyConfidence } = estimateKey(samples, sampleRate, durationSec);
 
   return {
@@ -361,6 +465,10 @@ export function analyzeSamples(
     energyOnsetSec,
     key,
     keyConfidence,
+    camelotKey: camelotForKey(key),
+    breakdownAtSec,
+    dropAtSec,
+    waveformPeaks,
     fallback: bpmConfidence < MIN_TEMPO_CONFIDENCE,
   };
 }

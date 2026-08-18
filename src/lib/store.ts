@@ -19,6 +19,7 @@ interface PlayerState {
   isTransitioning: boolean;
   sidebarOpen: boolean;
   queuePanelOpen: boolean;
+  deckViewOpen: boolean;
   trackAnalysis: Record<string, TrackAnalysis>;
   analyzingTrackIds: Set<string>;
   styleGenreHint: string | null;
@@ -44,6 +45,7 @@ interface PlayerState {
   setIsTransitioning: (isTransitioning: boolean) => void;
   setSidebarOpen: (open: boolean) => void;
   toggleQueuePanel: () => void;
+  toggleDeckView: () => void;
   addLocalTracks: (tracks: Track[]) => void;
   removeLocalTrack: (trackId: string) => void;
   setTrackSourceUrls: (urls: Record<string, string>) => void;
@@ -81,6 +83,7 @@ export const useStore = create<PlayerState>()(
       isTransitioning: false,
       sidebarOpen: false,
       queuePanelOpen: false,
+      deckViewOpen: false,
       trackAnalysis: {},
       analyzingTrackIds: new Set<string>(),
       styleGenreHint: null,
@@ -119,6 +122,7 @@ export const useStore = create<PlayerState>()(
       setIsTransitioning: (isTransitioning) => set({ isTransitioning }),
       setSidebarOpen: (open) => set({ sidebarOpen: open }),
       toggleQueuePanel: () => set((s) => ({ queuePanelOpen: !s.queuePanelOpen })),
+      toggleDeckView: () => set((s) => ({ deckViewOpen: !s.deckViewOpen })),
       addLocalTracks: (tracks) =>
         set((s) => ({ localLibrary: [...s.localLibrary, ...tracks] })),
       removeLocalTrack: (trackId) =>

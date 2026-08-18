@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   MAX_ACTIVE_PLAY_SEC,
   brakeGainCurves,
+  camelotCompatibility,
   planTransition,
   stutterGateCurves,
 } from "./mix-engine";
@@ -20,6 +21,10 @@ function makeAnalysis(overrides: Partial<TrackAnalysis> = {}): TrackAnalysis {
     energyOnsetSec: 8,
     key: "A minor",
     keyConfidence: 0.6,
+    camelotKey: "8A",
+    breakdownAtSec: null,
+    dropAtSec: null,
+    waveformPeaks: [],
     fallback: false,
     ...overrides,
   };
@@ -189,6 +194,78 @@ describe("brakeGainCurves", () => {
     const { outCurve, inCurve } = brakeGainCurves(20, 0.75);
     expect(outCurve[19]).toBeCloseTo(0, 5);
     expect(inCurve[19]).toBeCloseTo(1, 5);
+  });
+});
+
+describe("camelotCompatibility", () => {
+  it("scores identical keys highest", () => {
+    expect(camelotCompatibility("8A", "8A")).toBe(2);
+  });
+
+  it("scores relative major/minor and adjacent-wheel keys as compatible", () => {
+    expect(camelotCompatibility("8A", "8B")).toBe(1);
+    expect(camelotCompatibility("8A", "9A")).toBe(1);
+    expect(camelotCompatibility("8A", "7A")).toBe(1);
+  });
+
+  it("scores unrelated keys as incompatible", () => {
+    expect(camelotCompatibility("8A", "2B")).toBe(0);
+  });
+
+  it("returns 0 for missing or malformed codes", () => {
+    expect(camelotCompatibility(null, "8A")).toBe(0);
+    expect(camelotCompatibility("8A", null)).toBe(0);
+    expect(camelotCompatibility("bogus", "8A")).toBe(0);
+  });
+});
+
+describe("planTransition — harmonic mixing", () => {
+  it("mentions matching keys in the rationale when both are confidently known", () => {
+    const plan = planTransition({
+      current: { track: makeTrack("a", 240), analysis: makeAnalysis({ bpm: 128 }) },
+      next: { track: makeTrack("b", 240), analysis: makeAnalysis({ bpm: 128 }) },
+      genreHint: "house",
+    });
+    expect(plan.rationale).toContain("Same key.");
+  });
+
+  it("omits the harmonic note when key confidence is too low to trust", () => {
+    const plan = planTransition({
+      current: { track: makeTrack("a", 240), analysis: makeAnalysis({ bpm: 128, keyConfidence: 0.05 }) },
+      next: { track: makeTrack("b", 240), analysis: makeAnalysis({ bpm: 128, keyConfidence: 0.05 }) },
+      genreHint: "house",
+    });
+    expect(plan.rationale).not.toMatch(/harmonically compatible|same key/i);
+  });
+});
+
+describe("planTransition — Double Drop", () => {
+  it("times the incoming track's drop to land at the end of the transition window", () => {
+    const plan = planTransition({
+      current: { track: makeTrack("a", 240), analysis: makeAnalysis({ bpm: 140 }) },
+      next: {
+        track: makeTrack("b", 240),
+        analysis: makeAnalysis({ bpm: 140, beatGridOffsetSec: 0, dropAtSec: 45 }),
+      },
+      genreHint: "dubstep",
+    });
+    expect(plan.category).toBe("drop");
+    const expectedEntry = 45 - plan.windowSec;
+    expect(plan.incomingEntryOffsetSec).toBeGreaterThan(expectedEntry - 1);
+    expect(plan.incomingEntryOffsetSec).toBeLessThanOrEqual(expectedEntry + 1);
+  });
+});
+
+describe("planTransition — Tempo Ramp", () => {
+  it("selects Tempo Ramp for a moderate BPM gap in a drum & bass context and computes a real tempo ratio", () => {
+    const plan = planTransition({
+      current: { track: makeTrack("a", 240), analysis: makeAnalysis({ bpm: 128 }) },
+      next: { track: makeTrack("b", 240), analysis: makeAnalysis({ bpm: 150 }) },
+      genreHint: "dnb",
+    });
+    expect(plan.category).toBe("tempo-ramp");
+    expect(plan.tempoSync).toBe(false);
+    expect(plan.tempoRatioStart).not.toBe(1);
   });
 });
 

@@ -58,7 +58,8 @@ function windowBeatsForTransition(t: TransitionEntry, tempoSync: boolean, bpmDel
       // MIN_CROSSFADE_SEC) is what actually floors this in seconds.
       return t.id === "hard-cut" ? 0.25 : 1;
     case "scratch":
-      return 4;
+      // Transform Chop is a faster, more clipped toggle than a beat juggle.
+      return t.id === "transform-chop" ? 2 : 4;
     case "brake":
       return 4;
     case "riser":
@@ -67,6 +68,17 @@ function windowBeatsForTransition(t: TransitionEntry, tempoSync: boolean, bpmDel
       return tempoSync && bpmDelta < 0.03 ? 32 : 16;
     case "eq-filter":
       return tempoSync ? 16 : 8;
+    case "eq-kill":
+      return 8;
+    case "reverb":
+      return 12;
+    case "drop":
+      return 16;
+    case "tempo-ramp":
+      // Deliberately long — the whole point is a gradual, extended shift.
+      return 64;
+    case "tag-sample":
+      return 2;
     case "effects":
       return 8;
     case "digital":
@@ -89,6 +101,11 @@ const MIN_WINDOW_SEC_BY_CATEGORY: Record<TransitionCategory, number> = {
   riser: 4,
   blend: MIN_CROSSFADE_SEC,
   "eq-filter": MIN_CROSSFADE_SEC,
+  "eq-kill": MIN_CROSSFADE_SEC,
+  reverb: MIN_CROSSFADE_SEC,
+  drop: MIN_CROSSFADE_SEC,
+  "tempo-ramp": 8,
+  "tag-sample": 1.5,
   effects: MIN_CROSSFADE_SEC,
   digital: MIN_CROSSFADE_SEC,
   vocal: MIN_CROSSFADE_SEC,
@@ -101,7 +118,10 @@ export type TransitionEffect =
   | "echo-tail"
   | "brake"
   | "riser"
-  | "stutter-gate";
+  | "stutter-gate"
+  | "eq-kill"
+  | "reverb-wash"
+  | "tag-sample";
 
 const TRANSITION_EFFECT_BY_ID: Record<string, TransitionEffect> = {
   "bass-swap": "highpass-sweep",
@@ -111,6 +131,10 @@ const TRANSITION_EFFECT_BY_ID: Record<string, TransitionEffect> = {
   "riser-uplift": "riser",
   "scratch-transition": "stutter-gate",
   "beat-juggle-transition": "stutter-gate",
+  "transform-chop": "stutter-gate",
+  "eq-kill-mix": "eq-kill",
+  "reverb-wash": "reverb-wash",
+  "tag-drop": "tag-sample",
 };
 
 /**
@@ -162,11 +186,40 @@ export function stutterGateCurves(
   return { outCurve, inCurve };
 }
 
+// ---------------------------------------------------------------------------
+// Harmonic mixing — Camelot wheel key-compatibility scoring. This is a
+// selection *input* (which transition/pairing reads as musically sound),
+// not a distinct audible technique, so it feeds transition scoring rather
+// than becoming its own TransitionEntry.
+// ---------------------------------------------------------------------------
+
+const MIN_KEY_CONFIDENCE_FOR_SCORING = 0.15;
+
+function parseCamelotCode(code: string): { number: number; letter: "A" | "B" } | null {
+  const m = code.match(/^(\d{1,2})([AB])$/);
+  if (!m) return null;
+  return { number: parseInt(m[1], 10), letter: m[2] as "A" | "B" };
+}
+
+/** 2 = identical key, 1 = relative major/minor or adjacent on the wheel, 0 = not compatible (or unknown). */
+export function camelotCompatibility(a: string | null, b: string | null): number {
+  if (!a || !b) return 0;
+  const pa = parseCamelotCode(a);
+  const pb = parseCamelotCode(b);
+  if (!pa || !pb) return 0;
+  if (pa.number === pb.number && pa.letter === pb.letter) return 2;
+  if (pa.number === pb.number) return 1;
+  const diff = Math.min((pa.number - pb.number + 12) % 12, (pb.number - pa.number + 12) % 12);
+  if (diff === 1 && pa.letter === pb.letter) return 1;
+  return 0;
+}
+
 export interface TransitionContext {
   bpmDelta: number;
   tempoSync: boolean;
   genreHint: string | null;
   personaDjNames: string[];
+  camelotScore?: number; // 0-2, from camelotCompatibility() — omit/0 when key confidence is too low to trust
 }
 
 function scoreTransition(t: TransitionEntry, ctx: TransitionContext): number {
@@ -179,6 +232,7 @@ function scoreTransition(t: TransitionEntry, ctx: TransitionContext): number {
   }
   if (ctx.personaDjNames.some((name) => t.exampleDjs.includes(name))) score += 8;
   if (t.idealGenres.length === 0) score += 1;
+  score += (ctx.camelotScore ?? 0) * 3;
   return score;
 }
 
@@ -216,20 +270,29 @@ interface PlanTransitionArgs {
   currentElapsedSec?: number | null;
 }
 
-function buildRationale(t: TransitionEntry, genreHint: string | null, tempoSync: boolean): string {
+function buildRationale(
+  t: TransitionEntry,
+  genreHint: string | null,
+  tempoSync: boolean,
+  camelotScore: number
+): string {
   const genre = genreHint ? genreFamilies.find((g) => g.id === genreHint) : null;
   const djNames = (genre?.exampleDjs.length ? genre.exampleDjs : t.exampleDjs).slice(0, 2).join(" & ");
   const tempoNote = tempoSync ? "tempo-synced" : "beat-aligned";
-  return djNames
+  const harmonicNote = camelotScore >= 2 ? " Same key." : camelotScore === 1 ? " Harmonically compatible keys." : "";
+  const base = djNames
     ? `${t.name}, ${genreHint ? `channeling ${djNames}'s ${genre?.name ?? ""} energy` : `in the style of ${djNames}`} — ${tempoNote}. ${t.description}`
     : `${t.name} — ${tempoNote}. ${t.description}`;
+  return base + harmonicNote;
 }
 
 /**
  * Plans a musically-aware transition between two tracks: picks a transition
- * style from the repertoire in data/transitions.ts, sizes the overlap window
- * in beats (not an arbitrary second count), and snaps the incoming track's
- * entry point to its own beat grid near its energy-onset — never a bare 0.
+ * style from the repertoire in data/transitions.ts (factoring in tempo,
+ * genre, persona, and Camelot-wheel key compatibility), sizes the overlap
+ * window in beats (not an arbitrary second count), and snaps the incoming
+ * track's entry point to its own beat grid near its energy-onset — never a
+ * bare 0 — or, for a Double Drop, to land its own drop at the window's end.
  */
 export function planTransition({
   current,
@@ -242,8 +305,13 @@ export function planTransition({
   const tempoSync = bpmDelta <= TEMPO_SYNC_MAX_DELTA;
   const genreFamily = genreHint ? genreFamilies.find((g) => g.id === genreHint) : null;
   const personaDjNames = genreFamily?.exampleDjs ?? [];
+  const camelotScore =
+    current.analysis.keyConfidence >= MIN_KEY_CONFIDENCE_FOR_SCORING &&
+    next.analysis.keyConfidence >= MIN_KEY_CONFIDENCE_FOR_SCORING
+      ? camelotCompatibility(current.analysis.camelotKey, next.analysis.camelotKey)
+      : 0;
 
-  const transition = chooseTransition({ bpmDelta, tempoSync, genreHint, personaDjNames });
+  const transition = chooseTransition({ bpmDelta, tempoSync, genreHint, personaDjNames, camelotScore });
 
   const windowBeats = windowBeatsForTransition(transition, tempoSync, bpmDelta);
   const effectiveBpm = current.analysis.bpm > 0 ? current.analysis.bpm : 120;
@@ -253,15 +321,25 @@ export function planTransition({
       ? clamp(overrideSec, MIN_CROSSFADE_SEC, MAX_CROSSFADE_SEC)
       : clamp((windowBeats * 60) / effectiveBpm, minWindowSec, MAX_CROSSFADE_SEC);
 
-  const tempoRatioStart = tempoSync
+  // A Tempo Ramp deliberately bridges a wider gap than normal tempoSync
+  // allows, gradually, across its unusually long window — everything else
+  // only attempts a tempo-ratio adjustment when tracks are already close.
+  const attemptsTempoRatio = tempoSync || transition.category === "tempo-ramp";
+  const tempoRatioStart = attemptsTempoRatio
     ? bestTempoRatio(current.analysis.bpm, next.analysis.bpm)
     : 1;
 
-  const snappedEntryOffsetSec = snapToBeatGrid(
-    next.analysis.energyOnsetSec,
-    next.analysis.beatGridOffsetSec,
-    next.analysis.bpm
-  );
+  // Double Drop: target the incoming track's own drop to land right at the
+  // end of the window, instead of just its post-intro energy onset — the
+  // whole point of this technique is the two drops coinciding.
+  const baseEntryOffsetSec =
+    transition.category === "drop" && next.analysis.dropAtSec != null
+      ? snapToBeatGrid(
+          Math.max(0, next.analysis.dropAtSec - windowSec),
+          next.analysis.beatGridOffsetSec,
+          next.analysis.bpm
+        )
+      : snapToBeatGrid(next.analysis.energyOnsetSec, next.analysis.beatGridOffsetSec, next.analysis.bpm);
   const latestSensibleEntrySec = Math.max(0, next.track.durationSec - MIN_CROSSFADE_SEC);
 
   // Phase-lock: snapping to the incoming track's own beat grid gets the
@@ -271,7 +349,7 @@ export function planTransition({
   // the outgoing track's current sub-beat phase (converted into incoming-
   // track-time via the rate the incoming deck starts at) so the two
   // downbeats actually coincide the moment the incoming track starts.
-  let entryOffsetSec = snappedEntryOffsetSec;
+  let entryOffsetSec = baseEntryOffsetSec;
   if (currentElapsedSec != null && current.analysis.bpm > 0) {
     const fromBeatLenSec = 60 / current.analysis.bpm;
     const fromPhaseSec =
@@ -290,7 +368,7 @@ export function planTransition({
     tempoSync,
     tempoRatioStart,
     effect: TRANSITION_EFFECT_BY_ID[transition.id] ?? "none",
-    rationale: buildRationale(transition, genreHint, tempoSync),
+    rationale: buildRationale(transition, genreHint, tempoSync, camelotScore),
   };
 }
 

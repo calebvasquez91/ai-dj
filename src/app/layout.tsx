@@ -5,6 +5,7 @@ import { Sidebar } from "@/components/Sidebar";
 import { TopBar } from "@/components/TopBar";
 import { PlayerBar } from "@/components/PlayerBar";
 import { QueuePanel } from "@/components/QueuePanel";
+import { DeckView } from "@/components/DeckView";
 import { KeyboardShortcuts } from "@/components/KeyboardShortcuts";
 import { AudioHydrator } from "@/components/AudioHydrator";
 
@@ -51,6 +52,7 @@ export default function RootLayout({
         </div>
         <PlayerBar />
         <QueuePanel />
+        <DeckView />
       </body>
     </html>
   );

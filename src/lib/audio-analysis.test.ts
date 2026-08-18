@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { analyzeSamples } from "./audio-analysis";
+import { analyzeSamples, camelotForKey } from "./audio-analysis";
 
 const SAMPLE_RATE = 11025;
 
@@ -74,5 +74,60 @@ describe("analyzeSamples", () => {
     const analysis = analyzeSamples(samples, SAMPLE_RATE, 15);
     expect(Number.isFinite(analysis.beatGridOffsetSec)).toBe(true);
     expect(analysis.beatGridOffsetSec).toBeGreaterThanOrEqual(0);
+  });
+
+  it("produces a normalized waveform peak array suitable for rendering", () => {
+    const samples = buildClickTrack(128, 20);
+    const analysis = analyzeSamples(samples, SAMPLE_RATE, 20);
+    expect(analysis.waveformPeaks.length).toBe(240);
+    expect(Math.max(...analysis.waveformPeaks)).toBeCloseTo(1, 5);
+    expect(Math.min(...analysis.waveformPeaks)).toBeGreaterThanOrEqual(0);
+  });
+
+  it("finds a drop (loudest plateau) inside a louder section and a breakdown inside a quieter one", () => {
+    const bpm = 128;
+    const intro = new Float32Array(Math.floor(3 * SAMPLE_RATE)).map(() => (Math.random() - 0.5) * 0.005);
+    const groove1 = buildClickTrack(bpm, 6);
+    const drop = buildClickTrack(bpm, 6).map((v) => v * 2.2);
+    const breakdown = new Float32Array(Math.floor(4 * SAMPLE_RATE)).map(() => (Math.random() - 0.5) * 0.004);
+    const groove2 = buildClickTrack(bpm, 6);
+    const parts = [intro, groove1, drop, breakdown, groove2];
+    const total = parts.reduce((sum, p) => sum + p.length, 0);
+    const samples = new Float32Array(total);
+    let offset = 0;
+    for (const p of parts) {
+      samples.set(p, offset);
+      offset += p.length;
+    }
+    const durationSec = total / SAMPLE_RATE;
+    const analysis = analyzeSamples(samples, SAMPLE_RATE, durationSec);
+
+    const dropSectionStart = 3 + 6;
+    const dropSectionEnd = dropSectionStart + 6;
+    expect(analysis.dropAtSec).not.toBeNull();
+    expect(analysis.dropAtSec as number).toBeGreaterThanOrEqual(dropSectionStart);
+    expect(analysis.dropAtSec as number).toBeLessThan(dropSectionEnd);
+
+    const breakdownSectionStart = dropSectionEnd;
+    const breakdownSectionEnd = breakdownSectionStart + 4;
+    expect(analysis.breakdownAtSec).not.toBeNull();
+    expect(analysis.breakdownAtSec as number).toBeGreaterThanOrEqual(breakdownSectionStart);
+    expect(analysis.breakdownAtSec as number).toBeLessThan(breakdownSectionEnd);
+  });
+});
+
+describe("camelotForKey", () => {
+  it("maps well-known major/minor keys to their standard Camelot codes", () => {
+    expect(camelotForKey("C major")).toBe("8B");
+    expect(camelotForKey("A minor")).toBe("8A");
+    expect(camelotForKey("G major")).toBe("9B");
+    expect(camelotForKey("E minor")).toBe("9A");
+    expect(camelotForKey("D major")).toBe("10B");
+    expect(camelotForKey("B minor")).toBe("10A");
+  });
+
+  it("returns null for an unknown key or no key", () => {
+    expect(camelotForKey(null)).toBeNull();
+    expect(camelotForKey("not a key")).toBeNull();
   });
 });
