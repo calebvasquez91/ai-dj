@@ -6,6 +6,7 @@ import { DualDeckStage } from "@/components/DualDeckStage";
 import { TrackThumbnail } from "@/components/TrackThumbnail";
 import { genreFamilies } from "@/data/styles";
 import type { DjSetMode } from "@/lib/mix-engine";
+import { speakHypePhrase } from "@/lib/wordPlay";
 
 const CROSSFADE_PRESETS = [5, 10, 15, 20, 30];
 
@@ -13,9 +14,9 @@ const DJ_MODES: { id: DjSetMode; label: string; title: string }[] = [
   { id: "auto", label: "Mode: Auto", title: "No bias — pick whatever scores best" },
   { id: "club", label: "Club", title: "Favors beatmatched, EQ-driven blends over flashy effects" },
   { id: "wedding", label: "Wedding", title: "Favors clean, safe blends; avoids scratches, risers, and other flashy effects" },
-  { id: "party", label: "Party", title: "Leans into crowd-hype moments — tags, risers, drops" },
+  { id: "party", label: "Party", title: "Leans into crowd-hype moments — tags, word play, risers, drops" },
   { id: "chill", label: "Chill", title: "Favors long, smooth blends and reverb washes; avoids anything abrupt" },
-  { id: "open-format", label: "Open Format", title: "Leans into bold genre/tempo bridges — tempo ramps, brakes, hard cuts" },
+  { id: "open-format", label: "Open Format", title: "Leans into bold genre/tempo bridges — tempo ramps, brakes, spin-ups, hard cuts" },
 ];
 
 export function PlayerBar() {
@@ -130,6 +131,14 @@ export function PlayerBar() {
       </div>
 
       <div className="flex items-center gap-2 justify-end shrink-0">
+        <button
+          type="button"
+          onClick={() => speakHypePhrase()}
+          className="text-accent-purple hover:text-accent-pink px-1"
+          title="Word Play — speak a hype phrase now, DJ's call (uses your browser's text-to-speech; it plays independently of the music, not mixed through it)"
+        >
+          🎤
+        </button>
         <button
           type="button"
           onClick={toggleDeckView}

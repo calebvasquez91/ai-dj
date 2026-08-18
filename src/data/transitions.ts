@@ -23,7 +23,9 @@ export type TransitionCategory =
   | "riser"
   | "drop"
   | "tempo-ramp"
-  | "tag-sample";
+  | "tag-sample"
+  | "spin-up"
+  | "word-play";
 
 export interface TransitionEntry {
   id: string;
@@ -117,14 +119,15 @@ export const transitions: TransitionEntry[] = [
     exampleDjs: ["Jeff Mills", "Ben Klock"],
   },
 
-  // Scratch-based — simulated as a rhythmic stutter-gate (real turntable
-  // scratch gestures need physical input we don't have; this is a
-  // best-effort approximation of the *feel*, not the technique itself).
+  // Scratch-based — simulated as a rhythmic stutter-gate plus a synthesized
+  // "chirp" tone (real turntable scratch gestures need physical input we
+  // don't have; this is a best-effort approximation of the *feel* and
+  // *sound*, not the technique itself).
   {
     id: "scratch-transition",
     name: "Scratch Transition",
     category: "scratch",
-    description: "Simulated: a rapid stutter-gate alternation standing in for a turntablist scratching the incoming track's intro in over the outgoing track's tail.",
+    description: "Simulated: a rapid stutter-gate alternation plus a synthesized scratch \"chirp\" tone, standing in for a turntablist scratching the incoming track's intro in over the outgoing track's tail.",
     idealBpmDeltaMax: Infinity,
     idealGenres: ["hip-hop"],
     executable: true,
@@ -149,6 +152,20 @@ export const transitions: TransitionEntry[] = [
     description: "The outgoing track audibly slows to a stop like a record braked by hand, then the incoming track drops in at full tempo.",
     idealBpmDeltaMax: Infinity,
     idealGenres: ["reggae", "hip-hop", "breakbeat"],
+    executable: true,
+    exampleDjs: ["Grandmaster Flash", "Kool Herc"],
+  },
+
+  // Spin-up — the mirror of the brake above: the incoming track starts
+  // slow and audibly spins up to full speed, like a DJ releasing a record
+  // held at the intro rather than letting it die.
+  {
+    id: "spin-up",
+    name: "Spin Up",
+    category: "spin-up",
+    description: "The incoming track starts slow and spins up to full speed, like a DJ releasing a record held at the intro — the reverse of a brake.",
+    idealBpmDeltaMax: Infinity,
+    idealGenres: ["hip-hop", "reggae", "breakbeat"],
     executable: true,
     exampleDjs: ["Grandmaster Flash", "Kool Herc"],
   },
@@ -246,6 +263,16 @@ export const transitions: TransitionEntry[] = [
     executable: true,
     exampleDjs: ["DJ Premier", "Diplo"],
   },
+  {
+    id: "word-play-drop",
+    name: "Word Play",
+    category: "word-play",
+    description: "A spoken hype phrase drops right at the transition point, radio/hype-man style — spoken live with the browser's text-to-speech rather than a bundled vocal sample, so voice and clarity vary by device.",
+    idealBpmDeltaMax: Infinity,
+    idealGenres: ["hip-hop", "reggae"],
+    executable: true,
+    exampleDjs: ["DJ Premier", "Diplo"],
+  },
 
   // Tempo-based
   {
@@ -265,7 +292,7 @@ export const transitions: TransitionEntry[] = [
     id: "transform-chop",
     name: "Transform Chop",
     category: "scratch",
-    description: "Simulated: a rapid, tightly-clipped stutter-gate standing in for a crossfader transform-switch chop between the two tracks.",
+    description: "Simulated: a rapid, tightly-clipped stutter-gate plus a synthesized scratch \"chirp\" tone, standing in for a crossfader transform-switch chop between the two tracks.",
     idealBpmDeltaMax: Infinity,
     idealGenres: ["hip-hop"],
     executable: true,

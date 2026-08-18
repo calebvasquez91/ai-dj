@@ -5,14 +5,18 @@ import { useStore } from "@/lib/store";
 import {
   AUTO_DJ_OFF_FADE_SEC,
   MAX_ACTIVE_PLAY_SEC,
+  TRACK_FADE_IN_SEC,
+  TRACK_FADE_OUT_SEC,
   brakeGainCurves,
   equalPowerCurves,
   planSimpleFade,
   planTransition,
+  spinUpGainCurves,
   stutterGateCurves,
   type TransitionPlan,
 } from "@/lib/mix-engine";
 import { analyzeTrackFromUrl, fallbackAnalysis, type TrackAnalysis } from "@/lib/audio-analysis";
+import { cancelHypePhrase, speakHypePhrase } from "@/lib/wordPlay";
 import type { Track } from "@/types/music";
 
 type DeckId = "A" | "B";
@@ -39,6 +43,8 @@ interface ActiveTransition {
 
 /** Real brakes don't slow linearly to a full stop — they decelerate hard early and crawl at the end. An ease-out curve (not linear) captures that. */
 const BRAKE_MIN_RATE = 0.15;
+/** How slow a "spin up" starts before ramping to full speed — the mirror of BRAKE_MIN_RATE. */
+const SPIN_UP_MIN_RATE = 0.2;
 
 interface DeckNodes {
   source: MediaElementAudioSourceNode;
@@ -145,6 +151,7 @@ export function DualDeckStage() {
     const fromEl = deckEl(t.fromDeckId);
     if (fromEl) fromEl.playbackRate = 1;
     stopOverlayNodes(t.overlayNodes);
+    if (t.effect === "word-play") cancelHypePhrase();
     resetDeckNodes(t.toDeckId, 0);
     resetDeckNodes(t.fromDeckId, 1);
     loadedTrackId.current[t.toDeckId] = null;
@@ -394,6 +401,49 @@ export function DualDeckStage() {
       return { source, filter, gain };
     }
 
+    /** Synthesizes a "chirp" tone for Scratch Transition/Transform Chop — a rapidly wobbling sawtooth standing in for the classic turntablist scratch sound, layered on top of the stutter-gate alternation applied to the actual decks. Real scratching is a physical gesture we can't replicate (and often uses a dedicated scratch record, not the track's own audio), so this approximates the *sound signature* rather than the technique. */
+    function startScratchChirpLayer(ctx: AudioContext, windowSec: number): OverlayNodes | null {
+      const masterGain = masterGainRef.current;
+      if (!masterGain) return null;
+      const sampleCount = Math.max(1, Math.floor(ctx.sampleRate * windowSec));
+      const buffer = ctx.createBuffer(1, sampleCount, ctx.sampleRate);
+      const data = buffer.getChannelData(0);
+      const carrierHz = 350;
+      const modHz = 9; // wobble rate — the pulse that reads as a "chirp"
+      let phase = 0;
+      for (let i = 0; i < sampleCount; i++) {
+        const t = i / ctx.sampleRate;
+        const wobble = Math.sin(2 * Math.PI * modHz * t);
+        const instHz = carrierHz + wobble * 220;
+        phase += instHz / ctx.sampleRate;
+        phase -= Math.floor(phase);
+        data[i] = 2 * phase - 1; // sawtooth for a scratchier timbre than a pure tone
+      }
+
+      const source = ctx.createBufferSource();
+      source.buffer = buffer;
+      const filter = ctx.createBiquadFilter();
+      filter.type = "bandpass";
+      filter.frequency.value = 500;
+      filter.Q.value = 0.8;
+      const gain = ctx.createGain();
+
+      source.connect(filter);
+      filter.connect(gain);
+      gain.connect(masterGain);
+
+      const now = ctx.currentTime;
+      gain.gain.setValueAtTime(0.0001, now);
+      gain.gain.exponentialRampToValueAtTime(0.35, now + Math.min(0.15, windowSec * 0.2));
+      gain.gain.setValueAtTime(0.35, now + windowSec * 0.8);
+      gain.gain.exponentialRampToValueAtTime(0.0001, now + windowSec);
+
+      source.start(now);
+      source.stop(now + windowSec + 0.05);
+
+      return { source, filter, gain };
+    }
+
     function startTransition(nextTrack: Track, plan: TransitionPlan) {
       if (transitionRef.current) return;
       const ctx = audioCtxRef.current;
@@ -407,18 +457,21 @@ export function DualDeckStage() {
 
       recentTransitionIdsRef.current = [...recentTransitionIdsRef.current, plan.transitionId].slice(-3);
 
-      // A brake/spinback dies to a full stop and drops the next track in
-      // fresh at its native tempo — no tempo-matching, since the whole
-      // point is a clean break, not a blend. A Tempo Ramp deliberately
-      // attempts a tempo-ratio adjustment even outside the normal
-      // tempoSync range, since bridging that gap gradually is the point.
+      // A brake/spinback dies to a full stop, and a spin-up starts from
+      // one, dropping the next track in fresh at its own native tempo —
+      // no tempo-matching either way, since the whole point is a clean
+      // break, not a blend. A Tempo Ramp deliberately attempts a
+      // tempo-ratio adjustment even outside the normal tempoSync range,
+      // since bridging that gap gradually is the point.
       const startsTempoSynced =
-        plan.effect !== "brake" && (plan.tempoSync || plan.category === "tempo-ramp");
+        plan.effect !== "brake" &&
+        plan.effect !== "spin-up" &&
+        (plan.tempoSync || plan.category === "tempo-ramp");
 
       loadedTrackId.current[toDeckId] = nextTrack.id;
       toEl.src = nextTrack.sourceUrl;
       toEl.currentTime = plan.incomingEntryOffsetSec;
-      toEl.playbackRate = startsTempoSynced ? plan.tempoRatioStart : 1;
+      toEl.playbackRate = plan.effect === "spin-up" ? SPIN_UP_MIN_RATE : startsTempoSynced ? plan.tempoRatioStart : 1;
       toNodes.gain.gain.setValueAtTime(0, ctx.currentTime);
       toEl.play().catch(() => {});
 
@@ -426,9 +479,11 @@ export function DualDeckStage() {
       const { outCurve, inCurve } =
         plan.effect === "brake"
           ? brakeGainCurves()
-          : plan.effect === "stutter-gate"
-            ? stutterGateCurves()
-            : equalPowerCurves();
+          : plan.effect === "spin-up"
+            ? spinUpGainCurves()
+            : plan.effect === "stutter-gate" || plan.effect === "scratch-chirp"
+              ? stutterGateCurves()
+              : equalPowerCurves();
       fromNodes.gain.gain.cancelScheduledValues(now);
       toNodes.gain.gain.cancelScheduledValues(now);
       fromNodes.gain.gain.setValueCurveAtTime(outCurve, now, plan.windowSec);
@@ -439,7 +494,15 @@ export function DualDeckStage() {
           ? startRiserLayer(ctx, plan.windowSec)
           : plan.effect === "tag-sample"
             ? startTagSampleStab(ctx, plan.windowSec)
-            : null;
+            : plan.effect === "scratch-chirp"
+              ? startScratchChirpLayer(ctx, plan.windowSec)
+              : null;
+      if (plan.effect === "word-play") {
+        // Fire-and-forget: SpeechSynthesis doesn't route through this
+        // component's Web Audio graph, so it can't be volume-matched or
+        // ducked under the music — it just speaks over whatever's playing.
+        speakHypePhrase();
+      }
 
       const transition: ActiveTransition = {
         fromDeckId,
@@ -472,6 +535,13 @@ export function DualDeckStage() {
             // Ease-out: decelerates hard early, crawls near the end, like a hand-braked record.
             const eased = 1 - Math.pow(1 - progress, 3);
             fromDeckEl.playbackRate = 1 - eased * (1 - BRAKE_MIN_RATE);
+          }
+        } else if (t.effect === "spin-up") {
+          const toDeckEl = deckEl(t.toDeckId);
+          if (toDeckEl) {
+            // Same ease-out shape as a brake, run in reverse: catches up fast, then levels off at full speed.
+            const eased = 1 - Math.pow(1 - progress, 3);
+            toDeckEl.playbackRate = SPIN_UP_MIN_RATE + eased * (1 - SPIN_UP_MIN_RATE);
           }
         } else if (t.tempoSync) {
           const toDeckEl = deckEl(t.toDeckId);
@@ -509,17 +579,35 @@ export function DualDeckStage() {
       return useStore.getState().trackAnalysis[trackId] ?? fallbackAnalysis();
     }
 
+    /** Nothing queued to transition into — instead of an abrupt stop, fade the active deck's gain to 0 so it reaches silence right as the track naturally ends. Recomputing from the current gain value every tick (rather than a one-shot scheduled ramp) keeps this self-correcting if the check re-fires before the fade completes. */
+    function fadeOutIfEnding(activeEl: HTMLAudioElement, duration: number, currentTime: number) {
+      const remaining = duration - currentTime;
+      if (remaining > TRACK_FADE_OUT_SEC) return;
+      const ctx = audioCtxRef.current;
+      const nodes = deckNodesRef.current[activeDeckRef.current];
+      if (!ctx || !nodes) return;
+      const now = ctx.currentTime;
+      nodes.gain.gain.cancelScheduledValues(now);
+      nodes.gain.gain.setValueAtTime(nodes.gain.gain.value, now);
+      nodes.gain.gain.linearRampToValueAtTime(0, now + Math.max(0.05, remaining));
+    }
+
     function tryAutoTransition() {
       if (transitionRef.current) return;
       const state = useStore.getState();
       const track = state.currentTrack;
-      const nextTrack = state.queue[0];
-      if (!track || !nextTrack) return;
+      if (!track) return;
       const activeEl = deckEl(activeDeckRef.current);
       if (!activeEl) return;
       const duration = activeEl.duration;
       if (!duration || !Number.isFinite(duration)) return;
       const currentTime = activeEl.currentTime;
+
+      const nextTrack = state.queue[0];
+      if (!nextTrack) {
+        fadeOutIfEnding(activeEl, duration, currentTime);
+        return;
+      }
 
       if (!state.autoDjEnabled) {
         const plan = planSimpleFade(AUTO_DJ_OFF_FADE_SEC);
@@ -646,9 +734,22 @@ export function DualDeckStage() {
     loadedTrackId.current[activeDeck] = currentTrack.id;
     const activeEl = deckEl(activeDeck);
     if (!activeEl) return;
-    resetDeckNodes(activeDeck, 1);
+    resetDeckNodes(activeDeck, 0);
     activeEl.playbackRate = 1;
     activeEl.src = currentTrack.sourceUrl;
+    // A track that starts outside of a transition (a direct pick, or the
+    // very first track of a session) fades in from silence instead of
+    // snapping to full volume — tracks that arrive via a real transition
+    // never hit this branch (loadedTrackId already matches), so this never
+    // stacks with a transition's own gain curve.
+    const activeNodes = deckNodesRef.current[activeDeck];
+    const ctx = audioCtxRef.current;
+    if (ctx && activeNodes) {
+      const now = ctx.currentTime;
+      activeNodes.gain.gain.cancelScheduledValues(now);
+      activeNodes.gain.gain.setValueAtTime(0, now);
+      activeNodes.gain.gain.linearRampToValueAtTime(1, now + TRACK_FADE_IN_SEC);
+    }
     if (useStore.getState().isPlaying) {
       audioCtxRef.current?.resume().catch(() => {});
       activeEl.play().catch(() => {});

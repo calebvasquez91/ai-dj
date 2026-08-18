@@ -9,6 +9,11 @@ export const AUTO_DJ_OFF_FADE_SEC = 3;
 /** Auto-DJ never lets a track ride past this much active playback before forcing a transition into the next queued track, regardless of the file's real length. */
 export const MAX_ACTIVE_PLAY_SEC = 150;
 
+/** How long a track fades in from silence when it starts outside of a transition (a direct pick, or the very first track of a session) — avoids an abrupt full-volume start. */
+export const TRACK_FADE_IN_SEC = 1.5;
+/** How long the last track in the queue fades out before its natural end, since there's nothing queued to transition into. */
+export const TRACK_FADE_OUT_SEC = 2.5;
+
 /** How close (fractional, after best-octave adjustment) two BPMs need to be to tempo-sync, roughly a real turntable's pitch-fader range. */
 const TEMPO_SYNC_MAX_DELTA = 0.08;
 
@@ -73,6 +78,8 @@ function windowBeatsForTransition(t: TransitionEntry, tempoSync: boolean, bpmDel
       return t.id === "transform-chop" ? 2 : 4;
     case "brake":
       return 4;
+    case "spin-up":
+      return 4;
     case "riser":
       return 16;
     case "blend":
@@ -89,6 +96,8 @@ function windowBeatsForTransition(t: TransitionEntry, tempoSync: boolean, bpmDel
       // Deliberately long — the whole point is a gradual, extended shift.
       return 64;
     case "tag-sample":
+      return 2;
+    case "word-play":
       return 2;
     case "effects":
       return 8;
@@ -109,6 +118,7 @@ const MIN_WINDOW_SEC_BY_CATEGORY: Record<TransitionCategory, number> = {
   cut: 0.15,
   scratch: 0.6,
   brake: 1.5,
+  "spin-up": 1.5,
   riser: 4,
   blend: MIN_CROSSFADE_SEC,
   "eq-filter": MIN_CROSSFADE_SEC,
@@ -117,6 +127,7 @@ const MIN_WINDOW_SEC_BY_CATEGORY: Record<TransitionCategory, number> = {
   drop: MIN_CROSSFADE_SEC,
   "tempo-ramp": 8,
   "tag-sample": 1.5,
+  "word-play": 1.5,
   effects: MIN_CROSSFADE_SEC,
   digital: MIN_CROSSFADE_SEC,
   vocal: MIN_CROSSFADE_SEC,
@@ -128,24 +139,29 @@ export type TransitionEffect =
   | "lowpass-sweep"
   | "echo-tail"
   | "brake"
+  | "spin-up"
   | "riser"
   | "stutter-gate"
+  | "scratch-chirp"
   | "eq-kill"
   | "reverb-wash"
-  | "tag-sample";
+  | "tag-sample"
+  | "word-play";
 
 const TRANSITION_EFFECT_BY_ID: Record<string, TransitionEffect> = {
   "bass-swap": "highpass-sweep",
   "filter-sweep": "lowpass-sweep",
   "echo-out": "echo-tail",
   spinback: "brake",
+  "spin-up": "spin-up",
   "riser-uplift": "riser",
-  "scratch-transition": "stutter-gate",
+  "scratch-transition": "scratch-chirp",
   "beat-juggle-transition": "stutter-gate",
-  "transform-chop": "stutter-gate",
+  "transform-chop": "scratch-chirp",
   "eq-kill-mix": "eq-kill",
   "reverb-wash": "reverb-wash",
   "tag-drop": "tag-sample",
+  "word-play-drop": "word-play",
 };
 
 /**
@@ -171,6 +187,34 @@ export function brakeGainCurves(
       const { outGain, inGain } = equalPowerGains(dropProgress);
       outCurve[i] = outGain;
       inCurve[i] = inGain;
+    }
+  }
+  return { outCurve, inCurve };
+}
+
+/**
+ * Gain shape for a "spin up" transition — the mirror of a brake: the
+ * outgoing track drops out quickly at the start while the incoming track
+ * comes up early and holds, so its playbackRate ramp (driven separately,
+ * from slow up to full speed) is clearly audible the whole time rather
+ * than being masked by a still-present outgoing track.
+ */
+export function spinUpGainCurves(
+  steps = 64,
+  riseEndRatio = 0.25
+): { outCurve: Float32Array; inCurve: Float32Array } {
+  const outCurve = new Float32Array(steps);
+  const inCurve = new Float32Array(steps);
+  for (let i = 0; i < steps; i++) {
+    const p = i / (steps - 1);
+    if (p < riseEndRatio) {
+      const riseProgress = p / riseEndRatio;
+      const { outGain, inGain } = equalPowerGains(riseProgress);
+      outCurve[i] = outGain;
+      inCurve[i] = inGain;
+    } else {
+      outCurve[i] = 0;
+      inCurve[i] = 1;
     }
   }
   return { outCurve, inCurve };
@@ -248,6 +292,7 @@ const MODE_CATEGORY_BIAS: Record<DjSetMode, Partial<Record<TransitionCategory, n
     digital: 3,
     scratch: -4,
     brake: -3,
+    "spin-up": -3,
     riser: -2,
   },
   wedding: {
@@ -257,15 +302,19 @@ const MODE_CATEGORY_BIAS: Record<DjSetMode, Partial<Record<TransitionCategory, n
     "eq-filter": 2,
     scratch: -10,
     "tag-sample": -10,
+    "word-play": -10,
     riser: -8,
     brake: -8,
+    "spin-up": -8,
     reverb: -6,
     drop: -6,
   },
   party: {
     "tag-sample": 6,
+    "word-play": 6,
     riser: 5,
     drop: 4,
+    "spin-up": 3,
     effects: 3,
     digital: 2,
   },
@@ -275,16 +324,20 @@ const MODE_CATEGORY_BIAS: Record<DjSetMode, Partial<Record<TransitionCategory, n
     "eq-filter": 3,
     "tempo-ramp": 2,
     brake: -6,
+    "spin-up": -6,
     scratch: -10,
     "tag-sample": -10,
+    "word-play": -10,
     riser: -8,
     drop: -6,
   },
   "open-format": {
     "tempo-ramp": 6,
     brake: 4,
+    "spin-up": 4,
     cut: 3,
     drop: 2,
+    "word-play": 2,
   },
 };
 

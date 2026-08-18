@@ -3,7 +3,9 @@ import {
   MAX_ACTIVE_PLAY_SEC,
   brakeGainCurves,
   camelotCompatibility,
+  chooseTransition,
   planTransition,
+  spinUpGainCurves,
   stutterGateCurves,
 } from "./mix-engine";
 import type { TrackAnalysis } from "./audio-analysis";
@@ -374,5 +376,47 @@ describe("stutterGateCurves", () => {
       if (inCurve[i] !== inCurve[i - 1]) toggles++;
     }
     expect(toggles).toBeGreaterThan(1);
+  });
+});
+
+describe("spinUpGainCurves", () => {
+  it("starts with the outgoing deck full and the incoming deck silent", () => {
+    const { outCurve, inCurve } = spinUpGainCurves(20, 0.25);
+    expect(outCurve[0]).toBe(1);
+    expect(inCurve[0]).toBe(0);
+  });
+
+  it("has fully handed off to the incoming deck well before the window ends, so its pitch ramp is audible on its own", () => {
+    const { outCurve, inCurve } = spinUpGainCurves(20, 0.25);
+    expect(outCurve[10]).toBe(0);
+    expect(inCurve[10]).toBe(1);
+    expect(outCurve[19]).toBe(0);
+    expect(inCurve[19]).toBe(1);
+  });
+});
+
+describe("chooseTransition — Spin Up vs. its near-twin Spinback", () => {
+  it("prefers Spin Up when Spinback (identical genre/persona fit) was just used", () => {
+    const t = chooseTransition({
+      bpmDelta: 0.02,
+      tempoSync: true,
+      genreHint: "hip-hop",
+      personaDjNames: ["Kool Herc"],
+      recentTransitionIds: ["spinback"],
+    });
+    expect(t.id).toBe("spin-up");
+  });
+});
+
+describe("chooseTransition — Word Play vs. its near-twin Tag/Sample", () => {
+  it("prefers Word Play when Tag/Sample (identical genre/persona fit) was just used", () => {
+    const t = chooseTransition({
+      bpmDelta: 0.02,
+      tempoSync: true,
+      genreHint: "hip-hop",
+      personaDjNames: ["Diplo"],
+      recentTransitionIds: ["tag-drop"],
+    });
+    expect(t.id).toBe("word-play-drop");
   });
 });
