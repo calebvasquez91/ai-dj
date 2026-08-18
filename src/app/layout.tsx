@@ -1,11 +1,12 @@
 import type { Metadata } from "next";
-import { Geist, Geist_Mono } from "next/font/google";
+import { Geist, Geist_Mono, Bungee } from "next/font/google";
 import "./globals.css";
 import { Sidebar } from "@/components/Sidebar";
 import { TopBar } from "@/components/TopBar";
 import { PlayerBar } from "@/components/PlayerBar";
 import { QueuePanel } from "@/components/QueuePanel";
 import { KeyboardShortcuts } from "@/components/KeyboardShortcuts";
+import { AudioHydrator } from "@/components/AudioHydrator";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -14,6 +15,12 @@ const geistSans = Geist({
 
 const geistMono = Geist_Mono({
   variable: "--font-geist-mono",
+  subsets: ["latin"],
+});
+
+const retroDisplay = Bungee({
+  variable: "--font-retro",
+  weight: "400",
   subsets: ["latin"],
 });
 
@@ -30,10 +37,11 @@ export default function RootLayout({
   return (
     <html
       lang="en"
-      className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
+      className={`${geistSans.variable} ${geistMono.variable} ${retroDisplay.variable} h-full antialiased`}
     >
       <body className="h-full flex flex-col overflow-hidden">
         <KeyboardShortcuts />
+        <AudioHydrator />
         <div className="flex flex-1 min-h-0">
           <Sidebar />
           <div className="flex flex-1 flex-col min-w-0">

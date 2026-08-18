@@ -25,6 +25,7 @@ interface PlayerState {
 
   playlists: Playlist[];
   localLibrary: Track[];
+  audioHydrated: boolean;
 
   setQueue: (tracks: Track[]) => void;
   enqueue: (track: Track) => void;
@@ -44,6 +45,9 @@ interface PlayerState {
   setSidebarOpen: (open: boolean) => void;
   toggleQueuePanel: () => void;
   addLocalTracks: (tracks: Track[]) => void;
+  removeLocalTrack: (trackId: string) => void;
+  setTrackSourceUrls: (urls: Record<string, string>) => void;
+  setAudioHydrated: (hydrated: boolean) => void;
   setTrackAnalysis: (trackId: string, analysis: TrackAnalysis) => void;
   startAnalyzing: (trackId: string) => void;
   stopAnalyzing: (trackId: string) => void;
@@ -83,6 +87,7 @@ export const useStore = create<PlayerState>()(
 
       playlists: [],
       localLibrary: [],
+      audioHydrated: false,
 
       setQueue: (tracks) => set({ queue: tracks }),
       enqueue: (track) => set((s) => ({ queue: [...s.queue, track] })),
@@ -116,6 +121,29 @@ export const useStore = create<PlayerState>()(
       toggleQueuePanel: () => set((s) => ({ queuePanelOpen: !s.queuePanelOpen })),
       addLocalTracks: (tracks) =>
         set((s) => ({ localLibrary: [...s.localLibrary, ...tracks] })),
+      removeLocalTrack: (trackId) =>
+        set((s) => ({
+          localLibrary: s.localLibrary.filter((t) => t.id !== trackId),
+        })),
+      // Called once on startup by <AudioHydrator> after it reads each
+      // track's bytes back out of IndexedDB and mints fresh blob: URLs —
+      // patches every place a matching track object might live.
+      setTrackSourceUrls: (urls) =>
+        set((s) => {
+          const patch = (t: Track) =>
+            urls[t.id] ? { ...t, sourceUrl: urls[t.id] } : t;
+          return {
+            localLibrary: s.localLibrary.map(patch),
+            playlists: s.playlists.map((p) => ({
+              ...p,
+              tracks: p.tracks.map(patch),
+            })),
+            queue: s.queue.map(patch),
+            history: s.history.map(patch),
+            currentTrack: s.currentTrack ? patch(s.currentTrack) : s.currentTrack,
+          };
+        }),
+      setAudioHydrated: (hydrated) => set({ audioHydrated: hydrated }),
       setTrackAnalysis: (trackId, analysis) =>
         set((s) => ({ trackAnalysis: { ...s.trackAnalysis, [trackId]: analysis } })),
       startAnalyzing: (trackId) =>
@@ -219,7 +247,13 @@ export const useStore = create<PlayerState>()(
     }),
     {
       name: "ai-dj-storage",
-      partialize: (state) => ({ playlists: state.playlists }),
+      // sourceUrl values are stale blob: URLs the moment this is written to
+      // localStorage — <AudioHydrator> mints fresh ones from IndexedDB on
+      // next load and patches them back in via setTrackSourceUrls.
+      partialize: (state) => ({
+        playlists: state.playlists,
+        localLibrary: state.localLibrary,
+      }),
     }
   )
 );

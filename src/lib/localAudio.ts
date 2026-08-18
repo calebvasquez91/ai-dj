@@ -1,4 +1,5 @@
 import type { Track } from "@/types/music";
+import { saveAudioFile } from "./audioDb";
 
 function parseFileName(fileName: string): { title: string; artist: string } {
   const withoutExt = fileName.replace(/\.[^/.]+$/, "");
@@ -24,11 +25,15 @@ function readDuration(url: string): Promise<number> {
 export async function filesToTracks(files: File[]): Promise<Track[]> {
   return Promise.all(
     files.map(async (file) => {
+      const id = crypto.randomUUID();
       const sourceUrl = URL.createObjectURL(file);
       const durationSec = await readDuration(sourceUrl);
       const { title, artist } = parseFileName(file.name);
+      // Persist the actual bytes so this track survives a reload — the
+      // blob: URL above only lives as long as this tab does.
+      await saveAudioFile(id, file);
       return {
-        id: crypto.randomUUID(),
+        id,
         title,
         artist,
         durationSec,

@@ -32,7 +32,7 @@ export default function PlaylistPage() {
         <input
           value={playlist.name}
           onChange={(e) => renamePlaylist(playlist.id, e.target.value)}
-          className="text-2xl font-bold bg-transparent outline-none border-b border-transparent focus:border-border flex-1"
+          className="text-2xl font-bold bg-transparent outline-none border-b-2 border-transparent focus:border-accent-purple flex-1"
         />
         <button
           type="button"
@@ -40,7 +40,7 @@ export default function PlaylistPage() {
             removePlaylist(playlist.id);
             router.push("/");
           }}
-          className="text-xs text-muted hover:text-red-400 border border-border rounded-full px-3 py-1.5 shrink-0"
+          className="text-xs text-muted hover:text-accent-pink border-2 border-border rounded-full px-3 py-1.5 shrink-0"
         >
           Delete playlist
         </button>
@@ -56,7 +56,7 @@ export default function PlaylistPage() {
             <button
               type="button"
               onClick={() => playTrackList(playlist.tracks, 0)}
-              className="self-start rounded-full bg-accent text-white text-sm font-semibold px-5 py-2 hover:bg-accent-strong"
+              className="btn-retro self-start"
             >
               ▶ Play
             </button>
@@ -64,7 +64,7 @@ export default function PlaylistPage() {
               type="button"
               onClick={() => playTrackList(shuffle(playlist.tracks), 0)}
               disabled={playlist.tracks.length < 2}
-              className="self-start rounded-full border border-border text-sm font-semibold px-5 py-2 hover:bg-surface-hover disabled:opacity-40"
+              className="btn-retro-outline self-start"
               title="Play this playlist in a random order"
             >
               🔀 Shuffle Play
@@ -82,8 +82,8 @@ export default function PlaylistPage() {
                   if (e.key === "Enter" || e.key === " ")
                     playTrackList(playlist.tracks, index);
                 }}
-                className={`flex items-center gap-3 rounded-md px-3 py-2 cursor-pointer hover:bg-surface-hover ${
-                  currentTrack?.id === track.id ? "bg-surface-hover" : ""
+                className={`flex items-center gap-3 rounded-xl px-3 py-2 cursor-pointer border border-transparent hover:border-accent/40 hover:bg-surface-hover transition-colors ${
+                  currentTrack?.id === track.id ? "bg-surface-hover border-accent/40" : ""
                 }`}
               >
                 <span className="w-5 text-xs text-muted text-right shrink-0">
@@ -126,7 +126,7 @@ export default function PlaylistPage() {
                   <button
                     type="button"
                     onClick={() => removeTrackFromPlaylist(playlist.id, track.id)}
-                    className="text-muted hover:text-red-400 px-1"
+                    className="text-muted hover:text-accent-pink px-1"
                     title="Remove from playlist"
                   >
                     ✕

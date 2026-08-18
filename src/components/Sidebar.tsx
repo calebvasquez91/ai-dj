@@ -19,9 +19,9 @@ function NavLink({
     <Link
       href={href}
       onClick={onNavigate}
-      className={`block rounded-md px-3 py-2 text-sm font-medium transition-colors ${
+      className={`block rounded-full px-3 py-2 text-sm font-semibold transition-colors ${
         active
-          ? "bg-surface-hover text-foreground"
+          ? "bg-gradient-to-r from-accent-teal/20 to-accent-purple/20 text-accent-purple border border-border"
           : "text-muted hover:text-foreground hover:bg-surface-hover"
       }`}
     >
@@ -57,14 +57,13 @@ export function Sidebar() {
         />
       )}
       <aside
-        className={`fixed inset-y-0 left-0 z-40 w-60 shrink-0 bg-black/40 border-r border-border flex flex-col gap-4 p-3 overflow-y-auto md:static ${
+        className={`fixed inset-y-0 left-0 z-40 w-60 shrink-0 bg-surface border-r-2 border-border flex flex-col gap-4 p-3 overflow-y-auto md:static ${
           sidebarOpen ? "" : "max-md:hidden"
         }`}
       >
-        <div className="px-2 py-2">
-          <span className="text-lg font-bold tracking-tight bg-gradient-to-r from-accent to-accent-strong bg-clip-text text-transparent">
-            AI DJ
-          </span>
+        <div className="px-2 py-2 flex flex-col gap-2">
+          <span className="text-xl retro-heading">AI DJ</span>
+          <div className="retro-stripe" />
         </div>
 
         <nav className="flex flex-col gap-1">
@@ -74,11 +73,11 @@ export function Sidebar() {
         </nav>
 
         <div className="flex items-center justify-between px-2 pt-2">
-          <span className="text-sm font-semibold text-muted">Your Library</span>
+          <span className="text-sm font-semibold text-accent-purple">Your Library</span>
           <button
             type="button"
             onClick={handleCreatePlaylist}
-            className="text-muted hover:text-foreground text-lg leading-none px-1"
+            className="text-accent-purple hover:text-accent-pink text-lg leading-none px-1"
             title="Create playlist"
           >
             +
@@ -96,7 +95,7 @@ export function Sidebar() {
                 key={playlist.id}
                 href={`/playlist/${playlist.id}`}
                 onClick={closeOnMobile}
-                className="rounded-md px-2 py-2 text-sm text-muted hover:text-foreground hover:bg-surface-hover truncate"
+                className="rounded-lg px-2 py-2 text-sm text-muted hover:text-foreground hover:bg-surface-hover truncate"
               >
                 {playlist.name}
               </Link>
