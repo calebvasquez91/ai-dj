@@ -38,6 +38,14 @@ export function DualDeckStage() {
   const audioCtxRef = useRef<AudioContext | null>(null);
   const masterGainRef = useRef<GainNode | null>(null);
   const deckNodesRef = useRef<Record<DeckId, DeckNodes | null>>({ A: null, B: null });
+  // Survives the graph-building effect's cleanup (see below) so React
+  // Strict Mode's dev-only mount→cleanup→mount cycle never rebuilds the
+  // audio graph on the same <audio> elements.
+  const graphCacheRef = useRef<{
+    ctx: AudioContext;
+    masterGain: GainNode;
+    decks: Record<DeckId, DeckNodes>;
+  } | null>(null);
   const loadedTrackId = useRef<Record<DeckId, string | null>>({ A: null, B: null });
   const transitionRef = useRef<ActiveTransition | null>(null);
   const activeDeckRef = useRef<DeckId>("A");
@@ -109,58 +117,77 @@ export function DualDeckStage() {
     }
   }, [currentTrack, queue]);
 
-  // Build the Web Audio graph once. Each deck: <audio> -> MediaElementSource
-  // -> BiquadFilter (neutral "allpass" unless a transition needs EQ/filter
-  // automation) -> Gain (crossfade progress only) -> master Gain (live
-  // volume) -> destination, plus a small always-present delay/feedback
-  // send used only for "echo out" transitions.
+  // Build the Web Audio graph once per <audio> element pair, ever. Each
+  // deck: <audio> -> MediaElementSource -> BiquadFilter (neutral "allpass"
+  // unless a transition needs EQ/filter automation) -> Gain (crossfade
+  // progress only) -> master Gain (live volume) -> destination, plus a
+  // small always-present delay/feedback send used only for "echo out"
+  // transitions.
   useEffect(() => {
     const elA = audioARef.current;
     const elB = audioBRef.current;
     if (!elA || !elB) return;
 
-    const AudioContextCtor =
-      window.AudioContext ||
-      (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
-    const ctx = new AudioContextCtor();
-    audioCtxRef.current = ctx;
+    // A media element can only ever be bound to one MediaElementSourceNode
+    // for its entire lifetime — even across a brand new AudioContext once
+    // the original one closes. React Strict Mode's dev-only mount →
+    // cleanup → mount cycle reuses these same <audio> DOM nodes, so if
+    // cleanup closed the context and this ran a second time, the second
+    // `createMediaElementSource` call would throw. Caching the graph in a
+    // ref that cleanup doesn't clear sidesteps that entirely.
+    if (!graphCacheRef.current) {
+      const AudioContextCtor =
+        window.AudioContext ||
+        (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
+      const ctx = new AudioContextCtor();
 
-    const masterGain = ctx.createGain();
-    masterGain.gain.value = useStore.getState().volume;
-    masterGain.connect(ctx.destination);
-    masterGainRef.current = masterGain;
+      const masterGain = ctx.createGain();
+      masterGain.gain.value = useStore.getState().volume;
+      masterGain.connect(ctx.destination);
 
-    function buildDeckNodes(el: HTMLAudioElement, initialGain: number): DeckNodes {
-      const source = ctx.createMediaElementSource(el);
-      const filter = ctx.createBiquadFilter();
-      filter.type = "allpass";
-      const gain = ctx.createGain();
-      gain.gain.value = initialGain;
-      const delaySend = ctx.createGain();
-      delaySend.gain.value = 0;
-      const delay = ctx.createDelay(1);
-      delay.delayTime.value = ECHO_DELAY_SEC;
-      const delayFeedback = ctx.createGain();
-      delayFeedback.gain.value = ECHO_FEEDBACK;
+      function buildDeckNodes(el: HTMLAudioElement, initialGain: number): DeckNodes {
+        const source = ctx.createMediaElementSource(el);
+        const filter = ctx.createBiquadFilter();
+        filter.type = "allpass";
+        const gain = ctx.createGain();
+        gain.gain.value = initialGain;
+        const delaySend = ctx.createGain();
+        delaySend.gain.value = 0;
+        const delay = ctx.createDelay(1);
+        delay.delayTime.value = ECHO_DELAY_SEC;
+        const delayFeedback = ctx.createGain();
+        delayFeedback.gain.value = ECHO_FEEDBACK;
 
-      source.connect(filter);
-      filter.connect(gain);
-      gain.connect(masterGain);
+        source.connect(filter);
+        filter.connect(gain);
+        gain.connect(masterGain);
 
-      filter.connect(delaySend);
-      delaySend.connect(delay);
-      delay.connect(delayFeedback);
-      delayFeedback.connect(delay);
-      delay.connect(masterGain);
+        filter.connect(delaySend);
+        delaySend.connect(delay);
+        delay.connect(delayFeedback);
+        delayFeedback.connect(delay);
+        delay.connect(masterGain);
 
-      return { source, filter, gain, delaySend, delay, delayFeedback };
+        return { source, filter, gain, delaySend, delay, delayFeedback };
+      }
+
+      graphCacheRef.current = {
+        ctx,
+        masterGain,
+        decks: { A: buildDeckNodes(elA, 1), B: buildDeckNodes(elB, 0) },
+      };
     }
 
-    deckNodesRef.current.A = buildDeckNodes(elA, 1);
-    deckNodesRef.current.B = buildDeckNodes(elB, 0);
+    const graph = graphCacheRef.current;
+    audioCtxRef.current = graph.ctx;
+    masterGainRef.current = graph.masterGain;
+    deckNodesRef.current = graph.decks;
 
     return () => {
-      ctx.close().catch(() => {});
+      // Intentionally does not close the AudioContext or clear
+      // graphCacheRef — see the comment above. This component stays
+      // mounted for the app's lifetime, so the "real" teardown happens
+      // when the tab itself goes away.
       audioCtxRef.current = null;
       deckNodesRef.current = { A: null, B: null };
       masterGainRef.current = null;
