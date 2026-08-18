@@ -1,16 +1,17 @@
 "use client";
 
-import { useParams, useRouter } from "next/navigation";
+import { Suspense } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import { useStore } from "@/lib/store";
 import { formatTime } from "@/lib/format";
 import { TrackThumbnail } from "@/components/TrackThumbnail";
 import { shuffle } from "@/lib/shuffle";
 
-export default function PlaylistPage() {
-  const params = useParams<{ id: string }>();
+function PlaylistContent() {
+  const id = useSearchParams().get("id") ?? "";
   const router = useRouter();
 
-  const playlist = useStore((s) => s.playlists.find((p) => p.id === params.id));
+  const playlist = useStore((s) => s.playlists.find((p) => p.id === id));
   const renamePlaylist = useStore((s) => s.renamePlaylist);
   const removePlaylist = useStore((s) => s.removePlaylist);
   const removeTrackFromPlaylist = useStore((s) => s.removeTrackFromPlaylist);
@@ -138,5 +139,13 @@ export default function PlaylistPage() {
         </>
       )}
     </div>
+  );
+}
+
+export default function PlaylistPage() {
+  return (
+    <Suspense>
+      <PlaylistContent />
+    </Suspense>
   );
 }

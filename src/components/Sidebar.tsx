@@ -44,7 +44,7 @@ export function Sidebar() {
   function handleCreatePlaylist() {
     const id = createPlaylist();
     setSidebarOpen(false);
-    router.push(`/playlist/${id}`);
+    router.push(`/playlist?id=${id}`);
   }
 
   return (
@@ -93,7 +93,7 @@ export function Sidebar() {
             playlists.map((playlist) => (
               <Link
                 key={playlist.id}
-                href={`/playlist/${playlist.id}`}
+                href={`/playlist?id=${playlist.id}`}
                 onClick={closeOnMobile}
                 className="rounded-lg px-2 py-2 text-sm text-muted hover:text-foreground hover:bg-surface-hover truncate"
               >
