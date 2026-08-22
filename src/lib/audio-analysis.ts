@@ -483,7 +483,92 @@ function mixToMono(buffer: AudioBuffer): Float32Array {
   return mono;
 }
 
-/** Browser-only: decodes a track URL and runs the pure analysis core on its samples. */
+// ---------------------------------------------------------------------------
+// Optional WebAssembly fast path (native/analysis.cpp, built by
+// scripts/build-wasm.sh into public/wasm/analysis.{js,wasm}). It's a
+// from-scratch C++ port of everything above, kept in sync by inspection —
+// this TypeScript version stays the tested reference implementation and is
+// always the fallback if the WASM module fails to load or throws.
+// ---------------------------------------------------------------------------
+
+interface WasmTrackAnalysisResult {
+  bpm: number;
+  bpmConfidence: number;
+  beatGridOffsetSec: number;
+  energyOnsetSec: number;
+  key: string;
+  keyConfidence: number;
+  camelotKey: string;
+  breakdownAtSec: number; // NaN means null
+  dropAtSec: number; // NaN means null
+  waveformPeaks: number[];
+  fallback: boolean;
+}
+
+interface AnalysisWasmModule {
+  analyzeSamples(samples: Float32Array, sampleRate: number, durationSec: number): WasmTrackAnalysisResult;
+}
+
+declare global {
+  interface Window {
+    createAnalysisModule?: () => Promise<AnalysisWasmModule>;
+  }
+}
+
+let wasmModulePromise: Promise<AnalysisWasmModule | null> | null = null;
+
+function loadWasmModule(): Promise<AnalysisWasmModule | null> {
+  if (wasmModulePromise) return wasmModulePromise;
+  wasmModulePromise = new Promise((resolve) => {
+    const script = document.createElement("script");
+    script.src = "/wasm/analysis.js";
+    script.onload = () => {
+      const factory = window.createAnalysisModule;
+      if (!factory) {
+        resolve(null);
+        return;
+      }
+      factory().then(resolve).catch(() => resolve(null));
+    };
+    script.onerror = () => resolve(null);
+    document.head.appendChild(script);
+  });
+  return wasmModulePromise;
+}
+
+function wasmResultToTrackAnalysis(raw: WasmTrackAnalysisResult): TrackAnalysis {
+  return {
+    bpm: raw.bpm,
+    bpmConfidence: raw.bpmConfidence,
+    beatGridOffsetSec: raw.beatGridOffsetSec,
+    energyOnsetSec: raw.energyOnsetSec,
+    key: raw.key.length > 0 ? raw.key : null,
+    keyConfidence: raw.keyConfidence,
+    camelotKey: raw.camelotKey.length > 0 ? raw.camelotKey : null,
+    breakdownAtSec: Number.isNaN(raw.breakdownAtSec) ? null : raw.breakdownAtSec,
+    dropAtSec: Number.isNaN(raw.dropAtSec) ? null : raw.dropAtSec,
+    waveformPeaks: raw.waveformPeaks,
+    fallback: raw.fallback,
+  };
+}
+
+async function tryAnalyzeSamplesWasm(
+  samples: Float32Array,
+  sampleRate: number,
+  durationSec: number
+): Promise<TrackAnalysis | null> {
+  try {
+    const wasmModule = await loadWasmModule();
+    if (!wasmModule) return null;
+    const raw = wasmModule.analyzeSamples(samples, sampleRate, durationSec);
+    return wasmResultToTrackAnalysis(raw);
+  } catch (err) {
+    console.warn("WASM analysis failed, falling back to JS:", err);
+    return null;
+  }
+}
+
+/** Browser-only: decodes a track URL and runs the analysis core on its samples (WASM when available, JS otherwise). */
 export async function analyzeTrackFromUrl(url: string): Promise<TrackAnalysis> {
   const AudioContextCtor =
     window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
@@ -493,7 +578,8 @@ export async function analyzeTrackFromUrl(url: string): Promise<TrackAnalysis> {
     const arrayBuffer = await res.arrayBuffer();
     const audioBuffer = await ctx.decodeAudioData(arrayBuffer);
     const samples = mixToMono(audioBuffer);
-    return analyzeSamples(samples, audioBuffer.sampleRate, audioBuffer.duration);
+    const wasmResult = await tryAnalyzeSamplesWasm(samples, audioBuffer.sampleRate, audioBuffer.duration);
+    return wasmResult ?? analyzeSamples(samples, audioBuffer.sampleRate, audioBuffer.duration);
   } finally {
     ctx.close();
   }

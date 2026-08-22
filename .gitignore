@@ -32,6 +32,7 @@ yarn-error.log*
 
 # env files (can opt-in for committing if needed)
 .env*
+!.env.example
 
 # vercel
 .vercel
@@ -42,3 +43,12 @@ next-env.d.ts
 
 # claude code local settings
 .claude/settings.local.json
+
+/src/generated/prisma
+
+# local SQLite dev database (see prisma/schema.prisma notes)
+/dev.db
+/dev.db-journal
+
+# uploaded audio files (local storage backend, dev only)
+/uploads

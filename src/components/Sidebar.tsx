@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
+import { useSession, signOut } from "next-auth/react";
 import { useStore } from "@/lib/store";
 
 function NavLink({
@@ -32,6 +33,7 @@ function NavLink({
 
 export function Sidebar() {
   const router = useRouter();
+  const { data: session } = useSession();
   const playlists = useStore((s) => s.playlists);
   const createPlaylist = useStore((s) => s.createPlaylist);
   const sidebarOpen = useStore((s) => s.sidebarOpen);
@@ -41,8 +43,8 @@ export function Sidebar() {
     setSidebarOpen(false);
   }
 
-  function handleCreatePlaylist() {
-    const id = createPlaylist();
+  async function handleCreatePlaylist() {
+    const id = await createPlaylist();
     setSidebarOpen(false);
     router.push(`/playlist?id=${id}`);
   }
@@ -101,6 +103,19 @@ export function Sidebar() {
               </Link>
             ))
           )}
+        </div>
+
+        <div className="mt-auto flex items-center justify-between gap-2 px-2 pt-2 border-t-2 border-border">
+          <span className="text-xs text-muted truncate" title={session?.user?.email ?? undefined}>
+            {session?.user?.name || session?.user?.email}
+          </span>
+          <button
+            type="button"
+            onClick={() => signOut({ callbackUrl: "/login" })}
+            className="text-xs font-semibold text-accent-purple hover:text-accent-pink shrink-0"
+          >
+            Log out
+          </button>
         </div>
       </aside>
     </>
