@@ -1,6 +1,7 @@
 import { create } from "zustand";
-import { persist } from "zustand/middleware";
 import type { Playlist, Track } from "@/types/music";
+import type { TrackAnalysis } from "@/lib/audio-analysis";
+import type { DjSetMode } from "@/lib/mix-engine";
 
 const MAX_HISTORY = 50;
 
@@ -18,9 +19,16 @@ interface PlayerState {
   isTransitioning: boolean;
   sidebarOpen: boolean;
   queuePanelOpen: boolean;
+  deckViewOpen: boolean;
+  trackAnalysis: Record<string, TrackAnalysis>;
+  analyzingTrackIds: Set<string>;
+  styleGenreHint: string | null;
+  djMode: DjSetMode;
 
   playlists: Playlist[];
+  playlistsLoaded: boolean;
   localLibrary: Track[];
+  libraryLoaded: boolean;
 
   setQueue: (tracks: Track[]) => void;
   enqueue: (track: Track) => void;
@@ -39,10 +47,21 @@ interface PlayerState {
   setIsTransitioning: (isTransitioning: boolean) => void;
   setSidebarOpen: (open: boolean) => void;
   toggleQueuePanel: () => void;
+  toggleDeckView: () => void;
+  loadLibrary: () => Promise<void>;
   addLocalTracks: (tracks: Track[]) => void;
+  removeLocalTrack: (trackId: string) => Promise<void>;
+  setTrackAnalysis: (trackId: string, analysis: TrackAnalysis) => void;
+  startAnalyzing: (trackId: string) => void;
+  stopAnalyzing: (trackId: string) => void;
+  setStyleGenreHint: (genreId: string | null) => void;
+  setDjMode: (mode: DjSetMode) => void;
+  setTrackPlayPreference: (trackId: string, preference: Track["playPreference"]) => void;
 
-  createPlaylist: () => string;
+  loadPlaylists: () => Promise<void>;
+  createPlaylist: () => Promise<string>;
   renamePlaylist: (playlistId: string, name: string) => void;
+  persistPlaylistName: (playlistId: string) => void;
   removePlaylist: (playlistId: string) => void;
   addTrackToPlaylist: (playlistId: string, track: Track) => void;
   removeTrackFromPlaylist: (playlistId: string, trackId: string) => void;
@@ -54,8 +73,7 @@ interface PlayerState {
 }
 
 export const useStore = create<PlayerState>()(
-  persist(
-    (set, get) => ({
+  (set, get) => ({
       queue: [],
       history: [],
       currentTrack: null,
@@ -69,9 +87,16 @@ export const useStore = create<PlayerState>()(
       isTransitioning: false,
       sidebarOpen: false,
       queuePanelOpen: false,
+      deckViewOpen: false,
+      trackAnalysis: {},
+      analyzingTrackIds: new Set<string>(),
+      styleGenreHint: null,
+      djMode: "auto",
 
       playlists: [],
+      playlistsLoaded: false,
       localLibrary: [],
+      libraryLoaded: false,
 
       setQueue: (tracks) => set({ queue: tracks }),
       enqueue: (track) => set((s) => ({ queue: [...s.queue, track] })),
@@ -103,8 +128,73 @@ export const useStore = create<PlayerState>()(
       setIsTransitioning: (isTransitioning) => set({ isTransitioning }),
       setSidebarOpen: (open) => set({ sidebarOpen: open }),
       toggleQueuePanel: () => set((s) => ({ queuePanelOpen: !s.queuePanelOpen })),
+      toggleDeckView: () => set((s) => ({ deckViewOpen: !s.deckViewOpen })),
+      // Populates the library from the server once on app start (replaces
+      // the old IndexedDB-rehydration step — track sourceUrls are now
+      // stable server URLs, not per-session blob: URLs, so there's nothing
+      // to "rehydrate", just an initial fetch).
+      loadLibrary: async () => {
+        try {
+          const res = await fetch("/api/tracks");
+          if (!res.ok) return;
+          const tracks = (await res.json()) as (Track & { analysis: TrackAnalysis | null })[];
+          const trackAnalysis: Record<string, TrackAnalysis> = {};
+          const localLibrary: Track[] = tracks.map(({ analysis, ...track }) => {
+            if (analysis) trackAnalysis[track.id] = analysis;
+            return track;
+          });
+          set((s) => ({ localLibrary, trackAnalysis: { ...s.trackAnalysis, ...trackAnalysis } }));
+        } finally {
+          set({ libraryLoaded: true });
+        }
+      },
       addLocalTracks: (tracks) =>
         set((s) => ({ localLibrary: [...s.localLibrary, ...tracks] })),
+      removeLocalTrack: async (trackId) => {
+        const res = await fetch(`/api/tracks/${trackId}`, { method: "DELETE" });
+        if (!res.ok && res.status !== 404) return; // keep it in the UI if the server didn't actually remove it
+        set((s) => ({
+          localLibrary: s.localLibrary.filter((t) => t.id !== trackId),
+        }));
+      },
+      setTrackAnalysis: (trackId, analysis) => {
+        set((s) => ({ trackAnalysis: { ...s.trackAnalysis, [trackId]: analysis } }));
+        // Cache it server-side so it's never recomputed for this track again.
+        void fetch(`/api/tracks/${trackId}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ analysis }),
+        });
+      },
+      startAnalyzing: (trackId) =>
+        set((s) => ({ analyzingTrackIds: new Set(s.analyzingTrackIds).add(trackId) })),
+      stopAnalyzing: (trackId) =>
+        set((s) => {
+          const next = new Set(s.analyzingTrackIds);
+          next.delete(trackId);
+          return { analyzingTrackIds: next };
+        }),
+      setStyleGenreHint: (genreId) => set({ styleGenreHint: genreId }),
+      setDjMode: (mode) => set({ djMode: mode }),
+      // Only localLibrary is the source of truth for curation flags, but
+      // patch every place a matching track object might already live so a
+      // badge shown elsewhere (queue, playlists, deck view) stays in sync.
+      setTrackPlayPreference: (trackId, preference) => {
+        set((s) => {
+          const patch = (t: Track) => (t.id === trackId ? { ...t, playPreference: preference } : t);
+          return {
+            localLibrary: s.localLibrary.map(patch),
+            playlists: s.playlists.map((p) => ({ ...p, tracks: p.tracks.map(patch) })),
+            queue: s.queue.map(patch),
+            currentTrack: s.currentTrack ? patch(s.currentTrack) : s.currentTrack,
+          };
+        });
+        void fetch(`/api/tracks/${trackId}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ playPreference: preference ?? null }),
+        });
+      },
 
       next: () => {
         const { queue, currentTrack, history } = get();
@@ -141,16 +231,27 @@ export const useStore = create<PlayerState>()(
         });
       },
 
-      createPlaylist: () => {
-        const id = crypto.randomUUID();
-        const playlist: Playlist = {
-          id,
-          name: "New Playlist",
-          tracks: [],
-          createdAt: Date.now(),
-        };
+      // Server is the source of truth for playlists now — this only
+      // populates the initial snapshot; every mutation below applies
+      // optimistically to local state and persists to the API in the
+      // background (except createPlaylist, which needs the server-assigned
+      // id before the caller can navigate to it).
+      loadPlaylists: async () => {
+        try {
+          const res = await fetch("/api/playlists");
+          if (!res.ok) return;
+          const playlists = (await res.json()) as Playlist[];
+          set({ playlists });
+        } finally {
+          set({ playlistsLoaded: true });
+        }
+      },
+
+      createPlaylist: async () => {
+        const res = await fetch("/api/playlists", { method: "POST" });
+        const playlist = (await res.json()) as Playlist;
         set((s) => ({ playlists: [...s.playlists, playlist] }));
-        return id;
+        return playlist.id;
       },
 
       renamePlaylist: (playlistId, name) =>
@@ -160,44 +261,66 @@ export const useStore = create<PlayerState>()(
           ),
         })),
 
-      removePlaylist: (playlistId) =>
+      // Separate from renamePlaylist so typing doesn't fire a request per
+      // keystroke — call this on blur once the name has settled.
+      persistPlaylistName: (playlistId) => {
+        const name = get().playlists.find((p) => p.id === playlistId)?.name;
+        if (name === undefined) return;
+        void fetch(`/api/playlists/${playlistId}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ name }),
+        });
+      },
+
+      removePlaylist: (playlistId) => {
         set((s) => ({
           playlists: s.playlists.filter((p) => p.id !== playlistId),
-        })),
+        }));
+        void fetch(`/api/playlists/${playlistId}`, { method: "DELETE" });
+      },
 
-      addTrackToPlaylist: (playlistId, track) =>
+      addTrackToPlaylist: (playlistId, track) => {
         set((s) => ({
           playlists: s.playlists.map((p) =>
             p.id === playlistId && !p.tracks.some((t) => t.id === track.id)
               ? { ...p, tracks: [...p.tracks, track] }
               : p
           ),
-        })),
+        }));
+        void fetch(`/api/playlists/${playlistId}/tracks`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ trackId: track.id }),
+        });
+      },
 
-      removeTrackFromPlaylist: (playlistId, trackId) =>
+      removeTrackFromPlaylist: (playlistId, trackId) => {
         set((s) => ({
           playlists: s.playlists.map((p) =>
             p.id === playlistId
               ? { ...p, tracks: p.tracks.filter((t) => t.id !== trackId) }
               : p
           ),
-        })),
+        }));
+        void fetch(`/api/playlists/${playlistId}/tracks/${trackId}`, { method: "DELETE" });
+      },
 
-      moveTrackInPlaylist: (playlistId, index, direction) =>
+      moveTrackInPlaylist: (playlistId, index, direction) => {
+        const playlist = get().playlists.find((p) => p.id === playlistId);
+        if (!playlist) return;
+        const swapIndex = direction === "up" ? index - 1 : index + 1;
+        if (swapIndex < 0 || swapIndex >= playlist.tracks.length) return;
+        const tracks = [...playlist.tracks];
+        [tracks[index], tracks[swapIndex]] = [tracks[swapIndex], tracks[index]];
         set((s) => ({
-          playlists: s.playlists.map((p) => {
-            if (p.id !== playlistId) return p;
-            const swapIndex = direction === "up" ? index - 1 : index + 1;
-            if (swapIndex < 0 || swapIndex >= p.tracks.length) return p;
-            const tracks = [...p.tracks];
-            [tracks[index], tracks[swapIndex]] = [tracks[swapIndex], tracks[index]];
-            return { ...p, tracks };
-          }),
-        })),
-    }),
-    {
-      name: "ai-dj-storage",
-      partialize: (state) => ({ playlists: state.playlists }),
-    }
-  )
+          playlists: s.playlists.map((p) => (p.id === playlistId ? { ...p, tracks } : p)),
+        }));
+        void fetch(`/api/playlists/${playlistId}/tracks/reorder`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ trackIds: tracks.map((t) => t.id) }),
+        });
+      },
+    })
 );

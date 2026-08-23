@@ -1,14 +1,20 @@
 @import "tailwindcss";
 
 :root {
-  --background: #0b0b0f;
-  --surface: #161318;
-  --surface-hover: #221e26;
-  --foreground: #f5f5f7;
-  --muted: #a1a1aa;
-  --accent: #a855f7;
-  --accent-strong: #d946ef;
-  --border: #2a2730;
+  --background: #f3edff;
+  --surface: #ffffff;
+  --surface-hover: #f4e9ff;
+  --foreground: #211531;
+  --muted: #6c5b82;
+  --accent: #0d9488;
+  --accent-strong: #9333ea;
+  --accent-teal: #0d9488;
+  --accent-teal-bright: #2dd4bf;
+  --accent-purple: #9333ea;
+  --accent-purple-bright: #c084fc;
+  --accent-pink: #ec4899;
+  --accent-yellow: #facc15;
+  --border: #211531;
 }
 
 @theme inline {
@@ -19,17 +25,138 @@
   --color-muted: var(--muted);
   --color-accent: var(--accent);
   --color-accent-strong: var(--accent-strong);
+  --color-accent-teal: var(--accent-teal);
+  --color-accent-purple: var(--accent-purple);
+  --color-accent-pink: var(--accent-pink);
+  --color-accent-yellow: var(--accent-yellow);
   --color-border: var(--border);
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
+  --font-retro: var(--font-retro);
 }
 
 body {
-  background: var(--background);
+  background-color: var(--background);
+  background-image: radial-gradient(
+      circle at 12% 8%,
+      color-mix(in srgb, var(--accent-teal-bright) 28%, transparent) 0%,
+      transparent 38%
+    ),
+    radial-gradient(
+      circle at 88% 15%,
+      color-mix(in srgb, var(--accent-purple-bright) 30%, transparent) 0%,
+      transparent 40%
+    ),
+    radial-gradient(
+      circle at 50% 100%,
+      color-mix(in srgb, var(--accent-pink) 20%, transparent) 0%,
+      transparent 45%
+    );
+  background-attachment: fixed;
   color: var(--foreground);
   font-family: var(--font-sans), Arial, Helvetica, sans-serif;
 }
 
 * {
-  scrollbar-color: var(--border) transparent;
+  scrollbar-color: var(--accent-purple-bright) transparent;
+}
+
+/* ---- Retro 90s utility classes ---- */
+
+.retro-heading {
+  font-family: var(--font-retro), var(--font-sans);
+  letter-spacing: 0.02em;
+  background: linear-gradient(
+    90deg,
+    var(--accent-teal-bright),
+    var(--accent-purple),
+    var(--accent-pink)
+  );
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+.retro-stripe {
+  height: 6px;
+  border-radius: 9999px;
+  background: linear-gradient(
+    90deg,
+    var(--accent-teal-bright),
+    var(--accent-purple),
+    var(--accent-pink),
+    var(--accent-yellow)
+  );
+}
+
+.btn-retro {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.375rem;
+  padding: 0.5rem 1.25rem;
+  border-radius: 9999px;
+  font-weight: 700;
+  font-size: 0.875rem;
+  color: #fff;
+  white-space: nowrap;
+  background: linear-gradient(135deg, var(--accent-teal-bright), var(--accent-purple));
+  border: 2px solid var(--foreground);
+  box-shadow: 3px 3px 0 var(--foreground);
+  transition: transform 0.15s ease, box-shadow 0.15s ease, opacity 0.15s ease;
+}
+
+.btn-retro:hover:not(:disabled) {
+  transform: translate(-1px, -1px);
+  box-shadow: 4px 4px 0 var(--foreground);
+}
+
+.btn-retro:active:not(:disabled) {
+  transform: translate(1px, 1px);
+  box-shadow: 1px 1px 0 var(--foreground);
+}
+
+.btn-retro:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  box-shadow: none;
+  transform: none;
+}
+
+.btn-retro-outline {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.375rem;
+  padding: 0.4rem 1rem;
+  border-radius: 9999px;
+  font-weight: 600;
+  font-size: 0.75rem;
+  color: var(--foreground);
+  background: var(--surface);
+  border: 2px solid var(--border);
+  transition: transform 0.15s ease, background 0.15s ease;
+}
+
+.btn-retro-outline:hover:not(:disabled) {
+  background: var(--surface-hover);
+  transform: translate(-1px, -1px);
+}
+
+.btn-retro-outline:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.btn-retro-outline[data-active="true"] {
+  background: linear-gradient(135deg, var(--accent-teal-bright), var(--accent-purple));
+  color: #fff;
+  border-color: var(--border);
+}
+
+.card-retro {
+  background: var(--surface);
+  border: 2px solid var(--border);
+  border-radius: 1rem;
+  box-shadow: 4px 4px 0 var(--accent-teal-bright);
 }

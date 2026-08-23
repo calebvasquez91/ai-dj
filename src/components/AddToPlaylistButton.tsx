@@ -33,13 +33,13 @@ export function AddToPlaylistButton({ track }: { track: Track }) {
       <button
         type="button"
         onClick={() => setOpen((o) => !o)}
-        className="text-muted hover:text-foreground text-lg leading-none px-2"
+        className="text-accent-purple hover:text-accent-pink text-lg leading-none px-2"
         title="Add to playlist"
       >
         +
       </button>
       {open && (
-        <div className="absolute right-0 z-10 mt-1 w-48 rounded-md border border-border bg-surface shadow-lg py-1">
+        <div className="absolute right-0 z-10 mt-1 w-48 rounded-xl border-2 border-border bg-surface shadow-lg py-1">
           {playlists.length === 0 ? (
             <p className="px-3 py-2 text-xs text-muted">No playlists yet.</p>
           ) : (
@@ -57,20 +57,20 @@ export function AddToPlaylistButton({ track }: { track: Track }) {
                   className="w-full flex items-center justify-between px-3 py-2 text-sm text-left hover:bg-surface-hover"
                 >
                   <span className="truncate">{playlist.name}</span>
-                  {inPlaylist && <span className="text-accent">✓</span>}
+                  {inPlaylist && <span className="text-accent-teal">✓</span>}
                 </button>
               );
             })
           )}
-          <div className="border-t border-border mt-1 pt-1">
+          <div className="border-t-2 border-border mt-1 pt-1">
             <button
               type="button"
-              onClick={() => {
-                const id = createPlaylist();
+              onClick={async () => {
+                const id = await createPlaylist();
                 addTrackToPlaylist(id, track);
                 setOpen(false);
               }}
-              className="w-full px-3 py-2 text-sm text-left text-accent hover:bg-surface-hover"
+              className="w-full px-3 py-2 text-sm text-left text-accent-purple font-semibold hover:bg-surface-hover"
             >
               + New playlist
             </button>

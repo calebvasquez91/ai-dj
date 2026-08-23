@@ -21,13 +21,13 @@ export function QueuePanel() {
         onClick={toggle}
         aria-hidden="true"
       />
-      <aside className="fixed inset-y-0 right-0 z-50 w-80 bg-surface border-l border-border flex flex-col">
-        <div className="flex items-center justify-between px-4 h-16 shrink-0 border-b border-border">
-          <h2 className="text-sm font-semibold">Queue</h2>
+      <aside className="fixed inset-y-0 right-0 z-50 w-80 bg-surface border-l-2 border-border flex flex-col">
+        <div className="flex items-center justify-between px-4 h-16 shrink-0 border-b-2 border-border">
+          <h2 className="text-sm retro-heading">Queue</h2>
           <button
             type="button"
             onClick={toggle}
-            className="text-muted hover:text-foreground text-lg leading-none px-1"
+            className="text-accent-purple hover:text-accent-pink text-lg leading-none px-1"
             title="Close queue"
           >
             ✕
@@ -38,7 +38,7 @@ export function QueuePanel() {
           {currentTrack && (
             <div>
               <p className="text-xs font-semibold text-muted px-1 mb-1">Now Playing</p>
-              <div className="flex items-center gap-3 rounded-md px-2 py-2 bg-surface-hover">
+              <div className="flex items-center gap-3 rounded-xl px-2 py-2 bg-surface-hover border border-accent-teal/40">
                 <TrackThumbnail
                   thumbnailUrl={currentTrack.thumbnailUrl}
                   title={currentTrack.title}

@@ -1,0 +1,82 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+// Get a free hosted Postgres database in seconds: `npx create-db`
+
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+// SQLite for local dev (zero-setup). Production uses Postgres — see
+// prisma/schema.prisma notes in the project plan: the two providers don't
+// share a migration history, so the real `prisma/migrations` history gets
+// generated against Postgres once a real instance exists. Scalar-only
+// columns (no native enums, no Json) keep this schema portable between them.
+datasource db {
+  provider = "sqlite"
+}
+
+model User {
+  id           String     @id @default(cuid())
+  email        String     @unique
+  passwordHash String
+  name         String?
+  createdAt    DateTime   @default(now())
+  tracks       Track[]
+  playlists    Playlist[]
+}
+
+model Track {
+  id             String   @id @default(cuid())
+  userId         String
+  user           User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  title          String
+  artist         String
+  durationSec    Float
+  storageKey     String // local backend: file id under ./uploads ; blob backend: full public URL
+  mimeType       String @default("audio/mpeg") // from the browser File's .type at upload time — served back as Content-Type
+  thumbnailUrl   String?
+  playPreference String? // "must" | "do-not" | null — enforced in app code, not a DB enum
+  createdAt      DateTime @default(now())
+
+  // Cached best-effort analysis (src/lib/audio-analysis.ts's TrackAnalysis),
+  // computed once client-side and persisted here so it never needs
+  // recomputing after the first time.
+  bpm               Float?
+  bpmConfidence     Float?
+  beatGridOffsetSec Float?
+  energyOnsetSec    Float?
+  key               String?
+  keyConfidence     Float?
+  camelotKey        String?
+  breakdownAtSec    Float?
+  dropAtSec         Float?
+  waveformPeaksJson String? // JSON.stringify(number[]) — plain String, not Prisma Json (SQLite portability)
+
+  playlistTracks PlaylistTrack[]
+
+  @@index([userId])
+}
+
+model Playlist {
+  id        String          @id @default(cuid())
+  userId    String
+  user      User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  name      String
+  createdAt DateTime        @default(now())
+  tracks    PlaylistTrack[]
+
+  @@index([userId])
+}
+
+model PlaylistTrack {
+  id         String   @id @default(cuid())
+  playlistId String
+  playlist   Playlist @relation(fields: [playlistId], references: [id], onDelete: Cascade)
+  trackId    String
+  track      Track    @relation(fields: [trackId], references: [id], onDelete: Cascade)
+  position   Int
+
+  @@unique([playlistId, trackId])
+}

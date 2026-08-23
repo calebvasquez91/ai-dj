@@ -13,7 +13,7 @@ export function TrackThumbnail({
     return (
       <div
         style={{ width: size, height: size }}
-        className="rounded-sm shrink-0 bg-gradient-to-br from-accent to-accent-strong flex items-center justify-center text-white/80"
+        className="rounded-md shrink-0 border-2 border-border bg-gradient-to-br from-accent-teal via-accent-purple to-accent-pink flex items-center justify-center text-white"
       >
         ♪
       </div>
@@ -25,7 +25,7 @@ export function TrackThumbnail({
       alt={title}
       width={size}
       height={size}
-      className="rounded-sm shrink-0 object-cover"
+      className="rounded-md shrink-0 object-cover border-2 border-border"
     />
   );
 }

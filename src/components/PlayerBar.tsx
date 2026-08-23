@@ -4,8 +4,20 @@ import { useStore } from "@/lib/store";
 import { formatTime } from "@/lib/format";
 import { DualDeckStage } from "@/components/DualDeckStage";
 import { TrackThumbnail } from "@/components/TrackThumbnail";
+import { genreFamilies } from "@/data/styles";
+import type { DjSetMode } from "@/lib/mix-engine";
+import { speakHypePhrase } from "@/lib/wordPlay";
 
 const CROSSFADE_PRESETS = [5, 10, 15, 20, 30];
+
+const DJ_MODES: { id: DjSetMode; label: string; title: string }[] = [
+  { id: "auto", label: "Mode: Auto", title: "No bias — pick whatever scores best" },
+  { id: "club", label: "Club", title: "Favors beatmatched, EQ-driven blends over flashy effects" },
+  { id: "wedding", label: "Wedding", title: "Favors clean, safe blends; avoids scratches, risers, and other flashy effects" },
+  { id: "party", label: "Party", title: "Leans into crowd-hype moments — tags, word play, risers, drops" },
+  { id: "chill", label: "Chill", title: "Favors long, smooth blends and reverb washes; avoids anything abrupt" },
+  { id: "open-format", label: "Open Format", title: "Leans into bold genre/tempo bridges — tempo ramps, brakes, spin-ups, hard cuts" },
+];
 
 export function PlayerBar() {
   const currentTrack = useStore((s) => s.currentTrack);
@@ -25,6 +37,13 @@ export function PlayerBar() {
   const crossfadeOverrideSec = useStore((s) => s.crossfadeOverrideSec);
   const setCrossfadeOverride = useStore((s) => s.setCrossfadeOverride);
   const toggleQueuePanel = useStore((s) => s.toggleQueuePanel);
+  const toggleDeckView = useStore((s) => s.toggleDeckView);
+  const styleGenreHint = useStore((s) => s.styleGenreHint);
+  const setStyleGenreHint = useStore((s) => s.setStyleGenreHint);
+  const djMode = useStore((s) => s.djMode);
+  const setDjMode = useStore((s) => s.setDjMode);
+  const analyzingTrackIds = useStore((s) => s.analyzingTrackIds);
+  const nextTrackAnalyzing = queue[0] ? analyzingTrackIds.has(queue[0].id) : false;
 
   const durationSec = currentTrack?.durationSec ?? 0;
   const progressPercent =
@@ -38,7 +57,7 @@ export function PlayerBar() {
   }
 
   return (
-    <footer className="h-20 shrink-0 border-t border-border bg-surface px-4 flex items-center gap-4">
+    <footer className="h-20 shrink-0 border-t-2 border-border bg-surface px-4 flex items-center gap-4">
       <div className="flex items-center gap-3 w-48 sm:w-64 min-w-0 shrink-0">
         {currentTrack ? (
           <>
@@ -64,7 +83,7 @@ export function PlayerBar() {
             type="button"
             onClick={previous}
             disabled={!currentTrack}
-            className="text-muted hover:text-foreground disabled:opacity-40"
+            className="text-accent-purple hover:text-accent-pink disabled:opacity-40 disabled:text-muted"
             title="Previous (←)"
           >
             ⏮
@@ -73,7 +92,7 @@ export function PlayerBar() {
             type="button"
             onClick={togglePlay}
             disabled={!currentTrack}
-            className="w-8 h-8 rounded-full bg-foreground text-background flex items-center justify-center disabled:opacity-40"
+            className="w-9 h-9 rounded-full bg-gradient-to-br from-accent-teal to-accent-purple text-white border-2 border-border flex items-center justify-center disabled:opacity-40 shadow-[2px_2px_0_var(--border)]"
             title={isPlaying ? "Pause (Space)" : "Play (Space)"}
           >
             {isPlaying ? "⏸" : "▶"}
@@ -82,7 +101,7 @@ export function PlayerBar() {
             type="button"
             onClick={next}
             disabled={!currentTrack}
-            className="text-muted hover:text-foreground disabled:opacity-40"
+            className="text-accent-purple hover:text-accent-pink disabled:opacity-40 disabled:text-muted"
             title="Next (→)"
           >
             ⏭
@@ -90,18 +109,18 @@ export function PlayerBar() {
         </div>
         <div className="w-full flex items-center gap-2 text-xs text-muted">
           {isTransitioning && queue[0] ? (
-            <span className="flex-1 text-center text-accent truncate">
+            <span className="flex-1 text-center text-accent-pink font-semibold truncate">
               Mixing into &ldquo;{queue[0].title}&rdquo;
             </span>
           ) : (
             <>
               <span>{formatTime(currentTimeSec)}</span>
               <div
-                className="flex-1 h-1 rounded-full bg-border overflow-hidden cursor-pointer"
+                className="flex-1 h-1.5 rounded-full bg-background overflow-hidden cursor-pointer border border-border"
                 onClick={handleSeekClick}
               >
                 <div
-                  className="h-full bg-accent"
+                  className="h-full bg-gradient-to-r from-accent-teal via-accent-purple to-accent-pink"
                   style={{ width: `${progressPercent}%` }}
                 />
               </div>
@@ -114,13 +133,30 @@ export function PlayerBar() {
       <div className="flex items-center gap-2 justify-end shrink-0">
         <button
           type="button"
+          onClick={() => speakHypePhrase()}
+          className="text-accent-purple hover:text-accent-pink px-1"
+          title="Word Play — speak a hype phrase now, DJ's call (uses your browser's text-to-speech; it plays independently of the music, not mixed through it)"
+        >
+          🎤
+        </button>
+        <button
+          type="button"
+          onClick={toggleDeckView}
+          disabled={!currentTrack}
+          className="text-accent-purple hover:text-accent-pink disabled:opacity-40 disabled:text-muted px-1"
+          title="Show the DJ decks — tempo, key, and what's lined up next"
+        >
+          🎛
+        </button>
+        <button
+          type="button"
           onClick={toggleQueuePanel}
-          className="relative text-muted hover:text-foreground px-1"
+          className="relative text-accent-purple hover:text-accent-pink px-1"
           title="Queue (Q)"
         >
           ☰
           {queue.length > 0 && (
-            <span className="absolute -top-1 -right-1 text-[10px] leading-none bg-accent text-white rounded-full w-4 h-4 flex items-center justify-center">
+            <span className="absolute -top-1 -right-1 text-[10px] leading-none bg-accent-pink text-white rounded-full w-4 h-4 flex items-center justify-center">
               {queue.length}
             </span>
           )}
@@ -128,12 +164,41 @@ export function PlayerBar() {
         <button
           type="button"
           onClick={requestMixNow}
-          disabled={!currentTrack || queue.length === 0 || isTransitioning}
-          className="text-xs font-semibold px-3 py-1.5 rounded-full border border-border text-muted hover:text-foreground disabled:opacity-30"
-          title="Crossfade into the next queued track now (M)"
+          disabled={!currentTrack || queue.length === 0 || isTransitioning || nextTrackAnalyzing}
+          className="btn-retro-outline"
+          title={
+            nextTrackAnalyzing
+              ? "Analyzing next track's beat/tempo…"
+              : "Beatmatch and mix into the next queued track now (M)"
+          }
         >
-          {isTransitioning ? "Mixing…" : "Mix Now"}
+          {isTransitioning ? "Mixing…" : nextTrackAnalyzing ? "Analyzing…" : "Mix Now"}
         </button>
+        <select
+          value={djMode}
+          onChange={(e) => setDjMode(e.target.value as DjSetMode)}
+          title="DJ set mode — biases which transition techniques get chosen"
+          className="hidden sm:block bg-surface border-2 border-border rounded-full text-xs text-muted px-2 py-1.5 outline-none"
+        >
+          {DJ_MODES.map((m) => (
+            <option key={m.id} value={m.id} title={m.title}>
+              {m.label}
+            </option>
+          ))}
+        </select>
+        <select
+          value={styleGenreHint ?? "auto"}
+          onChange={(e) => setStyleGenreHint(e.target.value === "auto" ? null : e.target.value)}
+          title="Style influence for chosen transitions"
+          className="hidden sm:block bg-surface border-2 border-border rounded-full text-xs text-muted px-2 py-1.5 outline-none"
+        >
+          <option value="auto">Style: Auto</option>
+          {genreFamilies.map((g) => (
+            <option key={g.id} value={g.id}>
+              {g.name}
+            </option>
+          ))}
+        </select>
         <select
           value={crossfadeOverrideSec ?? "auto"}
           onChange={(e) =>
@@ -142,7 +207,7 @@ export function PlayerBar() {
             )
           }
           title="Crossfade length"
-          className="hidden sm:block bg-transparent border border-border rounded-full text-xs text-muted px-2 py-1.5 outline-none"
+          className="hidden sm:block bg-surface border-2 border-border rounded-full text-xs text-muted px-2 py-1.5 outline-none"
         >
           <option value="auto">Auto</option>
           {CROSSFADE_PRESETS.map((sec) => (
@@ -154,11 +219,8 @@ export function PlayerBar() {
         <button
           type="button"
           onClick={() => setAutoDj(!autoDjEnabled)}
-          className={`text-xs font-semibold px-3 py-1.5 rounded-full border transition-colors ${
-            autoDjEnabled
-              ? "bg-accent/20 border-accent text-accent"
-              : "border-border text-muted hover:text-foreground"
-          }`}
+          data-active={autoDjEnabled}
+          className="btn-retro-outline"
           title="Toggle automatic DJ transitions"
         >
           Auto-DJ {autoDjEnabled ? "On" : "Off"}
@@ -170,7 +232,7 @@ export function PlayerBar() {
           step={0.01}
           value={volume}
           onChange={(e) => setVolume(Number(e.target.value))}
-          className="hidden sm:block w-20 accent-accent"
+          className="hidden sm:block w-20 accent-accent-purple"
         />
       </div>
     </footer>

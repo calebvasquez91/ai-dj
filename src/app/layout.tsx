@@ -1,11 +1,7 @@
-import type { Metadata } from "next";
-import { Geist, Geist_Mono } from "next/font/google";
+import type { Metadata, Viewport } from "next";
+import { Geist, Geist_Mono, Bungee } from "next/font/google";
 import "./globals.css";
-import { Sidebar } from "@/components/Sidebar";
-import { TopBar } from "@/components/TopBar";
-import { PlayerBar } from "@/components/PlayerBar";
-import { QueuePanel } from "@/components/QueuePanel";
-import { KeyboardShortcuts } from "@/components/KeyboardShortcuts";
+import { ServiceWorkerRegister } from "@/components/ServiceWorkerRegister";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -17,9 +13,28 @@ const geistMono = Geist_Mono({
   subsets: ["latin"],
 });
 
+const retroDisplay = Bungee({
+  variable: "--font-retro",
+  weight: "400",
+  subsets: ["latin"],
+});
+
 export const metadata: Metadata = {
   title: "AI DJ",
   description: "An AI DJ that mixes your music into one continuous set.",
+  icons: {
+    icon: [{ url: "/icons/icon-192.png", sizes: "192x192", type: "image/png" }],
+    apple: [{ url: "/icons/icon-180.png", sizes: "180x180", type: "image/png" }],
+  },
+  appleWebApp: {
+    capable: true,
+    statusBarStyle: "default",
+    title: "AI DJ",
+  },
+};
+
+export const viewport: Viewport = {
+  themeColor: "#9333ea",
 };
 
 export default function RootLayout({
@@ -30,19 +45,11 @@ export default function RootLayout({
   return (
     <html
       lang="en"
-      className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
+      className={`${geistSans.variable} ${geistMono.variable} ${retroDisplay.variable} h-full antialiased`}
     >
       <body className="h-full flex flex-col overflow-hidden">
-        <KeyboardShortcuts />
-        <div className="flex flex-1 min-h-0">
-          <Sidebar />
-          <div className="flex flex-1 flex-col min-w-0">
-            <TopBar />
-            <main className="flex-1 overflow-y-auto">{children}</main>
-          </div>
-        </div>
-        <PlayerBar />
-        <QueuePanel />
+        <ServiceWorkerRegister />
+        {children}
       </body>
     </html>
   );

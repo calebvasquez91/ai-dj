@@ -12,6 +12,10 @@ const eslintConfig = defineConfig([
     "out/**",
     "build/**",
     "next-env.d.ts",
+    // Emscripten-generated glue code (scripts/build-wasm.sh) — not hand-written.
+    "public/wasm/**",
+    // Prisma-generated client (`npx prisma generate`) — not hand-written.
+    "src/generated/**",
   ]),
 ]);
 

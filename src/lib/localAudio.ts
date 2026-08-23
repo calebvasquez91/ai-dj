@@ -1,4 +1,5 @@
 import type { Track } from "@/types/music";
+import { uploadTrack } from "./trackUpload";
 
 function parseFileName(fileName: string): { title: string; artist: string } {
   const withoutExt = fileName.replace(/\.[^/.]+$/, "");
@@ -21,19 +22,15 @@ function readDuration(url: string): Promise<number> {
   });
 }
 
+/** Reads each file's duration/filename client-side, then uploads it (bytes + metadata) to the server library. */
 export async function filesToTracks(files: File[]): Promise<Track[]> {
   return Promise.all(
     files.map(async (file) => {
-      const sourceUrl = URL.createObjectURL(file);
-      const durationSec = await readDuration(sourceUrl);
+      const tempUrl = URL.createObjectURL(file);
+      const durationSec = await readDuration(tempUrl);
+      URL.revokeObjectURL(tempUrl);
       const { title, artist } = parseFileName(file.name);
-      return {
-        id: crypto.randomUUID(),
-        title,
-        artist,
-        durationSec,
-        sourceUrl,
-      };
+      return uploadTrack(file, { title, artist, durationSec });
     })
   );
 }
