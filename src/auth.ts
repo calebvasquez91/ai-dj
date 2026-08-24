@@ -8,6 +8,10 @@ import { prisma } from "@/lib/prisma";
 // for OAuth account-linking, which doesn't apply here. `authorize` looks the
 // user up and checks the password directly.
 export const { handlers, auth, signIn, signOut } = NextAuth({
+  // Explicit rather than relying on Auth.js's AUTH_SECRET auto-inference —
+  // that inference didn't pick it up in production (MissingSecret at
+  // runtime despite the env var being set in Vercel).
+  secret: process.env.AUTH_SECRET,
   session: { strategy: "jwt" },
   pages: {
     signIn: "/login",
