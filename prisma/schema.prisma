@@ -8,13 +8,12 @@ generator client {
   output   = "../src/generated/prisma"
 }
 
-// SQLite for local dev (zero-setup). Production uses Postgres — see
-// prisma/schema.prisma notes in the project plan: the two providers don't
-// share a migration history, so the real `prisma/migrations` history gets
-// generated against Postgres once a real instance exists. Scalar-only
-// columns (no native enums, no Json) keep this schema portable between them.
+// Postgres (Vercel/Neon) — same instance for local dev and production for
+// now, no separate local database. Scalar-only columns (no native enums,
+// no Json) were kept from the original SQLite-dev design but aren't load
+// bearing here anymore; harmless either way.
 datasource db {
-  provider = "sqlite"
+  provider = "postgresql"
 }
 
 model User {

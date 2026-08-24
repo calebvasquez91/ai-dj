@@ -1,14 +1,10 @@
 import { PrismaClient } from "@/generated/prisma/client";
-import { PrismaLibSql } from "@prisma/adapter-libsql";
+import { PrismaPg } from "@prisma/adapter-pg";
 
 // Prisma 7 requires an explicit driver adapter (no more implicit
-// DATABASE_URL-only connections). This one is SQLite-specific (libsql, pure
-// JS — better-sqlite3 needs a native compiler toolchain this machine
-// doesn't have) and matches schema.prisma's `datasource db { provider =
-// "sqlite" }`. Moving to Postgres in production means changing *both*:
-// this adapter (-> @prisma/adapter-pg) and the schema's datasource
-// provider (-> "postgresql") together — they have to agree.
-const adapter = new PrismaLibSql({ url: process.env.DATABASE_URL ?? "file:./dev.db" });
+// DATABASE_URL-only connections). Must agree with schema.prisma's
+// `datasource db { provider = "postgresql" }`.
+const adapter = new PrismaPg(process.env.DATABASE_URL as string);
 
 // Next.js dev-mode hot-reload re-evaluates this module on every edit, which
 // would otherwise open a fresh PrismaClient (and DB connection pool) each
