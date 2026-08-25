@@ -781,8 +781,11 @@ export function DualDeckStage() {
 
   return (
     <>
-      <audio ref={audioARef} preload="auto" className="hidden" />
-      <audio ref={audioBRef} preload="auto" className="hidden" />
+      {/* crossOrigin is required for createMediaElementSource to read samples
+          from cross-origin audio (Vercel Blob) — without it the element still
+          plays normally, but the Web Audio graph it feeds outputs silence. */}
+      <audio ref={audioARef} preload="auto" crossOrigin="anonymous" className="hidden" />
+      <audio ref={audioBRef} preload="auto" crossOrigin="anonymous" className="hidden" />
     </>
   );
 }
