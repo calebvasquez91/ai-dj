@@ -157,6 +157,7 @@ export function DualDeckStage() {
     loadedTrackId.current[t.toDeckId] = null;
     transitionRef.current = null;
     useStore.getState().setIsTransitioning(false);
+    useStore.getState().setActiveTransitionRationale(null);
   }, [deckEl, resetDeckNodes, stopOverlayNodes]);
 
   // Background analysis: as soon as a track is reachable (now playing or
@@ -456,6 +457,11 @@ export function DualDeckStage() {
       if (!ctx || !fromEl || !toEl || !fromNodes || !toNodes) return;
 
       recentTransitionIdsRef.current = [...recentTransitionIdsRef.current, plan.transitionId].slice(-3);
+      // One-shot: a manual pick or reroll only applies to this upcoming mix —
+      // Auto-DJ resumes normal automatic variety for the next one unless the
+      // user sets a new override.
+      useStore.getState().setForcedTransitionId(null);
+      useStore.getState().clearRerolledTransitionIds();
 
       // A brake/spinback dies to a full stop, and a spin-up starts from
       // one, dropping the next track in fresh at its own native tempo —
@@ -518,6 +524,7 @@ export function DualDeckStage() {
       };
       transitionRef.current = transition;
       useStore.getState().setIsTransitioning(true);
+      useStore.getState().setActiveTransitionRationale(plan.rationale);
 
       // Gain/filter automation is native (AudioParam-scheduled) and keeps
       // running even if this JS timer is delayed. The timer's only audio
@@ -572,6 +579,7 @@ export function DualDeckStage() {
       activeDeckRef.current = t.toDeckId;
       setActiveDeck(t.toDeckId);
       useStore.getState().setIsTransitioning(false);
+      useStore.getState().setActiveTransitionRationale(null);
       useStore.getState().next();
     }
 
@@ -627,6 +635,9 @@ export function DualDeckStage() {
         currentElapsedSec: currentTime,
         djMode: state.djMode,
         recentTransitionIds: recentTransitionIdsRef.current,
+        forceTransitionId: state.forcedTransitionId,
+        excludeTransitionIds: state.rerolledTransitionIds,
+        varietyBias: state.djVarietyBias,
       });
       const clampedWindow = Math.min(
         plan.windowSec,
@@ -684,6 +695,9 @@ export function DualDeckStage() {
         currentElapsedSec: activeEl?.currentTime ?? null,
         djMode: state.djMode,
         recentTransitionIds: recentTransitionIdsRef.current,
+        forceTransitionId: state.forcedTransitionId,
+        excludeTransitionIds: state.rerolledTransitionIds,
+        varietyBias: state.djVarietyBias,
       });
       startTransition(nextTrack, plan);
     });

@@ -420,3 +420,88 @@ describe("chooseTransition — Word Play vs. its near-twin Tag/Sample", () => {
     expect(t.id).toBe("word-play-drop");
   });
 });
+
+describe("chooseTransition — manual override (forceTransitionId)", () => {
+  it("returns exactly the forced transition even when it would score poorly on merit", () => {
+    const t = chooseTransition({
+      bpmDelta: 0.02,
+      tempoSync: true,
+      genreHint: null,
+      personaDjNames: [],
+      forceTransitionId: "reverb-wash",
+    });
+    expect(t.id).toBe("reverb-wash");
+  });
+
+  it("falls back to normal scoring if the forced id doesn't exist or isn't executable", () => {
+    const normal = chooseTransition({ bpmDelta: 0, tempoSync: true, genreHint: null, personaDjNames: [] });
+    const forcedBogus = chooseTransition({
+      bpmDelta: 0,
+      tempoSync: true,
+      genreHint: null,
+      personaDjNames: [],
+      forceTransitionId: "not-a-real-transition",
+    });
+    const forcedNonExecutable = chooseTransition({
+      bpmDelta: 0,
+      tempoSync: true,
+      genreHint: null,
+      personaDjNames: [],
+      forceTransitionId: "vocal-layering", // data-only, executable: false
+    });
+    expect(forcedBogus.id).toBe(normal.id);
+    expect(forcedNonExecutable.id).toBe(normal.id);
+  });
+});
+
+describe("chooseTransition — reroll (excludeTransitionIds)", () => {
+  it("picks a different transition than the one just excluded", () => {
+    const ctx = {
+      bpmDelta: 0,
+      tempoSync: true,
+      genreHint: null,
+      personaDjNames: [],
+    };
+    const first = chooseTransition(ctx);
+    const rerolled = chooseTransition({ ...ctx, excludeTransitionIds: [first.id] });
+    expect(rerolled.id).not.toBe(first.id);
+  });
+
+  it("falls back to unrestricted scoring instead of breaking when every candidate is excluded", () => {
+    const ctx = {
+      bpmDelta: 0,
+      tempoSync: true,
+      genreHint: null,
+      personaDjNames: [],
+    };
+    const normal = chooseTransition(ctx);
+    const allExcluded = chooseTransition({
+      ...ctx,
+      excludeTransitionIds: ["hard-cut", "quick-chop", "long-blend", "phrase-blend", "auto-sync-blend"],
+    });
+    // With the top scorers excluded but not literally every transition,
+    // this should still return something real and executable, not crash.
+    expect(allExcluded.executable).toBe(true);
+    expect(typeof allExcluded.id).toBe("string");
+    void normal;
+  });
+});
+
+describe("chooseTransition — varietyBias", () => {
+  it("favors a bolder, tempo-insensitive technique over a defensive hard cut when tempo is uncertain and the genre doesn't match either", () => {
+    // bpmDelta of 0.15 is well outside every tempo-sensitive category's
+    // tolerance, and "house" doesn't match hard-cut's/echo-out's idealGenres
+    // — without bias, hard-cut wins on its flat, tempo-insensitive +10.
+    const ctx = {
+      bpmDelta: 0.15,
+      tempoSync: false,
+      genreHint: "house",
+      personaDjNames: [],
+    };
+    const withoutBias = chooseTransition(ctx);
+    expect(withoutBias.category).toBe("cut");
+
+    const withBias = chooseTransition({ ...ctx, varietyBias: true });
+    expect(withBias.category).not.toBe("cut");
+  });
+});

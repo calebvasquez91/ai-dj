@@ -5,7 +5,10 @@ import { useStore } from "@/lib/store";
 import { camelotCompatibility, planTransition } from "@/lib/mix-engine";
 import { fallbackAnalysis, type TrackAnalysis } from "@/lib/audio-analysis";
 import { TrackThumbnail } from "@/components/TrackThumbnail";
+import { transitions } from "@/data/transitions";
 import type { Track } from "@/types/music";
+
+const PICKABLE_TRANSITIONS = transitions.filter((t) => t.executable);
 
 // Mirrors mix-engine's own key-confidence gate for scoring — a key label
 // below this confidence is more likely noise than signal, so don't surface
@@ -128,7 +131,14 @@ export function DeckView() {
   const styleGenreHint = useStore((s) => s.styleGenreHint);
   const crossfadeOverrideSec = useStore((s) => s.crossfadeOverrideSec);
   const isTransitioning = useStore((s) => s.isTransitioning);
+  const activeTransitionRationale = useStore((s) => s.activeTransitionRationale);
   const djMode = useStore((s) => s.djMode);
+  const forcedTransitionId = useStore((s) => s.forcedTransitionId);
+  const setForcedTransitionId = useStore((s) => s.setForcedTransitionId);
+  const rerolledTransitionIds = useStore((s) => s.rerolledTransitionIds);
+  const addRerolledTransitionId = useStore((s) => s.addRerolledTransitionId);
+  const djVarietyBias = useStore((s) => s.djVarietyBias);
+  const setDjVarietyBias = useStore((s) => s.setDjVarietyBias);
 
   const nextTrack = queue[0] ?? null;
   const currentAnalysis = currentTrack ? trackAnalysis[currentTrack.id] : undefined;
@@ -143,8 +153,23 @@ export function DeckView() {
       overrideSec: crossfadeOverrideSec,
       currentElapsedSec: currentTimeSec,
       djMode,
+      forceTransitionId: forcedTransitionId,
+      excludeTransitionIds: rerolledTransitionIds,
+      varietyBias: djVarietyBias,
     });
-  }, [currentTrack, nextTrack, currentAnalysis, nextAnalysis, styleGenreHint, crossfadeOverrideSec, currentTimeSec, djMode]);
+  }, [
+    currentTrack,
+    nextTrack,
+    currentAnalysis,
+    nextAnalysis,
+    styleGenreHint,
+    crossfadeOverrideSec,
+    currentTimeSec,
+    djMode,
+    forcedTransitionId,
+    rerolledTransitionIds,
+    djVarietyBias,
+  ]);
 
   if (!open) return null;
 
@@ -173,14 +198,28 @@ export function DeckView() {
       <div className="fixed inset-x-4 bottom-24 z-50 mx-auto max-w-3xl rounded-2xl border-2 border-border bg-surface p-4 flex flex-col gap-3 shadow-xl">
         <div className="flex items-center justify-between">
           <h2 className="text-sm retro-heading">DJ Decks</h2>
-          <button
-            type="button"
-            onClick={toggle}
-            className="text-accent-purple hover:text-accent-pink text-lg leading-none px-1"
-            title="Close"
-          >
-            ✕
-          </button>
+          <div className="flex items-center gap-3">
+            <label
+              className="flex items-center gap-1.5 text-xs text-muted cursor-pointer"
+              title="Take more chances on bold transitions instead of defaulting to a safe cut when tempo is uncertain"
+            >
+              <input
+                type="checkbox"
+                checked={djVarietyBias}
+                onChange={(e) => setDjVarietyBias(e.target.checked)}
+                className="accent-accent-purple"
+              />
+              Favor variety
+            </label>
+            <button
+              type="button"
+              onClick={toggle}
+              className="text-accent-purple hover:text-accent-pink text-lg leading-none px-1"
+              title="Close"
+            >
+              ✕
+            </button>
+          </div>
         </div>
 
         <div className="flex flex-col sm:flex-row gap-3">
@@ -215,7 +254,33 @@ export function DeckView() {
               )}
               {isTransitioning && <span className="text-accent-pink font-semibold">Mixing now…</span>}
             </div>
-            <p className="text-xs text-muted">{preview.rationale}</p>
+            <p className="text-xs text-muted">
+              {isTransitioning && activeTransitionRationale ? activeTransitionRationale : preview.rationale}
+            </p>
+            <div className="flex flex-wrap items-center gap-2 pt-1.5 mt-0.5 border-t border-border/60">
+              <select
+                value={forcedTransitionId ?? ""}
+                onChange={(e) => setForcedTransitionId(e.target.value || null)}
+                title="Pick a specific transition for the upcoming mix, or let Auto-DJ choose"
+                className="bg-surface border-2 border-border rounded-full text-xs text-muted px-2 py-1 outline-none max-w-[55%]"
+              >
+                <option value="">Auto-DJ chooses</option>
+                {PICKABLE_TRANSITIONS.map((t) => (
+                  <option key={t.id} value={t.id}>
+                    {t.name}
+                  </option>
+                ))}
+              </select>
+              <button
+                type="button"
+                onClick={() => addRerolledTransitionId(preview.transitionId)}
+                disabled={Boolean(forcedTransitionId)}
+                className="btn-retro-outline disabled:opacity-40 disabled:cursor-not-allowed"
+                title="Try a different transition for the upcoming mix"
+              >
+                🎲 Try another
+              </button>
+            </div>
           </div>
         ) : (
           <p className="text-xs text-muted">

@@ -24,6 +24,13 @@ interface PlayerState {
   analyzingTrackIds: Set<string>;
   styleGenreHint: string | null;
   djMode: DjSetMode;
+  /** Manually pinned transition id for the upcoming mix — cleared automatically once that mix starts. */
+  forcedTransitionId: string | null;
+  /** transitionIds the user has "rerolled" away from for the upcoming mix — cleared automatically once that mix starts. */
+  rerolledTransitionIds: string[];
+  djVarietyBias: boolean;
+  /** Rationale text for the mix currently in progress, captured at the moment it started — so the DJ Decks panel keeps showing what's actually playing out instead of a live recompute that goes stale the instant a one-shot override clears. */
+  activeTransitionRationale: string | null;
 
   playlists: Playlist[];
   playlistsLoaded: boolean;
@@ -56,6 +63,11 @@ interface PlayerState {
   stopAnalyzing: (trackId: string) => void;
   setStyleGenreHint: (genreId: string | null) => void;
   setDjMode: (mode: DjSetMode) => void;
+  setForcedTransitionId: (id: string | null) => void;
+  addRerolledTransitionId: (id: string) => void;
+  clearRerolledTransitionIds: () => void;
+  setDjVarietyBias: (enabled: boolean) => void;
+  setActiveTransitionRationale: (rationale: string | null) => void;
   setTrackPlayPreference: (trackId: string, preference: Track["playPreference"]) => void;
 
   loadPlaylists: () => Promise<void>;
@@ -92,6 +104,10 @@ export const useStore = create<PlayerState>()(
       analyzingTrackIds: new Set<string>(),
       styleGenreHint: null,
       djMode: "auto",
+      forcedTransitionId: null,
+      rerolledTransitionIds: [],
+      djVarietyBias: false,
+      activeTransitionRationale: null,
 
       playlists: [],
       playlistsLoaded: false,
@@ -176,6 +192,12 @@ export const useStore = create<PlayerState>()(
         }),
       setStyleGenreHint: (genreId) => set({ styleGenreHint: genreId }),
       setDjMode: (mode) => set({ djMode: mode }),
+      setForcedTransitionId: (id) => set({ forcedTransitionId: id }),
+      addRerolledTransitionId: (id) =>
+        set((s) => ({ rerolledTransitionIds: [...s.rerolledTransitionIds, id] })),
+      clearRerolledTransitionIds: () => set({ rerolledTransitionIds: [] }),
+      setDjVarietyBias: (enabled) => set({ djVarietyBias: enabled }),
+      setActiveTransitionRationale: (rationale) => set({ activeTransitionRationale: rationale }),
       // Only localLibrary is the source of truth for curation flags, but
       // patch every place a matching track object might already live so a
       // badge shown elsewhere (queue, playlists, deck view) stays in sync.

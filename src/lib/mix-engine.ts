@@ -349,13 +349,28 @@ const MODE_CATEGORY_BIAS: Record<DjSetMode, Partial<Record<TransitionCategory, n
  * (a blend, an EQ mix) should score sharply worse the more mismatched the
  * pair actually is, instead of a flat -5 that genre/persona bonuses can
  * easily paper over regardless of how badly the tempos actually clash.
+ *
+ * `varietyBias` softens this penalty (higher floor, gentler slope) — the
+ * default penalty is correct (it's what stops badly-mismatched tracks from
+ * getting blended), but it also means tempo-insensitive categories like
+ * "cut" win by default whenever tempo is uncertain, which real, varied-tempo
+ * libraries hit constantly. Variety bias trades some of that safety for
+ * more willingness to take a chance on a bolder technique.
  */
-function bpmFitScore(bpmDelta: number, idealBpmDeltaMax: number): number {
+function bpmFitScore(bpmDelta: number, idealBpmDeltaMax: number, varietyBias = false): number {
   if (bpmDelta <= idealBpmDeltaMax) return 10;
   if (!Number.isFinite(idealBpmDeltaMax)) return 10;
   const excessRatio = (bpmDelta - idealBpmDeltaMax) / Math.max(idealBpmDeltaMax, 0.01);
-  return Math.max(-25, -5 - excessRatio * 15);
+  const slope = varietyBias ? 8 : 15;
+  const floor = varietyBias ? -15 : -25;
+  return Math.max(floor, -5 - excessRatio * slope);
 }
+
+/** How much the anti-repetition penalty scales under variety bias — pushes harder against repeating the same pick. */
+const REPETITION_PENALTY = 7;
+const REPETITION_PENALTY_VARIETY = 14;
+/** Flat penalty applied to the "cut" category under variety bias — the thing that otherwise wins by default whenever tempo is uncertain. */
+const VARIETY_CUT_PENALTY = 6;
 
 export interface TransitionContext {
   bpmDelta: number;
@@ -366,12 +381,19 @@ export interface TransitionContext {
   djMode?: DjSetMode;
   /** transitionIds used for the last few transitions, most recent last — discourages picking the exact same technique over and over when several score similarly. */
   recentTransitionIds?: string[];
+  /** Pins the pick to this exact transition id (must be executable), bypassing scoring entirely — a manual override for the upcoming mix. */
+  forceTransitionId?: string | null;
+  /** Candidates to skip this round (treated as unpickable) — used by "reroll" to cycle to the next-best alternative instead of the top score. */
+  excludeTransitionIds?: string[];
+  /** Trades some tempo-mismatch safety for more willingness to pick a bold technique, and pushes harder against repeating the last few picks. */
+  varietyBias?: boolean;
 }
 
 function scoreTransition(t: TransitionEntry, ctx: TransitionContext): number {
   if (!t.executable) return -Infinity;
+  if (ctx.excludeTransitionIds?.includes(t.id)) return -Infinity;
   let score = 0;
-  score += bpmFitScore(ctx.bpmDelta, t.idealBpmDeltaMax);
+  score += bpmFitScore(ctx.bpmDelta, t.idealBpmDeltaMax, ctx.varietyBias);
   if (ctx.genreHint) {
     if (t.idealGenres.includes(ctx.genreHint)) score += 6;
     else if (t.idealGenres.length > 0) score -= 2;
@@ -380,11 +402,14 @@ function scoreTransition(t: TransitionEntry, ctx: TransitionContext): number {
   if (t.idealGenres.length === 0) score += 1;
   score += (ctx.camelotScore ?? 0) * 3;
   score += MODE_CATEGORY_BIAS[ctx.djMode ?? "auto"][t.category] ?? 0;
-  if (ctx.recentTransitionIds?.includes(t.id)) score -= 7;
+  if (ctx.varietyBias && t.category === "cut") score -= VARIETY_CUT_PENALTY;
+  if (ctx.recentTransitionIds?.includes(t.id)) {
+    score -= ctx.varietyBias ? REPETITION_PENALTY_VARIETY : REPETITION_PENALTY;
+  }
   return score;
 }
 
-export function chooseTransition(ctx: TransitionContext): TransitionEntry {
+function bestScoringTransition(ctx: TransitionContext): { entry: TransitionEntry; score: number } {
   let best = transitions[0];
   let bestScore = -Infinity;
   for (const t of transitions) {
@@ -394,7 +419,22 @@ export function chooseTransition(ctx: TransitionContext): TransitionEntry {
       best = t;
     }
   }
-  return best;
+  return { entry: best, score: bestScore };
+}
+
+export function chooseTransition(ctx: TransitionContext): TransitionEntry {
+  if (ctx.forceTransitionId) {
+    const forced = transitions.find((t) => t.id === ctx.forceTransitionId && t.executable);
+    if (forced) return forced;
+  }
+  const result = bestScoringTransition(ctx);
+  // Excluding candidates (reroll) can in principle exhaust every viable
+  // option — fall back to unrestricted scoring rather than ever returning
+  // an arbitrary/wrong pick.
+  if (result.score === -Infinity && ctx.excludeTransitionIds?.length) {
+    return bestScoringTransition({ ...ctx, excludeTransitionIds: [] }).entry;
+  }
+  return result.entry;
 }
 
 export interface TransitionPlan {
@@ -419,6 +459,12 @@ interface PlanTransitionArgs {
   djMode?: DjSetMode;
   /** transitionIds used for the last few transitions, most recent last — discourages repeating the exact same technique back-to-back. */
   recentTransitionIds?: string[];
+  /** Pins the pick to this exact transition id for this one mix, bypassing scoring — cleared by the caller after the mix starts. */
+  forceTransitionId?: string | null;
+  /** transitionIds to skip this round — used by "reroll" to cycle to the next-best alternative. */
+  excludeTransitionIds?: string[];
+  /** Trades some tempo-mismatch safety for more willingness to pick a bold technique — see bpmFitScore(). */
+  varietyBias?: boolean;
 }
 
 function buildRationale(
@@ -426,12 +472,16 @@ function buildRationale(
   genreHint: string | null,
   tempoSync: boolean,
   camelotScore: number,
-  hasConfidentTempo: boolean
+  hasConfidentTempo: boolean,
+  wasForced: boolean
 ): string {
+  const harmonicNote = camelotScore >= 2 ? " Same key." : camelotScore === 1 ? " Harmonically compatible keys." : "";
+  if (wasForced) {
+    return `${t.name} — your pick. ${t.description}` + harmonicNote;
+  }
   const genre = genreHint ? genreFamilies.find((g) => g.id === genreHint) : null;
   const djNames = (genre?.exampleDjs.length ? genre.exampleDjs : t.exampleDjs).slice(0, 2).join(" & ");
   const tempoNote = tempoSync ? "tempo-synced" : hasConfidentTempo ? "beat-aligned" : "tempo unclear, played safe";
-  const harmonicNote = camelotScore >= 2 ? " Same key." : camelotScore === 1 ? " Harmonically compatible keys." : "";
   const base = djNames
     ? `${t.name}, ${genreHint ? `channeling ${djNames}'s ${genre?.name ?? ""} energy` : `in the style of ${djNames}`} — ${tempoNote}. ${t.description}`
     : `${t.name} — ${tempoNote}. ${t.description}`;
@@ -454,6 +504,9 @@ export function planTransition({
   currentElapsedSec = null,
   djMode = "auto",
   recentTransitionIds = [],
+  forceTransitionId = null,
+  excludeTransitionIds = [],
+  varietyBias = false,
 }: PlanTransitionArgs): TransitionPlan {
   const bpmDelta = Math.abs(bestTempoRatio(current.analysis.bpm, next.analysis.bpm) - 1);
   // Two tracks that both fell back to the same neutral 120 BPM (low
@@ -484,7 +537,11 @@ export function planTransition({
     camelotScore,
     djMode,
     recentTransitionIds,
+    forceTransitionId,
+    excludeTransitionIds,
+    varietyBias,
   });
+  const wasForced = Boolean(forceTransitionId) && transition.id === forceTransitionId;
 
   const windowBeats = windowBeatsForTransition(transition, tempoSync, bpmDelta);
   const effectiveBpm = current.analysis.bpm > 0 ? current.analysis.bpm : 120;
@@ -544,7 +601,7 @@ export function planTransition({
     tempoSync,
     tempoRatioStart,
     effect: TRANSITION_EFFECT_BY_ID[transition.id] ?? "none",
-    rationale: buildRationale(transition, genreHint, tempoSync, camelotScore, hasConfidentTempo),
+    rationale: buildRationale(transition, genreHint, tempoSync, camelotScore, hasConfidentTempo, wasForced),
   };
 }
 
