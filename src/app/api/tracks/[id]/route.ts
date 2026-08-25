@@ -59,10 +59,16 @@ export async function DELETE(request: Request, { params }: { params: Promise<{ i
   const existing = await loadOwnedTrack(id, session.user.id);
   if (!existing) return new NextResponse(null, { status: 404 });
 
-  if (getStorageBackend() === "local") {
-    await deleteLocalFile(existing.storageKey);
-  } else {
-    await deleteBlobFile(existing.storageKey);
+  try {
+    if (getStorageBackend() === "local") {
+      await deleteLocalFile(existing.storageKey);
+    } else {
+      await deleteBlobFile(existing.storageKey);
+    }
+  } catch (err) {
+    // Don't let a storage-side failure (already gone, transient network
+    // error, etc.) leave the track stuck and undeletable from the app.
+    console.warn(`Failed to delete storage object for track ${id}:`, err);
   }
   await prisma.track.delete({ where: { id } });
 
