@@ -8,9 +8,16 @@
  * reworking that loader to be worker-compatible is out of scope here. The
  * goal of this worker is "never blocks the main thread", not raw speed;
  * the JS path fully satisfies that even without the WASM boost.
+ *
+ * Imports from audio-analysis-core.ts specifically, NOT audio-analysis.ts —
+ * that file is what spawns this worker (`new Worker(new URL("../workers/
+ * analysis.worker.ts", ...))`), so importing back from it here would create
+ * a cycle between the worker entrypoint and its own spawner, which hung
+ * Turbopack's production build indefinitely (dev mode worked fine, since
+ * its on-demand compilation never needed to fully resolve the cycle).
  */
 
-import { analyzeSamples } from "@/lib/audio-analysis";
+import { analyzeSamples } from "@/lib/audio-analysis-core";
 
 interface AnalysisWorkerRequest {
   samples: Float32Array;
