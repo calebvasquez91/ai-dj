@@ -2,11 +2,13 @@
 
 import { useMemo } from "react";
 import { useStore } from "@/lib/store";
-import { camelotCompatibility, planTransition } from "@/lib/mix-engine";
+import { camelotCompatibility, planTransition, type DjSetMode } from "@/lib/mix-engine";
 import { fallbackAnalysis, type TrackAnalysis } from "@/lib/audio-analysis";
 import { useDjWeights } from "@/lib/dj-weights";
 import { TrackThumbnail } from "@/components/TrackThumbnail";
 import { transitions } from "@/data/transitions";
+import { genreFamilies } from "@/data/styles";
+import { CROSSFADE_PRESETS, DJ_MODES } from "@/components/PlayerBar";
 import type { AmbienceFrequency } from "@/lib/ambience";
 import type { Track } from "@/types/music";
 
@@ -136,10 +138,13 @@ export function DeckView() {
   const trackAnalysis = useStore((s) => s.trackAnalysis);
   const currentTimeSec = useStore((s) => s.currentTimeSec);
   const styleGenreHint = useStore((s) => s.styleGenreHint);
+  const setStyleGenreHint = useStore((s) => s.setStyleGenreHint);
   const crossfadeOverrideSec = useStore((s) => s.crossfadeOverrideSec);
+  const setCrossfadeOverride = useStore((s) => s.setCrossfadeOverride);
   const isTransitioning = useStore((s) => s.isTransitioning);
   const activeTransitionRationale = useStore((s) => s.activeTransitionRationale);
   const djMode = useStore((s) => s.djMode);
+  const setDjMode = useStore((s) => s.setDjMode);
   const forcedTransitionId = useStore((s) => s.forcedTransitionId);
   const setForcedTransitionId = useStore((s) => s.setForcedTransitionId);
   const rerolledTransitionIds = useStore((s) => s.rerolledTransitionIds);
@@ -209,10 +214,10 @@ export function DeckView() {
   return (
     <>
       <div className="fixed inset-0 z-40 bg-black/50" onClick={toggle} aria-hidden="true" />
-      <div className="fixed inset-x-4 bottom-24 z-50 mx-auto max-w-3xl rounded-2xl border-2 border-border bg-surface p-4 flex flex-col gap-3 shadow-xl">
-        <div className="flex items-center justify-between">
+      <div className="fixed inset-x-4 bottom-32 md:bottom-24 z-50 mx-auto max-w-3xl max-h-[70vh] overflow-y-auto rounded-2xl border-2 border-border bg-surface p-4 flex flex-col gap-3 shadow-xl">
+        <div className="flex flex-wrap items-center justify-between gap-2">
           <h2 className="text-sm retro-heading">DJ Decks</h2>
-          <div className="flex items-center gap-3">
+          <div className="flex flex-wrap items-center gap-3">
             <label
               className="flex items-center gap-1.5 text-xs text-muted cursor-pointer"
               title="Take more chances on bold transitions instead of defaulting to a safe cut when tempo is uncertain"
@@ -260,6 +265,47 @@ export function DeckView() {
               ✕
             </button>
           </div>
+        </div>
+
+        <div className="flex flex-wrap items-center gap-2">
+          <select
+            value={djMode}
+            onChange={(e) => setDjMode(e.target.value as DjSetMode)}
+            title="DJ set mode — biases which transition techniques get chosen"
+            className="bg-surface border-2 border-border rounded-full text-xs text-muted px-2 py-1.5 outline-none"
+          >
+            {DJ_MODES.map((m) => (
+              <option key={m.id} value={m.id} title={m.title}>
+                {m.label}
+              </option>
+            ))}
+          </select>
+          <select
+            value={styleGenreHint ?? "auto"}
+            onChange={(e) => setStyleGenreHint(e.target.value === "auto" ? null : e.target.value)}
+            title="Style influence for chosen transitions"
+            className="bg-surface border-2 border-border rounded-full text-xs text-muted px-2 py-1.5 outline-none"
+          >
+            <option value="auto">Style: Auto</option>
+            {genreFamilies.map((g) => (
+              <option key={g.id} value={g.id}>
+                {g.name}
+              </option>
+            ))}
+          </select>
+          <select
+            value={crossfadeOverrideSec ?? "auto"}
+            onChange={(e) => setCrossfadeOverride(e.target.value === "auto" ? null : Number(e.target.value))}
+            title="Crossfade length"
+            className="bg-surface border-2 border-border rounded-full text-xs text-muted px-2 py-1.5 outline-none"
+          >
+            <option value="auto">Crossfade: Auto</option>
+            {CROSSFADE_PRESETS.map((sec) => (
+              <option key={sec} value={sec}>
+                {sec}s
+              </option>
+            ))}
+          </select>
         </div>
 
         <div className="flex flex-col sm:flex-row gap-3">

@@ -50,7 +50,7 @@ function LibraryContent() {
 
   return (
     <div className="p-6 flex flex-col gap-4">
-      <div className="flex items-center justify-between gap-4">
+      <div className="flex flex-wrap items-center justify-between gap-4">
         <h1 className="text-2xl font-bold retro-heading">Local Files</h1>
         <div className="flex items-center gap-3 shrink-0">
           <button

@@ -8,9 +8,9 @@ import { genreFamilies } from "@/data/styles";
 import type { DjSetMode } from "@/lib/mix-engine";
 import { speakHypePhrase } from "@/lib/wordPlay";
 
-const CROSSFADE_PRESETS = [5, 10, 15, 20, 30];
+export const CROSSFADE_PRESETS = [5, 10, 15, 20, 30];
 
-const DJ_MODES: { id: DjSetMode; label: string; title: string }[] = [
+export const DJ_MODES: { id: DjSetMode; label: string; title: string }[] = [
   { id: "auto", label: "Mode: Auto", title: "No bias — pick whatever scores best" },
   { id: "club", label: "Club", title: "Favors beatmatched, EQ-driven blends over flashy effects" },
   { id: "wedding", label: "Wedding", title: "Favors clean, safe blends; avoids scratches, risers, and other flashy effects" },
@@ -57,8 +57,8 @@ export function PlayerBar() {
   }
 
   return (
-    <footer className="h-20 shrink-0 border-t-2 border-border bg-surface px-4 flex items-center gap-4">
-      <div className="flex items-center gap-3 w-48 sm:w-64 min-w-0 shrink-0">
+    <footer className="min-h-20 shrink-0 border-t-2 border-border bg-surface px-4 py-2 flex flex-wrap items-center gap-2 lg:gap-4">
+      <div className="flex items-center gap-3 w-28 sm:w-48 lg:w-64 min-w-0 shrink-0">
         {currentTrack ? (
           <>
             <DualDeckStage />
@@ -130,7 +130,7 @@ export function PlayerBar() {
         </div>
       </div>
 
-      <div className="flex items-center gap-2 justify-end shrink-0">
+      <div className="flex items-center gap-2 justify-between md:justify-end w-full md:w-auto shrink-0">
         <button
           type="button"
           onClick={() => speakHypePhrase()}
@@ -178,7 +178,7 @@ export function PlayerBar() {
           value={djMode}
           onChange={(e) => setDjMode(e.target.value as DjSetMode)}
           title="DJ set mode — biases which transition techniques get chosen"
-          className="hidden sm:block bg-surface border-2 border-border rounded-full text-xs text-muted px-2 py-1.5 outline-none"
+          className="hidden xl:block bg-surface border-2 border-border rounded-full text-xs text-muted px-2 py-1.5 outline-none"
         >
           {DJ_MODES.map((m) => (
             <option key={m.id} value={m.id} title={m.title}>
@@ -190,7 +190,7 @@ export function PlayerBar() {
           value={styleGenreHint ?? "auto"}
           onChange={(e) => setStyleGenreHint(e.target.value === "auto" ? null : e.target.value)}
           title="Style influence for chosen transitions"
-          className="hidden sm:block bg-surface border-2 border-border rounded-full text-xs text-muted px-2 py-1.5 outline-none"
+          className="hidden xl:block bg-surface border-2 border-border rounded-full text-xs text-muted px-2 py-1.5 outline-none"
         >
           <option value="auto">Style: Auto</option>
           {genreFamilies.map((g) => (
@@ -207,7 +207,7 @@ export function PlayerBar() {
             )
           }
           title="Crossfade length"
-          className="hidden sm:block bg-surface border-2 border-border rounded-full text-xs text-muted px-2 py-1.5 outline-none"
+          className="hidden xl:block bg-surface border-2 border-border rounded-full text-xs text-muted px-2 py-1.5 outline-none"
         >
           <option value="auto">Auto</option>
           {CROSSFADE_PRESETS.map((sec) => (
@@ -232,7 +232,7 @@ export function PlayerBar() {
           step={0.01}
           value={volume}
           onChange={(e) => setVolume(Number(e.target.value))}
-          className="hidden sm:block w-20 accent-accent-purple"
+          className="hidden xl:block w-20 accent-accent-purple"
         />
       </div>
     </footer>
