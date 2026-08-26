@@ -387,6 +387,8 @@ export interface TransitionContext {
   excludeTransitionIds?: string[];
   /** Trades some tempo-mismatch safety for more willingness to pick a bold technique, and pushes harder against repeating the last few picks. */
   varietyBias?: boolean;
+  /** Per-category score adjustment learned from the user's own manual picks/rerolls over time (see lib/dj-weights.ts) — same shape and role as MODE_CATEGORY_BIAS, just tuned by behavior instead of a fixed preset. */
+  categoryWeights?: Partial<Record<TransitionCategory, number>>;
 }
 
 function scoreTransition(t: TransitionEntry, ctx: TransitionContext): number {
@@ -402,6 +404,7 @@ function scoreTransition(t: TransitionEntry, ctx: TransitionContext): number {
   if (t.idealGenres.length === 0) score += 1;
   score += (ctx.camelotScore ?? 0) * 3;
   score += MODE_CATEGORY_BIAS[ctx.djMode ?? "auto"][t.category] ?? 0;
+  score += ctx.categoryWeights?.[t.category] ?? 0;
   if (ctx.varietyBias && t.category === "cut") score -= VARIETY_CUT_PENALTY;
   if (ctx.recentTransitionIds?.includes(t.id)) {
     score -= ctx.varietyBias ? REPETITION_PENALTY_VARIETY : REPETITION_PENALTY;
@@ -465,6 +468,8 @@ interface PlanTransitionArgs {
   excludeTransitionIds?: string[];
   /** Trades some tempo-mismatch safety for more willingness to pick a bold technique — see bpmFitScore(). */
   varietyBias?: boolean;
+  /** Per-category score adjustment learned from the user's own manual picks/rerolls over time — see lib/dj-weights.ts. */
+  categoryWeights?: Partial<Record<TransitionCategory, number>>;
 }
 
 function buildRationale(
@@ -507,6 +512,7 @@ export function planTransition({
   forceTransitionId = null,
   excludeTransitionIds = [],
   varietyBias = false,
+  categoryWeights = {},
 }: PlanTransitionArgs): TransitionPlan {
   const bpmDelta = Math.abs(bestTempoRatio(current.analysis.bpm, next.analysis.bpm) - 1);
   // Two tracks that both fell back to the same neutral 120 BPM (low
@@ -540,6 +546,7 @@ export function planTransition({
     forceTransitionId,
     excludeTransitionIds,
     varietyBias,
+    categoryWeights,
   });
   const wasForced = Boolean(forceTransitionId) && transition.id === forceTransitionId;
 

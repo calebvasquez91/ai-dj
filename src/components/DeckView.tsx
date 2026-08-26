@@ -4,11 +4,18 @@ import { useMemo } from "react";
 import { useStore } from "@/lib/store";
 import { camelotCompatibility, planTransition } from "@/lib/mix-engine";
 import { fallbackAnalysis, type TrackAnalysis } from "@/lib/audio-analysis";
+import { useDjWeights } from "@/lib/dj-weights";
 import { TrackThumbnail } from "@/components/TrackThumbnail";
 import { transitions } from "@/data/transitions";
+import type { AmbienceFrequency } from "@/lib/ambience";
 import type { Track } from "@/types/music";
 
 const PICKABLE_TRANSITIONS = transitions.filter((t) => t.executable);
+
+const AMBIENCE_FREQUENCIES: { id: AmbienceFrequency; label: string }[] = [
+  { id: "occasional", label: "Occasional" },
+  { id: "frequent", label: "Frequent" },
+];
 
 // Mirrors mix-engine's own key-confidence gate for scoring — a key label
 // below this confidence is more likely noise than signal, so don't surface
@@ -139,6 +146,11 @@ export function DeckView() {
   const addRerolledTransitionId = useStore((s) => s.addRerolledTransitionId);
   const djVarietyBias = useStore((s) => s.djVarietyBias);
   const setDjVarietyBias = useStore((s) => s.setDjVarietyBias);
+  const ambienceEnabled = useStore((s) => s.ambienceEnabled);
+  const setAmbienceEnabled = useStore((s) => s.setAmbienceEnabled);
+  const ambienceFrequency = useStore((s) => s.ambienceFrequency);
+  const setAmbienceFrequency = useStore((s) => s.setAmbienceFrequency);
+  const categoryWeights = useDjWeights((s) => s.categoryWeights);
 
   const nextTrack = queue[0] ?? null;
   const currentAnalysis = currentTrack ? trackAnalysis[currentTrack.id] : undefined;
@@ -156,6 +168,7 @@ export function DeckView() {
       forceTransitionId: forcedTransitionId,
       excludeTransitionIds: rerolledTransitionIds,
       varietyBias: djVarietyBias,
+      categoryWeights,
     });
   }, [
     currentTrack,
@@ -169,6 +182,7 @@ export function DeckView() {
     forcedTransitionId,
     rerolledTransitionIds,
     djVarietyBias,
+    categoryWeights,
   ]);
 
   if (!open) return null;
@@ -211,6 +225,32 @@ export function DeckView() {
               />
               Favor variety
             </label>
+            <label
+              className="flex items-center gap-1.5 text-xs text-muted cursor-pointer"
+              title="Occasional mid-track FX (a filter/riser build, an echo throw on a breakdown) — separate from transition FX, which always play"
+            >
+              <input
+                type="checkbox"
+                checked={ambienceEnabled}
+                onChange={(e) => setAmbienceEnabled(e.target.checked)}
+                className="accent-accent-purple"
+              />
+              Ambience
+            </label>
+            {ambienceEnabled && (
+              <select
+                value={ambienceFrequency}
+                onChange={(e) => setAmbienceFrequency(e.target.value as AmbienceFrequency)}
+                title="How often mid-track ambience FX can fire"
+                className="bg-surface border-2 border-border rounded-full text-xs text-muted px-2 py-1 outline-none"
+              >
+                {AMBIENCE_FREQUENCIES.map((f) => (
+                  <option key={f.id} value={f.id}>
+                    {f.label}
+                  </option>
+                ))}
+              </select>
+            )}
             <button
               type="button"
               onClick={toggle}

@@ -17,6 +17,8 @@ import {
 } from "@/lib/mix-engine";
 import { analyzeTrackFromUrl, fallbackAnalysis, type TrackAnalysis } from "@/lib/audio-analysis";
 import { cancelHypePhrase, speakHypePhrase } from "@/lib/wordPlay";
+import { shouldTriggerAmbience } from "@/lib/ambience";
+import { useDjWeights, LEARNING_NUDGE_UP, LEARNING_NUDGE_DOWN } from "@/lib/dj-weights";
 import type { Track } from "@/types/music";
 
 type DeckId = "A" | "B";
@@ -83,6 +85,12 @@ export function DualDeckStage() {
   // several score similarly (which without this, tends to collapse to
   // whichever blend-style option wins ties by default).
   const recentTransitionIdsRef = useRef<string[]>([]);
+  // Tracks the last mid-track ambience trigger per-track (reset whenever the
+  // active track changes) so shouldTriggerAmbience() can enforce a cooldown.
+  const ambienceStateRef = useRef<{ trackId: string | null; lastTriggeredSec: number | null }>({
+    trackId: null,
+    lastTriggeredSec: null,
+  });
   const activeDeckRef = useRef<DeckId>("A");
   const analyzingRef = useRef<Set<string>>(new Set());
 
@@ -587,6 +595,77 @@ export function DualDeckStage() {
       return useStore.getState().trackAnalysis[trackId] ?? fallbackAnalysis();
     }
 
+    /**
+     * Local-adaptation hook: only does anything when the user actually
+     * overrode this mix (a manual pick or a reroll) — in that case, compare
+     * against what auto-scoring alone would have chosen and nudge category
+     * weights accordingly, so a repeated override gradually shifts what
+     * "auto" means for this browser instead of having to be re-applied by
+     * hand every time. A no-op the vast majority of the time (no override),
+     * so it never adds cost to the common case.
+     */
+    function applyLearningNudge(
+      track: Track,
+      nextTrack: Track,
+      state: ReturnType<typeof useStore.getState>,
+      currentTime: number | null,
+      plan: TransitionPlan
+    ) {
+      if (!state.forcedTransitionId && state.rerolledTransitionIds.length === 0) return;
+      const autoPlan = planTransition({
+        current: { track, analysis: getAnalysis(track.id) },
+        next: { track: nextTrack, analysis: getAnalysis(nextTrack.id) },
+        genreHint: state.styleGenreHint,
+        overrideSec: state.crossfadeOverrideSec,
+        currentElapsedSec: currentTime,
+        djMode: state.djMode,
+        recentTransitionIds: recentTransitionIdsRef.current,
+        categoryWeights: useDjWeights.getState().categoryWeights,
+      });
+      if (autoPlan.category !== plan.category) {
+        useDjWeights.getState().nudge(plan.category, LEARNING_NUDGE_UP);
+        useDjWeights.getState().nudge(autoPlan.category, LEARNING_NUDGE_DOWN);
+      }
+    }
+
+    /** Occasional mid-track FX — never during an active transition, gated by ambienceEnabled/ambienceFrequency and shouldTriggerAmbience()'s own cooldown/energy-curve logic. */
+    function tryAmbience() {
+      if (transitionRef.current) return;
+      const state = useStore.getState();
+      if (!state.ambienceEnabled || state.ambienceFrequency === "off") return;
+      const track = state.currentTrack;
+      if (!track) return;
+      const activeEl = deckEl(activeDeckRef.current);
+      const ctx = audioCtxRef.current;
+      if (!activeEl || !ctx) return;
+      const currentTime = activeEl.currentTime;
+
+      if (ambienceStateRef.current.trackId !== track.id) {
+        ambienceStateRef.current = { trackId: track.id, lastTriggeredSec: null };
+      }
+      const cue = shouldTriggerAmbience({
+        analysis: getAnalysis(track.id),
+        durationSec: track.durationSec,
+        currentTimeSec: currentTime,
+        lastTriggeredSec: ambienceStateRef.current.lastTriggeredSec,
+        frequency: state.ambienceFrequency,
+      });
+      if (!cue) return;
+      ambienceStateRef.current.lastTriggeredSec = currentTime;
+
+      if (cue.effect === "riser") {
+        startRiserLayer(ctx, cue.windowSec);
+      } else if (cue.effect === "echo-tail") {
+        const nodes = deckNodesRef.current[activeDeckRef.current];
+        if (!nodes) return;
+        const now = ctx.currentTime;
+        nodes.delaySend.gain.cancelScheduledValues(now);
+        nodes.delaySend.gain.setValueAtTime(0, now);
+        nodes.delaySend.gain.linearRampToValueAtTime(ECHO_WET_LEVEL, now + cue.windowSec * 0.6);
+        nodes.delaySend.gain.linearRampToValueAtTime(0, now + cue.windowSec);
+      }
+    }
+
     /** Nothing queued to transition into — instead of an abrupt stop, fade the active deck's gain to 0 so it reaches silence right as the track naturally ends. Recomputing from the current gain value every tick (rather than a one-shot scheduled ramp) keeps this self-correcting if the check re-fires before the fade completes. */
     function fadeOutIfEnding(activeEl: HTMLAudioElement, duration: number, currentTime: number) {
       const remaining = duration - currentTime;
@@ -638,6 +717,7 @@ export function DualDeckStage() {
         forceTransitionId: state.forcedTransitionId,
         excludeTransitionIds: state.rerolledTransitionIds,
         varietyBias: state.djVarietyBias,
+        categoryWeights: useDjWeights.getState().categoryWeights,
       });
       const clampedWindow = Math.min(
         plan.windowSec,
@@ -668,6 +748,7 @@ export function DualDeckStage() {
         currentTime >= currentAnalysis.breakdownAtSec - clampedWindow &&
         currentTime < currentAnalysis.breakdownAtSec + clampedWindow;
       if (nearNaturalEnd || pastActiveCap || dropAligned || breakdownOpportunity) {
+        applyLearningNudge(track, nextTrack, state, currentTime, plan);
         startTransition(nextTrack, { ...plan, windowSec: clampedWindow });
       }
     }
@@ -678,6 +759,7 @@ export function DualDeckStage() {
         useStore.getState().setCurrentTime(activeEl.currentTime);
       }
       tryAutoTransition();
+      tryAmbience();
     }, 500);
 
     const unsubscribe = useStore.subscribe((state, prevState) => {
@@ -698,7 +780,9 @@ export function DualDeckStage() {
         forceTransitionId: state.forcedTransitionId,
         excludeTransitionIds: state.rerolledTransitionIds,
         varietyBias: state.djVarietyBias,
+        categoryWeights: useDjWeights.getState().categoryWeights,
       });
+      applyLearningNudge(track, nextTrack, state, activeEl?.currentTime ?? null, plan);
       startTransition(nextTrack, plan);
     });
 

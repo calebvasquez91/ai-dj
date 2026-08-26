@@ -2,6 +2,7 @@ import { create } from "zustand";
 import type { Playlist, Track } from "@/types/music";
 import type { TrackAnalysis } from "@/lib/audio-analysis";
 import type { DjSetMode } from "@/lib/mix-engine";
+import type { AmbienceFrequency } from "@/lib/ambience";
 
 const MAX_HISTORY = 50;
 
@@ -31,6 +32,9 @@ interface PlayerState {
   djVarietyBias: boolean;
   /** Rationale text for the mix currently in progress, captured at the moment it started — so the DJ Decks panel keeps showing what's actually playing out instead of a live recompute that goes stale the instant a one-shot override clears. */
   activeTransitionRationale: string | null;
+  /** Occasional mid-track FX (filter/riser builds, echo throws on breakdowns) — separate from transition FX, which always fire regardless of this setting. */
+  ambienceEnabled: boolean;
+  ambienceFrequency: AmbienceFrequency;
 
   playlists: Playlist[];
   playlistsLoaded: boolean;
@@ -68,6 +72,8 @@ interface PlayerState {
   clearRerolledTransitionIds: () => void;
   setDjVarietyBias: (enabled: boolean) => void;
   setActiveTransitionRationale: (rationale: string | null) => void;
+  setAmbienceEnabled: (enabled: boolean) => void;
+  setAmbienceFrequency: (frequency: AmbienceFrequency) => void;
   setTrackPlayPreference: (trackId: string, preference: Track["playPreference"]) => void;
 
   loadPlaylists: () => Promise<void>;
@@ -108,6 +114,8 @@ export const useStore = create<PlayerState>()(
       rerolledTransitionIds: [],
       djVarietyBias: false,
       activeTransitionRationale: null,
+      ambienceEnabled: true,
+      ambienceFrequency: "occasional",
 
       playlists: [],
       playlistsLoaded: false,
@@ -198,6 +206,8 @@ export const useStore = create<PlayerState>()(
       clearRerolledTransitionIds: () => set({ rerolledTransitionIds: [] }),
       setDjVarietyBias: (enabled) => set({ djVarietyBias: enabled }),
       setActiveTransitionRationale: (rationale) => set({ activeTransitionRationale: rationale }),
+      setAmbienceEnabled: (enabled) => set({ ambienceEnabled: enabled }),
+      setAmbienceFrequency: (frequency) => set({ ambienceFrequency: frequency }),
       // Only localLibrary is the source of truth for curation flags, but
       // patch every place a matching track object might already live so a
       // badge shown elsewhere (queue, playlists, deck view) stays in sync.
