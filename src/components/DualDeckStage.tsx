@@ -9,6 +9,7 @@ import {
   TRACK_FADE_OUT_SEC,
   brakeGainCurves,
   equalPowerCurves,
+  mashupGainCurves,
   planSimpleFade,
   planTransition,
   spinUpGainCurves,
@@ -19,6 +20,8 @@ import { analyzeTrackFromUrl, fallbackAnalysis, type TrackAnalysis } from "@/lib
 import { cancelHypePhrase, speakHypePhrase } from "@/lib/wordPlay";
 import { shouldTriggerAmbience } from "@/lib/ambience";
 import { useDjWeights, LEARNING_NUDGE_UP, LEARNING_NUDGE_DOWN } from "@/lib/dj-weights";
+import { planMashup, MASHUP_COOLDOWN_SEC, type MashupPlan } from "@/lib/mashup-engine";
+import { createTimeStretchVoice, type TimeStretchVoice } from "@/lib/time-stretch";
 import type { Track } from "@/types/music";
 
 type DeckId = "A" | "B";
@@ -41,6 +44,44 @@ interface ActiveTransition {
   category: TransitionPlan["category"];
   tickIntervalId: ReturnType<typeof setInterval> | null;
   overlayNodes: OverlayNodes | null;
+}
+
+/**
+ * A matched mashup in progress: the outgoing <audio> deck keeps playing
+ * completely normally while a separate, temporary buffer-voice (decoded
+ * audio run through SoundTouchJS, see lib/time-stretch.ts) plays the
+ * incoming track tempo/key-matched on top for `plan.durationSec`. Not a
+ * TransitionPlan — this is a much longer, differently-shaped process with
+ * its own tick loop, tracked independently of `transitionRef`.
+ */
+interface ActiveMashup {
+  fromDeckId: DeckId; // still playing normally, unprocessed
+  toDeckId: DeckId; // idle <audio> deck — receives the handoff once the mashup resolves
+  nextTrack: Track;
+  plan: MashupPlan;
+  voice: TimeStretchVoice;
+  voiceGain: GainNode;
+  startTime: number; // performance.now()
+  durationMs: number;
+  lastTickTime: number; // performance.now() at the previous tick, for integrating elapsed track-time
+  /** Running estimate of the buffer-voice's position within nextTrack's own timeline — accumulates realDeltaSec * currentTempo each tick, since tempo isn't constant throughout. */
+  trackTimeElapsedSec: number;
+  /** The buffer-voice's tempo ratio as of the last tick (starts at plan.tempoRatio, eases to 1 during the resolve phase). */
+  currentTempo: number;
+  tickIntervalId: ReturnType<typeof setInterval> | null;
+}
+
+/** Per-deck nodes for the acoustic-feel + stadium-echo vocal moment — built lazily on first use, not part of the always-present per-deck graph, since it's a rarely-triggered effect. */
+interface VocalEchoNodes {
+  splitter: ChannelSplitterNode;
+  vocalForward: GainNode;
+  convolver: ConvolverNode;
+  reverbGain: GainNode;
+  slapDelay: DelayNode;
+  slapFeedback: GainNode;
+  delayGain: GainNode;
+  /** Overall wet level for this effect — the only node actually automated per-trigger; everything upstream is static, silent by default. */
+  sendGain: GainNode;
 }
 
 /** Real brakes don't slow linearly to a full stop — they decelerate hard early and crawl at the end. An ease-out curve (not linear) captures that. */
@@ -93,6 +134,24 @@ export function DualDeckStage() {
   });
   const activeDeckRef = useRef<DeckId>("A");
   const analyzingRef = useRef<Set<string>>(new Set());
+  const mashupRef = useRef<ActiveMashup | null>(null);
+  // True synchronously as soon as a mashup decode kicks off, before mashupRef
+  // itself is populated — guards against the tick loop starting a second
+  // mashup while the first is still mid-decode (an inherently async gap
+  // ActiveMashup's own ref alone can't cover).
+  const mashupStartingRef = useRef(false);
+  const mashupBufferCacheRef = useRef<Record<string, AudioBuffer>>({});
+  // Wall-clock (not track-relative) timestamp of the last mashup, since the
+  // cooldown needs to span across tracks/transitions, not reset per-track
+  // the way ambience's cooldown does.
+  const mashupLastAtRef = useRef<number | null>(null);
+  // Memoizes the mashup plan (which includes a randomized bars count) per
+  // (current, next) track pairing so it's decided once and held stable —
+  // planMashup() is otherwise re-evaluated every 500ms tick, which would
+  // otherwise re-roll a fresh random duration on every single check.
+  const mashupPlanCacheRef = useRef<{ pairKey: string; plan: MashupPlan | null } | null>(null);
+  const vocalEchoNodesRef = useRef<Record<DeckId, VocalEchoNodes | null>>({ A: null, B: null });
+  const stadiumIrRef = useRef<AudioBuffer | null>(null);
 
   const [activeDeck, setActiveDeck] = useState<DeckId>("A");
 
@@ -167,6 +226,23 @@ export function DualDeckStage() {
     useStore.getState().setIsTransitioning(false);
     useStore.getState().setActiveTransitionRationale(null);
   }, [deckEl, resetDeckNodes, stopOverlayNodes]);
+
+  /** Tears down an in-progress mashup cleanly (user seeked or picked a different track mid-mashup) — the idle toDeck was never touched yet, so only the buffer-voice and the still-playing fromDeck need resetting. */
+  const cancelMashup = useCallback(() => {
+    const m = mashupRef.current;
+    if (!m) return;
+    if (m.tickIntervalId != null) clearInterval(m.tickIntervalId);
+    try {
+      m.voice.stop();
+    } catch {
+      // Already stopped — harmless.
+    }
+    m.voiceGain.disconnect();
+    resetDeckNodes(m.fromDeckId, 1);
+    mashupRef.current = null;
+    useStore.getState().setIsTransitioning(false);
+    useStore.getState().setActiveTransitionRationale(null);
+  }, [resetDeckNodes]);
 
   // Background analysis: as soon as a track is reachable (now playing or
   // queued), estimate its BPM/beat-grid/energy-onset/key so a mix engine
@@ -274,7 +350,7 @@ export function DualDeckStage() {
   // Core transition machinery + auto-DJ lookahead + Mix Now subscription.
   useEffect(() => {
     function handleEnded(deckId: DeckId) {
-      if (transitionRef.current) return;
+      if (transitionRef.current || mashupRef.current) return;
       if (deckId !== activeDeckRef.current) return;
       useStore.getState().next();
     }
@@ -628,9 +704,305 @@ export function DualDeckStage() {
       }
     }
 
+    /** Fetches and decodes a track's audio into an AudioBuffer for the mashup buffer-voice — cached by URL so a re-decode never happens twice for the same track. */
+    async function decodeTrackBuffer(ctx: AudioContext, url: string): Promise<AudioBuffer> {
+      const cached = mashupBufferCacheRef.current[url];
+      if (cached) return cached;
+      const res = await fetch(url);
+      const arrayBuffer = await res.arrayBuffer();
+      const buffer = await ctx.decodeAudioData(arrayBuffer);
+      mashupBufferCacheRef.current[url] = buffer;
+      return buffer;
+    }
+
+    /**
+     * Starts a matched mashup: decodes the incoming track, plays it
+     * tempo/key-matched over the still-playing outgoing deck via a
+     * SoundTouchJS voice, and schedules the full gain choreography as one
+     * native curve (mashupGainCurves) up front — only tempo/pitch easing
+     * and the eventual handoff need a JS tick, since SoundTouchJS's
+     * tempo/pitch aren't AudioParams.
+     */
+    async function startMashup(nextTrack: Track, plan: MashupPlan) {
+      if (transitionRef.current || mashupRef.current || mashupStartingRef.current) return;
+      mashupStartingRef.current = true;
+      const currentTrackIdAtStart = useStore.getState().currentTrack?.id;
+      try {
+        const ctx = audioCtxRef.current;
+        const masterGain = masterGainRef.current;
+        if (!ctx || !masterGain) return;
+
+        const buffer = await decodeTrackBuffer(ctx, nextTrack.sourceUrl);
+
+        // The world may have moved on while we were decoding (track
+        // skipped, a transition started some other way) — abort rather
+        // than layer a mashup onto a pairing that's no longer current.
+        const state = useStore.getState();
+        if (transitionRef.current || mashupRef.current) return;
+        if (state.currentTrack?.id !== currentTrackIdAtStart || state.queue[0]?.id !== nextTrack.id) return;
+
+        const fromDeckId = activeDeckRef.current;
+        const toDeckId: DeckId = fromDeckId === "A" ? "B" : "A";
+        const fromNodes = deckNodesRef.current[fromDeckId];
+        if (!fromNodes) return;
+
+        const voice = createTimeStretchVoice(ctx, buffer, {
+          tempo: plan.tempoRatio,
+          pitchSemitones: plan.pitchSemitones,
+        });
+        voice.setStartFraction(Math.max(0, Math.min(1, plan.entryOffsetSec / buffer.duration)));
+        const voiceGain = ctx.createGain();
+        voiceGain.gain.value = 0;
+        voice.node.connect(voiceGain);
+        voiceGain.connect(masterGain);
+
+        const now = ctx.currentTime;
+        const { outCurve, inCurve } = mashupGainCurves();
+        fromNodes.gain.gain.cancelScheduledValues(now);
+        fromNodes.gain.gain.setValueCurveAtTime(outCurve, now, plan.durationSec);
+        voiceGain.gain.cancelScheduledValues(now);
+        voiceGain.gain.setValueCurveAtTime(inCurve, now, plan.durationSec);
+
+        const mashup: ActiveMashup = {
+          fromDeckId,
+          toDeckId,
+          nextTrack,
+          plan,
+          voice,
+          voiceGain,
+          startTime: performance.now(),
+          lastTickTime: performance.now(),
+          durationMs: Math.max(1, plan.durationSec) * 1000,
+          trackTimeElapsedSec: 0,
+          currentTempo: plan.tempoRatio,
+          tickIntervalId: null,
+        };
+        mashupRef.current = mashup;
+        useStore.getState().setIsTransitioning(true);
+        useStore.getState().setActiveTransitionRationale(plan.rationale);
+
+        // Resolve phase starts at this fraction of the total duration — the
+        // last stretch of mashupGainCurves' own resolve taper, kept in sync
+        // so the tempo/pitch easing lands right as the gain hand-off does.
+        const resolveStartRatio = 0.7;
+        const tick = () => {
+          const m = mashupRef.current;
+          if (!m) return;
+          const nowMs = performance.now();
+          const realDeltaSec = (nowMs - m.lastTickTime) / 1000;
+          m.trackTimeElapsedSec += realDeltaSec * m.currentTempo;
+          m.lastTickTime = nowMs;
+
+          const progress = Math.min(1, (nowMs - m.startTime) / m.durationMs);
+          if (progress >= resolveStartRatio) {
+            const localProgress = (progress - resolveStartRatio) / (1 - resolveStartRatio);
+            m.currentTempo = m.plan.tempoRatio + (1 - m.plan.tempoRatio) * localProgress;
+            m.voice.setTempo(m.currentTempo);
+            m.voice.setPitchSemitones(m.plan.pitchSemitones * (1 - localProgress));
+          }
+          if (progress >= 1) {
+            if (m.tickIntervalId != null) clearInterval(m.tickIntervalId);
+            completeMashup(m);
+          }
+        };
+        mashup.tickIntervalId = setInterval(tick, TICK_INTERVAL_MS);
+      } catch {
+        // Fetch/decode/SoundTouchJS failure — just skip this mashup
+        // attempt. tryAutoTransition falls through to a normal transition
+        // on a later tick since mashupRef never got populated.
+      } finally {
+        mashupStartingRef.current = false;
+      }
+    }
+
+    /** Hands the mashup off to a normal <audio> deck at the exact position the buffer-voice reached, then tears the buffer-voice down — the rest of the app (transition timing, ambience, analysis) goes right back to reasoning about the normal two-deck world afterward. */
+    function completeMashup(m: ActiveMashup) {
+      const ctx = audioCtxRef.current;
+      const idleEl = deckEl(m.toDeckId);
+      const idleNodes = deckNodesRef.current[m.toDeckId];
+      if (ctx && idleEl && idleNodes) {
+        loadedTrackId.current[m.toDeckId] = m.nextTrack.id;
+        idleEl.src = m.nextTrack.sourceUrl;
+        idleEl.currentTime = m.plan.entryOffsetSec + m.trackTimeElapsedSec;
+        idleEl.playbackRate = 1;
+        idleNodes.gain.gain.cancelScheduledValues(ctx.currentTime);
+        idleNodes.gain.gain.setValueAtTime(1, ctx.currentTime);
+        idleEl.play().catch(() => {});
+      }
+
+      // A brief overlap (same track, same position, both at native tempo/
+      // pitch by now) before killing the buffer-voice — guards against any
+      // <audio> element play() start latency producing a gap, without
+      // risking an audible clash since both sides are playing identical
+      // content at this instant.
+      const fromDeckId = m.fromDeckId;
+      setTimeout(() => {
+        try {
+          m.voice.stop();
+        } catch {
+          // Already stopped — harmless.
+        }
+        const fromEl = deckEl(fromDeckId);
+        if (fromEl) {
+          fromEl.pause();
+          fromEl.playbackRate = 1;
+        }
+        resetDeckNodes(fromDeckId, 1);
+        loadedTrackId.current[fromDeckId] = null;
+      }, 150);
+
+      activeDeckRef.current = m.toDeckId;
+      setActiveDeck(m.toDeckId);
+      mashupRef.current = null;
+      mashupLastAtRef.current = Date.now();
+      useStore.getState().setIsTransitioning(false);
+      useStore.getState().setActiveTransitionRationale(null);
+      useStore.getState().next();
+    }
+
+    /** A synthesized noise-decay impulse response standing in for a real captured hall/stadium recording — no bundled audio asset, same zero-asset approach as every other FX in this app. Built once and shared across every deck's ConvolverNode. */
+    function getStadiumImpulseResponse(ctx: AudioContext): AudioBuffer {
+      if (stadiumIrRef.current) return stadiumIrRef.current;
+      const durationSec = 3.2;
+      const sampleCount = Math.floor(ctx.sampleRate * durationSec);
+      const buffer = ctx.createBuffer(2, sampleCount, ctx.sampleRate);
+      for (let ch = 0; ch < 2; ch++) {
+        const data = buffer.getChannelData(ch);
+        for (let i = 0; i < sampleCount; i++) {
+          const t = i / sampleCount;
+          const decay = Math.pow(1 - t, 2.2); // slow, dense tail — reads as a big room, not a small one
+          data[i] = (Math.random() * 2 - 1) * decay;
+        }
+      }
+      stadiumIrRef.current = buffer;
+      return buffer;
+    }
+
+    /**
+     * Lazily builds the vocal-forward reverb/delay send for one deck, tapped
+     * from that deck's existing (already-connected) filter node — built
+     * once per deck, then reused on every later vocal-echo trigger.
+     *
+     * Rough vocal isolation via mid/side processing: most pop/EDM mixes
+     * place vocals near-center, so boosting mid ((L+R)*0.5) while
+     * subtracting side ((L-R)*0.5) is a real, if approximate, mixing-
+     * engineer technique for pulling vocal-ish content forward — not a
+     * guess. It's not true source separation (that needs a Demucs/
+     * Spleeter-class ML model, out of scope for a browser tab), so
+     * instruments panned near-center bleed through too.
+     */
+    function getOrCreateVocalEchoNodes(deckId: DeckId, ctx: AudioContext, deckNodes: DeckNodes, masterGain: GainNode): VocalEchoNodes {
+      const existing = vocalEchoNodesRef.current[deckId];
+      if (existing) return existing;
+
+      const splitter = ctx.createChannelSplitter(2);
+      deckNodes.filter.connect(splitter);
+
+      const midL = ctx.createGain();
+      midL.gain.value = 0.5;
+      const midR = ctx.createGain();
+      midR.gain.value = 0.5;
+      const sideL = ctx.createGain();
+      sideL.gain.value = 0.5;
+      const sideR = ctx.createGain();
+      sideR.gain.value = -0.5;
+      splitter.connect(midL, 0);
+      splitter.connect(midR, 1);
+      splitter.connect(sideL, 0);
+      splitter.connect(sideR, 1);
+
+      const midSum = ctx.createGain();
+      midSum.gain.value = 1.4; // boost the (rough) vocal-forward center
+      const sideSum = ctx.createGain();
+      sideSum.gain.value = -0.6; // subtract the (rough) stereo-width content
+      midL.connect(midSum);
+      midR.connect(midSum);
+      sideL.connect(sideSum);
+      sideR.connect(sideSum);
+
+      const vocalForward = ctx.createGain();
+      midSum.connect(vocalForward);
+      sideSum.connect(vocalForward);
+
+      const convolver = ctx.createConvolver();
+      convolver.buffer = getStadiumImpulseResponse(ctx);
+      convolver.normalize = true;
+      const reverbGain = ctx.createGain();
+      vocalForward.connect(convolver);
+      convolver.connect(reverbGain);
+
+      const slapDelay = ctx.createDelay(1);
+      slapDelay.delayTime.value = 0.11;
+      const slapFeedback = ctx.createGain();
+      slapFeedback.gain.value = 0.28;
+      const delayGain = ctx.createGain();
+      delayGain.gain.value = 0.7;
+      vocalForward.connect(slapDelay);
+      slapDelay.connect(slapFeedback);
+      slapFeedback.connect(slapDelay);
+      slapDelay.connect(delayGain);
+
+      const sendGain = ctx.createGain();
+      sendGain.gain.value = 0;
+      reverbGain.connect(sendGain);
+      delayGain.connect(sendGain);
+      sendGain.connect(masterGain);
+
+      const nodes: VocalEchoNodes = {
+        splitter,
+        vocalForward,
+        convolver,
+        reverbGain,
+        slapDelay,
+        slapFeedback,
+        delayGain,
+        sendGain,
+      };
+      vocalEchoNodesRef.current[deckId] = nodes;
+      return nodes;
+    }
+
+    /**
+     * The acoustic-feel + stadium-echo vocal moment: gently rolls off harsh
+     * highs and heavy low end on the deck's normal signal (an EQ move, no
+     * new nodes) while ramping up the vocal-forward reverb/delay send —
+     * both ease back to neutral by the end, never a sudden drop.
+     */
+    function triggerVocalEcho(deckId: DeckId, windowSec: number) {
+      const ctx = audioCtxRef.current;
+      const masterGain = masterGainRef.current;
+      const nodes = deckNodesRef.current[deckId];
+      if (!ctx || !masterGain || !nodes) return;
+      const vocalNodes = getOrCreateVocalEchoNodes(deckId, ctx, nodes, masterGain);
+      const now = ctx.currentTime;
+
+      nodes.filter.type = "lowpass";
+      nodes.filter.frequency.cancelScheduledValues(now);
+      nodes.filter.frequency.setValueAtTime(20000, now);
+      nodes.filter.frequency.linearRampToValueAtTime(3200, now + windowSec * 0.3);
+      nodes.filter.frequency.setValueAtTime(3200, now + windowSec * 0.7);
+      nodes.filter.frequency.linearRampToValueAtTime(20000, now + windowSec);
+
+      nodes.lowShelf.gain.cancelScheduledValues(now);
+      nodes.lowShelf.gain.setValueAtTime(0, now);
+      nodes.lowShelf.gain.linearRampToValueAtTime(-8, now + windowSec * 0.3);
+      nodes.lowShelf.gain.setValueAtTime(-8, now + windowSec * 0.7);
+      nodes.lowShelf.gain.linearRampToValueAtTime(0, now + windowSec);
+
+      nodes.delaySend.gain.cancelScheduledValues(now);
+      nodes.delaySend.gain.setValueAtTime(nodes.delaySend.gain.value, now);
+      nodes.delaySend.gain.linearRampToValueAtTime(0, now + windowSec * 0.3);
+
+      vocalNodes.sendGain.gain.cancelScheduledValues(now);
+      vocalNodes.sendGain.gain.setValueAtTime(0, now);
+      vocalNodes.sendGain.gain.linearRampToValueAtTime(0.9, now + windowSec * 0.3);
+      vocalNodes.sendGain.gain.setValueAtTime(0.9, now + windowSec * 0.7);
+      vocalNodes.sendGain.gain.linearRampToValueAtTime(0, now + windowSec);
+    }
+
     /** Occasional mid-track FX — never during an active transition, gated by ambienceEnabled/ambienceFrequency and shouldTriggerAmbience()'s own cooldown/energy-curve logic. */
     function tryAmbience() {
-      if (transitionRef.current) return;
+      if (transitionRef.current || mashupRef.current) return;
       const state = useStore.getState();
       if (!state.ambienceEnabled || state.ambienceFrequency === "off") return;
       const track = state.currentTrack;
@@ -663,6 +1035,8 @@ export function DualDeckStage() {
         nodes.delaySend.gain.setValueAtTime(0, now);
         nodes.delaySend.gain.linearRampToValueAtTime(ECHO_WET_LEVEL, now + cue.windowSec * 0.6);
         nodes.delaySend.gain.linearRampToValueAtTime(0, now + cue.windowSec);
+      } else if (cue.effect === "vocal-echo") {
+        triggerVocalEcho(activeDeckRef.current, cue.windowSec);
       }
     }
 
@@ -680,7 +1054,7 @@ export function DualDeckStage() {
     }
 
     function tryAutoTransition() {
-      if (transitionRef.current) return;
+      if (transitionRef.current || mashupRef.current) return;
       const state = useStore.getState();
       const track = state.currentTrack;
       if (!track) return;
@@ -706,6 +1080,33 @@ export function DualDeckStage() {
       }
 
       const currentAnalysis = getAnalysis(track.id);
+
+      // Opportunistic matched mashup: a rarer, bigger "special moment" than
+      // a normal transition, so it's checked first (and takes over the
+      // whole tick if triggered) rather than folded into planTransition's
+      // own scoring. Needs a longer runway than a normal transition window
+      // — it only fires once there's just enough of the current track left
+      // for the whole planned overlap to actually fit before the file ends.
+      if (state.mashupEnabled && !mashupRef.current && !mashupStartingRef.current) {
+        const cooldownOk =
+          mashupLastAtRef.current == null || Date.now() - mashupLastAtRef.current >= MASHUP_COOLDOWN_SEC * 1000;
+        if (cooldownOk) {
+          const pairKey = `${track.id}>${nextTrack.id}`;
+          if (mashupPlanCacheRef.current?.pairKey !== pairKey) {
+            const plan = planMashup(
+              { track, analysis: currentAnalysis },
+              { track: nextTrack, analysis: getAnalysis(nextTrack.id) }
+            );
+            mashupPlanCacheRef.current = { pairKey, plan };
+          }
+          const mashupPlan = mashupPlanCacheRef.current.plan;
+          if (mashupPlan && duration - currentTime <= mashupPlan.durationSec) {
+            void startMashup(nextTrack, mashupPlan);
+            return;
+          }
+        }
+      }
+
       const plan = planTransition({
         current: { track, analysis: currentAnalysis },
         next: { track: nextTrack, analysis: getAnalysis(nextTrack.id) },
@@ -764,7 +1165,7 @@ export function DualDeckStage() {
 
     const unsubscribe = useStore.subscribe((state, prevState) => {
       if (state.mixNowRequestId === prevState.mixNowRequestId) return;
-      if (transitionRef.current) return;
+      if (transitionRef.current || mashupRef.current) return;
       const track = state.currentTrack;
       const nextTrack = state.queue[0];
       if (!track || !nextTrack) return;
@@ -801,6 +1202,15 @@ export function DualDeckStage() {
       }
       stopOverlayNodes(transitionRef.current?.overlayNodes ?? null);
       transitionRef.current = null;
+      if (mashupRef.current?.tickIntervalId != null) {
+        clearInterval(mashupRef.current.tickIntervalId);
+      }
+      try {
+        mashupRef.current?.voice.stop();
+      } catch {
+        // Already stopped — harmless.
+      }
+      mashupRef.current = null;
       elA?.removeEventListener("ended", onEndedA);
       elB?.removeEventListener("ended", onEndedB);
     };
@@ -818,6 +1228,7 @@ export function DualDeckStage() {
     if (loadedTrackId.current[activeDeck] === currentTrack.id) return;
 
     cancelTransition();
+    cancelMashup();
 
     const idleId: DeckId = activeDeck === "A" ? "B" : "A";
     const idleEl = deckEl(idleId);
@@ -852,7 +1263,7 @@ export function DualDeckStage() {
       audioCtxRef.current?.resume().catch(() => {});
       activeEl.play().catch(() => {});
     }
-  }, [currentTrack, activeDeck, cancelTransition, deckEl, resetDeckNodes]);
+  }, [currentTrack, activeDeck, cancelMashup, cancelTransition, deckEl, resetDeckNodes]);
 
   useEffect(() => {
     const activeEl = deckEl(activeDeck);
@@ -872,10 +1283,11 @@ export function DualDeckStage() {
   useEffect(() => {
     if (seekRequest == null) return;
     cancelTransition();
+    cancelMashup();
     const activeEl = deckEl(activeDeck);
     if (activeEl) activeEl.currentTime = seekRequest;
     clearSeekRequest();
-  }, [seekRequest, activeDeck, clearSeekRequest, cancelTransition, deckEl]);
+  }, [seekRequest, activeDeck, cancelMashup, clearSeekRequest, cancelTransition, deckEl]);
 
   return (
     <>

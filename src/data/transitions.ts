@@ -56,10 +56,10 @@ export const transitions: TransitionEntry[] = [
     id: "quick-chop",
     name: "Quick Chop",
     category: "cut",
-    description: "A very short (roughly one beat) overlap before switching — a snappier, slightly softer cut.",
+    description: "A very short (roughly one beat) overlap before switching — a snappier, slightly softer cut. Disabled by user preference (no sudden stops, ever) — kept here as data/persona only, never picked to actually play.",
     idealBpmDeltaMax: Infinity,
     idealGenres: ["hip-hop"],
-    executable: true,
+    executable: false,
     exampleDjs: ["DJ Z-Trip", "Cut Chemist"],
   },
 

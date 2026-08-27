@@ -4,6 +4,7 @@ import {
   brakeGainCurves,
   camelotCompatibility,
   chooseTransition,
+  mashupGainCurves,
   planTransition,
   spinUpGainCurves,
   stutterGateCurves,
@@ -398,6 +399,38 @@ describe("spinUpGainCurves", () => {
   });
 });
 
+describe("mashupGainCurves", () => {
+  it("starts with the outgoing deck full and the incoming deck silent", () => {
+    const { outCurve, inCurve } = mashupGainCurves();
+    expect(outCurve[0]).toBe(1);
+    expect(inCurve[0]).toBe(0);
+  });
+
+  it("resolves to the incoming deck full and the outgoing deck silent — never a sudden stop", () => {
+    const { outCurve, inCurve } = mashupGainCurves();
+    const last = outCurve.length - 1;
+    expect(outCurve[last]).toBeCloseTo(0, 5);
+    expect(inCurve[last]).toBeCloseTo(1, 5);
+  });
+
+  it("holds both decks at the shared mid-level through the bulk of the overlap", () => {
+    const { outCurve, inCurve } = mashupGainCurves(128, 0.15, 0.7, 0.75);
+    const midIndex = Math.round(128 * 0.4); // well inside the 0.15-0.7 hold window
+    expect(outCurve[midIndex]).toBeCloseTo(0.75, 5);
+    expect(inCurve[midIndex]).toBeCloseTo(0.75, 5);
+  });
+
+  it("never overshoots 1 or dips below 0 on either curve", () => {
+    const { outCurve, inCurve } = mashupGainCurves();
+    for (let i = 0; i < outCurve.length; i++) {
+      expect(outCurve[i]).toBeGreaterThanOrEqual(-1e-9);
+      expect(outCurve[i]).toBeLessThanOrEqual(1 + 1e-9);
+      expect(inCurve[i]).toBeGreaterThanOrEqual(-1e-9);
+      expect(inCurve[i]).toBeLessThanOrEqual(1 + 1e-9);
+    }
+  });
+});
+
 describe("chooseTransition — Spin Up vs. its near-twin Spinback", () => {
   it("prefers Spin Up when Spinback (identical genre/persona fit) was just used", () => {
     const t = chooseTransition({
@@ -491,20 +524,28 @@ describe("chooseTransition — reroll (excludeTransitionIds)", () => {
 });
 
 describe("chooseTransition — varietyBias", () => {
-  it("favors a bolder, tempo-insensitive technique over a defensive hard cut when tempo is uncertain and the genre doesn't match either", () => {
-    // bpmDelta of 0.15 is well outside every tempo-sensitive category's
-    // tolerance, and "house" doesn't match hard-cut's/echo-out's idealGenres
-    // — without bias, hard-cut wins on its flat, tempo-insensitive +10.
+  it("pushes harder against repeating the same pick than the default anti-repetition penalty alone", () => {
+    // With "cut" entirely disabled (Hard Cut and Quick Chop are both
+    // executable: false by user preference — no sudden stops, ever),
+    // "Echo Out" is the strongest tempo-insensitive pick for a dubstep-
+    // tagged, wide-tempo-gap pair. The default -7 repetition penalty isn't
+    // enough to dislodge its lead here, but varietyBias's doubled -14
+    // penalty is — a real, still-observable effect of the flag now that
+    // its old "avoid the defensive cut" behavior has nothing left to do.
     const ctx = {
-      bpmDelta: 0.15,
+      bpmDelta: 0.2,
       tempoSync: false,
-      genreHint: "house",
+      genreHint: "dubstep",
       personaDjNames: [],
     };
-    const withoutBias = chooseTransition(ctx);
-    expect(withoutBias.category).toBe("cut");
+    const top = chooseTransition(ctx);
+    expect(top.id).toBe("echo-out");
 
-    const withBias = chooseTransition({ ...ctx, varietyBias: true });
-    expect(withBias.category).not.toBe("cut");
+    const recentCtx = { ...ctx, recentTransitionIds: [top.id] };
+    const withoutBias = chooseTransition(recentCtx);
+    expect(withoutBias.id).toBe(top.id); // single penalty doesn't dislodge the leader
+
+    const withBias = chooseTransition({ ...recentCtx, varietyBias: true });
+    expect(withBias.id).not.toBe(top.id); // doubled penalty does
   });
 });

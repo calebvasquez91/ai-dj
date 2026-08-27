@@ -14,7 +14,7 @@ import type { TrackAnalysis } from "@/lib/audio-analysis";
 
 export type AmbienceFrequency = "off" | "occasional" | "frequent";
 
-export type AmbienceEffect = "riser" | "echo-tail";
+export type AmbienceEffect = "riser" | "echo-tail" | "vocal-echo";
 
 export interface AmbienceCue {
   effect: AmbienceEffect;
@@ -47,6 +47,8 @@ const BUILD_RISE_RATIO = 1.35;
 const BREAKDOWN_WINDOW_SEC = 6;
 /** Recent energy at or below this fraction of the track's own average counts as a lull, when no breakdownAtSec was detected. */
 const LOW_ENERGY_RATIO = 0.45;
+/** How often a breakdown moment reaches for the bigger acoustic-feel + stadium-echo vocal moment instead of the lighter echo-tail — it's meant to read as a rarer highlight, not the default breakdown treatment. */
+const VOCAL_ECHO_CHANCE = 0.35;
 
 function averagePeaks(peaks: number[]): number {
   if (peaks.length === 0) return 0;
@@ -117,6 +119,9 @@ export function shouldTriggerAmbience({
     return { effect: "riser", windowSec: 6 };
   }
   if (detectBreakdown(analysis, durationSec, currentTimeSec)) {
+    if (Math.random() < VOCAL_ECHO_CHANCE) {
+      return { effect: "vocal-echo", windowSec: 9 };
+    }
     return { effect: "echo-tail", windowSec: 3 };
   }
   return null;

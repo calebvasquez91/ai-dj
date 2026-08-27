@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { shouldTriggerAmbience } from "./ambience";
 import type { TrackAnalysis } from "./audio-analysis";
 
@@ -28,6 +28,10 @@ function flatPeaks(value: number, length = DURATION_SEC): number[] {
 }
 
 describe("shouldTriggerAmbience", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
   it("returns null when ambience is off", () => {
     const peaks = flatPeaks(0.2).map((v, i) => (i >= 66 && i < 70 ? 0.9 : v));
     const analysis = makeAnalysis(peaks, { dropAtSec: 75 });
@@ -80,7 +84,8 @@ describe("shouldTriggerAmbience", () => {
     expect(cue).toBeNull();
   });
 
-  it("fires an echo-tail cue on arrival at a detected breakdown", () => {
+  it("fires an echo-tail cue on arrival at a detected breakdown, most of the time", () => {
+    vi.spyOn(Math, "random").mockReturnValue(0.99); // above VOCAL_ECHO_CHANCE — takes the lighter branch
     const analysis = makeAnalysis(flatPeaks(0.2), { breakdownAtSec: 40 });
     const cue = shouldTriggerAmbience({
       analysis,
@@ -92,7 +97,21 @@ describe("shouldTriggerAmbience", () => {
     expect(cue).toEqual({ effect: "echo-tail", windowSec: 3 });
   });
 
+  it("fires the bigger vocal-echo cue on a detected breakdown, occasionally", () => {
+    vi.spyOn(Math, "random").mockReturnValue(0); // below VOCAL_ECHO_CHANCE — takes the bigger branch
+    const analysis = makeAnalysis(flatPeaks(0.2), { breakdownAtSec: 40 });
+    const cue = shouldTriggerAmbience({
+      analysis,
+      durationSec: DURATION_SEC,
+      currentTimeSec: 42,
+      lastTriggeredSec: null,
+      frequency: "occasional",
+    });
+    expect(cue).toEqual({ effect: "vocal-echo", windowSec: 9 });
+  });
+
   it("falls back to a peaks-derived lull when no breakdownAtSec was detected", () => {
+    vi.spyOn(Math, "random").mockReturnValue(0.99);
     const peaks = flatPeaks(0.6).map((v, i) => (i >= 76 && i < 80 ? 0.2 : v));
     const analysis = makeAnalysis(peaks);
     const cue = shouldTriggerAmbience({

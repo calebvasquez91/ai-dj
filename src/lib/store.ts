@@ -35,6 +35,8 @@ interface PlayerState {
   /** Occasional mid-track FX (filter/riser builds, echo throws on breakdowns) — separate from transition FX, which always fire regardless of this setting. */
   ambienceEnabled: boolean;
   ambienceFrequency: AmbienceFrequency;
+  /** Opportunistic tempo/key-matched dual-track mashup moments — a distinct, rarer "special moment" from ambience FX. */
+  mashupEnabled: boolean;
 
   playlists: Playlist[];
   playlistsLoaded: boolean;
@@ -74,6 +76,7 @@ interface PlayerState {
   setActiveTransitionRationale: (rationale: string | null) => void;
   setAmbienceEnabled: (enabled: boolean) => void;
   setAmbienceFrequency: (frequency: AmbienceFrequency) => void;
+  setMashupEnabled: (enabled: boolean) => void;
   setTrackPlayPreference: (trackId: string, preference: Track["playPreference"]) => void;
 
   loadPlaylists: () => Promise<void>;
@@ -116,6 +119,7 @@ export const useStore = create<PlayerState>()(
       activeTransitionRationale: null,
       ambienceEnabled: true,
       ambienceFrequency: "occasional",
+      mashupEnabled: true,
 
       playlists: [],
       playlistsLoaded: false,
@@ -208,6 +212,7 @@ export const useStore = create<PlayerState>()(
       setActiveTransitionRationale: (rationale) => set({ activeTransitionRationale: rationale }),
       setAmbienceEnabled: (enabled) => set({ ambienceEnabled: enabled }),
       setAmbienceFrequency: (frequency) => set({ ambienceFrequency: frequency }),
+      setMashupEnabled: (enabled) => set({ mashupEnabled: enabled }),
       // Only localLibrary is the source of truth for curation flags, but
       // patch every place a matching track object might already live so a
       // badge shown elsewhere (queue, playlists, deck view) stays in sync.

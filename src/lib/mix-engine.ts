@@ -26,7 +26,7 @@ const TEMPO_SYNC_MAX_DELTA = 0.08;
  * otherwise read as a perfect bpmDelta-of-0 tempo match and get blended,
  * even though nothing about their real tempos is actually known.
  */
-const MIN_TEMPO_CONFIDENCE_FOR_TRUST = 0.35;
+export const MIN_TEMPO_CONFIDENCE_FOR_TRUST = 0.35;
 
 function clamp(value: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, value));
@@ -52,14 +52,14 @@ export function equalPowerCurves(steps = 64): { outCurve: Float32Array; inCurve:
 }
 
 /** BPM ratio (a/b) adjusted to whichever octave (1x, 2x, 0.5x) sits closest to 1 — treats double/half-tempo as compatible. */
-function bestTempoRatio(bpmA: number, bpmB: number): number {
+export function bestTempoRatio(bpmA: number, bpmB: number): number {
   if (bpmA <= 0 || bpmB <= 0) return 1;
   const raw = bpmA / bpmB;
   const candidates = [raw, raw * 2, raw / 2];
   return candidates.reduce((best, r) => (Math.abs(r - 1) < Math.abs(best - 1) ? r : best));
 }
 
-function snapToBeatGrid(timeSec: number, beatGridOffsetSec: number, bpm: number): number {
+export function snapToBeatGrid(timeSec: number, beatGridOffsetSec: number, bpm: number): number {
   if (bpm <= 0) return Math.max(0, timeSec);
   const beatLenSec = 60 / bpm;
   const beatsSinceOffset = (timeSec - beatGridOffsetSec) / beatLenSec;
@@ -241,6 +241,42 @@ export function stutterGateCurves(
   return { outCurve, inCurve };
 }
 
+/**
+ * Gain shape for a matched mashup's full overlap window: both decks ease
+ * to a shared mid-level (so the combined loudness of two full mixes
+ * playing together doesn't spike), hold there for the bulk of the
+ * section, then resolve down to a normal single-track handoff using the
+ * same equal-power taper every other blend uses — "no sudden stop"
+ * applies here exactly as everywhere else, just stretched across bars
+ * instead of seconds.
+ */
+export function mashupGainCurves(
+  steps = 128,
+  holdStartRatio = 0.15,
+  holdEndRatio = 0.7,
+  midLevel = 0.75
+): { outCurve: Float32Array; inCurve: Float32Array } {
+  const outCurve = new Float32Array(steps);
+  const inCurve = new Float32Array(steps);
+  for (let i = 0; i < steps; i++) {
+    const p = i / (steps - 1);
+    if (p < holdStartRatio) {
+      const local = p / holdStartRatio;
+      outCurve[i] = 1 - local * (1 - midLevel);
+      inCurve[i] = local * midLevel;
+    } else if (p < holdEndRatio) {
+      outCurve[i] = midLevel;
+      inCurve[i] = midLevel;
+    } else {
+      const local = (p - holdEndRatio) / (1 - holdEndRatio);
+      const { outGain, inGain } = equalPowerGains(local);
+      outCurve[i] = midLevel * outGain;
+      inCurve[i] = midLevel + (1 - midLevel) * inGain;
+    }
+  }
+  return { outCurve, inCurve };
+}
+
 // ---------------------------------------------------------------------------
 // Harmonic mixing — Camelot wheel key-compatibility scoring. This is a
 // selection *input* (which transition/pairing reads as musically sound),
@@ -248,7 +284,7 @@ export function stutterGateCurves(
 // than becoming its own TransitionEntry.
 // ---------------------------------------------------------------------------
 
-const MIN_KEY_CONFIDENCE_FOR_SCORING = 0.15;
+export const MIN_KEY_CONFIDENCE_FOR_SCORING = 0.15;
 
 function parseCamelotCode(code: string): { number: number; letter: "A" | "B" } | null {
   const m = code.match(/^(\d{1,2})([AB])$/);

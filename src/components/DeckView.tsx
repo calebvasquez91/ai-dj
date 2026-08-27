@@ -155,6 +155,8 @@ export function DeckView() {
   const setAmbienceEnabled = useStore((s) => s.setAmbienceEnabled);
   const ambienceFrequency = useStore((s) => s.ambienceFrequency);
   const setAmbienceFrequency = useStore((s) => s.setAmbienceFrequency);
+  const mashupEnabled = useStore((s) => s.mashupEnabled);
+  const setMashupEnabled = useStore((s) => s.setMashupEnabled);
   const categoryWeights = useDjWeights((s) => s.categoryWeights);
 
   const nextTrack = queue[0] ?? null;
@@ -256,6 +258,18 @@ export function DeckView() {
                 ))}
               </select>
             )}
+            <label
+              className="flex items-center gap-1.5 text-xs text-muted cursor-pointer"
+              title="Opportunistic tempo/key-matched dual-track mashup moments — a rarer, bigger highlight than a normal transition, only for pairs that are genuinely close in tempo and key"
+            >
+              <input
+                type="checkbox"
+                checked={mashupEnabled}
+                onChange={(e) => setMashupEnabled(e.target.checked)}
+                className="accent-accent-purple"
+              />
+              Mashups
+            </label>
             <button
               type="button"
               onClick={toggle}
