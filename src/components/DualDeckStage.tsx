@@ -12,6 +12,7 @@ import {
   mashupGainCurves,
   planSimpleFade,
   planTransition,
+  snapToBeatGrid,
   spinUpGainCurves,
   stutterGateCurves,
   type TransitionPlan,
@@ -82,6 +83,31 @@ interface VocalEchoNodes {
   delayGain: GainNode;
   /** Overall wet level for this effect — the only node actually automated per-trigger; everything upstream is static, silent by default. */
   sendGain: GainNode;
+  /** Direct (non-reverb/delay) send for the isolated vocal-forward signal — used by the acapella-drop ad-lib to play it alone, dry, while the main mix is ducked. Silent by default. */
+  dryGain: GainNode;
+}
+
+/**
+ * A freeform beat-aligned loop in progress: repeats a short segment of the
+ * *same* track by rewinding the active <audio> element's own currentTime —
+ * not a separate buffer voice, so there's no new audio path and releasing
+ * it is inherently seamless (playback just stops being rewound and
+ * continues forward exactly as it already was). Used for the drum-break
+ * ad-lib now; the start/bars/repeat parameters are generic enough to loop
+ * any beat-aligned segment.
+ */
+interface ActiveLoop {
+  deckId: DeckId;
+  startSec: number;
+  endSec: number;
+  repeatsRemaining: number;
+  tickIntervalId: ReturnType<typeof setInterval> | null;
+}
+
+/** A backspin ad-lib in progress — a plain interval driving the active deck's own playbackRate down and back up (never its gain), tracked so an external track change or seek mid-backspin can cancel it before it applies a stale rate to whatever loads next. */
+interface ActiveBackspin {
+  deckId: DeckId;
+  intervalId: ReturnType<typeof setInterval>;
 }
 
 /** Real brakes don't slow linearly to a full stop — they decelerate hard early and crawl at the end. An ease-out curve (not linear) captures that. */
@@ -152,6 +178,8 @@ export function DualDeckStage() {
   const mashupPlanCacheRef = useRef<{ pairKey: string; plan: MashupPlan | null } | null>(null);
   const vocalEchoNodesRef = useRef<Record<DeckId, VocalEchoNodes | null>>({ A: null, B: null });
   const stadiumIrRef = useRef<AudioBuffer | null>(null);
+  const loopRef = useRef<ActiveLoop | null>(null);
+  const backspinRef = useRef<ActiveBackspin | null>(null);
 
   const [activeDeck, setActiveDeck] = useState<DeckId>("A");
 
@@ -243,6 +271,24 @@ export function DualDeckStage() {
     useStore.getState().setIsTransitioning(false);
     useStore.getState().setActiveTransitionRationale(null);
   }, [resetDeckNodes]);
+
+  /** Stops an in-progress freeform beat-loop from rewinding again — the deck's own playback just continues forward untouched, since the loop never altered gain or node state, only currentTime. */
+  const cancelLoop = useCallback(() => {
+    const l = loopRef.current;
+    if (!l) return;
+    if (l.tickIntervalId != null) clearInterval(l.tickIntervalId);
+    loopRef.current = null;
+  }, []);
+
+  /** Stops an in-progress backspin from continuing to drive playbackRate — restores it to 1 immediately rather than leaving the deck at whatever intermediate rate the ramp was at. */
+  const cancelBackspin = useCallback(() => {
+    const b = backspinRef.current;
+    if (!b) return;
+    clearInterval(b.intervalId);
+    const el = deckEl(b.deckId);
+    if (el) el.playbackRate = 1;
+    backspinRef.current = null;
+  }, [deckEl]);
 
   // Background analysis: as soon as a track is reachable (now playing or
   // queued), estimate its BPM/beat-grid/energy-onset/key so a mix engine
@@ -948,6 +994,14 @@ export function DualDeckStage() {
       delayGain.connect(sendGain);
       sendGain.connect(masterGain);
 
+      // Direct (dry) send for the acapella drop — plays the isolated
+      // vocal-forward signal alone, without the reverb/delay coloring,
+      // while the main deck gain is ducked. Silent by default, same as sendGain.
+      const dryGain = ctx.createGain();
+      dryGain.gain.value = 0;
+      vocalForward.connect(dryGain);
+      dryGain.connect(masterGain);
+
       const nodes: VocalEchoNodes = {
         splitter,
         vocalForward,
@@ -957,6 +1011,7 @@ export function DualDeckStage() {
         slapFeedback,
         delayGain,
         sendGain,
+        dryGain,
       };
       vocalEchoNodesRef.current[deckId] = nodes;
       return nodes;
@@ -1000,9 +1055,121 @@ export function DualDeckStage() {
       vocalNodes.sendGain.gain.linearRampToValueAtTime(0, now + windowSec);
     }
 
+    /**
+     * A standalone backspin flourish — reuses the same ease-out deceleration
+     * curve as the Spinback/Brake transition, but as an in-track ad-lib: rides
+     * the active deck's own playbackRate down toward BRAKE_MIN_RATE and back
+     * to 1, never touching gain, so there's never a moment of silence.
+     * Guarded by backspinRef so a track change or seek mid-backspin can
+     * cancel it before it applies a stale rate to whatever loads next.
+     */
+    function triggerBackspin(deckId: DeckId, windowSec: number) {
+      if (backspinRef.current) return;
+      const el = deckEl(deckId);
+      if (!el) return;
+      const decelRatio = 0.75;
+      const decelMs = windowSec * decelRatio * 1000;
+      const recoverMs = windowSec * (1 - decelRatio) * 1000;
+      const startedAt = performance.now();
+      const intervalId = setInterval(() => {
+        const b = backspinRef.current;
+        if (!b) return;
+        const loopEl = deckEl(b.deckId);
+        if (!loopEl) return;
+        const elapsed = performance.now() - startedAt;
+        if (elapsed < decelMs) {
+          const progress = elapsed / decelMs;
+          const eased = 1 - Math.pow(1 - progress, 3);
+          loopEl.playbackRate = 1 - eased * (1 - BRAKE_MIN_RATE);
+        } else if (elapsed < decelMs + recoverMs) {
+          const progress = (elapsed - decelMs) / recoverMs;
+          loopEl.playbackRate = BRAKE_MIN_RATE + progress * (1 - BRAKE_MIN_RATE);
+        } else {
+          loopEl.playbackRate = 1;
+          clearInterval(b.intervalId);
+          backspinRef.current = null;
+        }
+      }, TICK_INTERVAL_MS);
+      backspinRef.current = { deckId, intervalId };
+    }
+
+    /**
+     * The freeform beat-loop primitive: repeats a short beat-aligned segment
+     * of the *currently playing* track by rewinding the active <audio>
+     * element's own currentTime back to startSec once it reaches endSec —
+     * no separate buffer voice, no new node graph, so release after the
+     * final repeat is inherently seamless (playback simply stops being
+     * rewound and continues forward exactly as it already was).
+     * Honest limitation: the loop-back splice isn't zero-crossing-aligned;
+     * beat-grid snapping keeps it landing on-beat, but a very quiet click at
+     * the seam is possible on some material.
+     */
+    function startBeatLoop(
+      deckId: DeckId,
+      analysis: TrackAnalysis,
+      currentTimeSec: number,
+      barsCount: number,
+      repeatCount: number
+    ) {
+      if (loopRef.current) return;
+      const el = deckEl(deckId);
+      if (!el || !Number.isFinite(el.duration) || el.duration <= 0) return;
+      const startSec = snapToBeatGrid(currentTimeSec, analysis.beatGridOffsetSec, analysis.bpm);
+      const effectiveBpm = analysis.bpm > 0 ? analysis.bpm : 120;
+      const endSec = startSec + (barsCount * 4 * 60) / effectiveBpm;
+      if (endSec >= el.duration - 1) return;
+
+      const loop: ActiveLoop = { deckId, startSec, endSec, repeatsRemaining: repeatCount, tickIntervalId: null };
+      loop.tickIntervalId = setInterval(() => {
+        const l = loopRef.current;
+        if (!l) return;
+        const loopEl = deckEl(l.deckId);
+        if (!loopEl) return;
+        if (loopEl.currentTime >= l.endSec) {
+          l.repeatsRemaining -= 1;
+          if (l.repeatsRemaining <= 0) {
+            if (l.tickIntervalId != null) clearInterval(l.tickIntervalId);
+            loopRef.current = null;
+            return;
+          }
+          loopEl.currentTime = l.startSec;
+        }
+      }, TICK_INTERVAL_MS);
+      loopRef.current = loop;
+    }
+
+    /**
+     * Ducks the deck's normal mix down while bringing the isolated
+     * vocal-forward signal up to play alone, dry, for a phrase — then
+     * reverses both. Reuses the same M/S tap built for the vocal-echo
+     * moment; both sides only ever ramp, so the full mix is always heard
+     * fading back in rather than snapping back.
+     */
+    function triggerAcapellaDrop(deckId: DeckId, windowSec: number) {
+      const ctx = audioCtxRef.current;
+      const masterGain = masterGainRef.current;
+      const nodes = deckNodesRef.current[deckId];
+      if (!ctx || !masterGain || !nodes) return;
+      const vocalNodes = getOrCreateVocalEchoNodes(deckId, ctx, nodes, masterGain);
+      const now = ctx.currentTime;
+      const duckedLevel = 0.08;
+
+      nodes.gain.gain.cancelScheduledValues(now);
+      nodes.gain.gain.setValueAtTime(nodes.gain.gain.value, now);
+      nodes.gain.gain.linearRampToValueAtTime(duckedLevel, now + windowSec * 0.15);
+      nodes.gain.gain.setValueAtTime(duckedLevel, now + windowSec * 0.85);
+      nodes.gain.gain.linearRampToValueAtTime(1, now + windowSec);
+
+      vocalNodes.dryGain.gain.cancelScheduledValues(now);
+      vocalNodes.dryGain.gain.setValueAtTime(0, now);
+      vocalNodes.dryGain.gain.linearRampToValueAtTime(1.6, now + windowSec * 0.15);
+      vocalNodes.dryGain.gain.setValueAtTime(1.6, now + windowSec * 0.85);
+      vocalNodes.dryGain.gain.linearRampToValueAtTime(0, now + windowSec);
+    }
+
     /** Occasional mid-track FX — never during an active transition, gated by ambienceEnabled/ambienceFrequency and shouldTriggerAmbience()'s own cooldown/energy-curve logic. */
     function tryAmbience() {
-      if (transitionRef.current || mashupRef.current) return;
+      if (transitionRef.current || mashupRef.current || loopRef.current || backspinRef.current) return;
       const state = useStore.getState();
       if (!state.ambienceEnabled || state.ambienceFrequency === "off") return;
       const track = state.currentTrack;
@@ -1037,6 +1204,12 @@ export function DualDeckStage() {
         nodes.delaySend.gain.linearRampToValueAtTime(0, now + cue.windowSec);
       } else if (cue.effect === "vocal-echo") {
         triggerVocalEcho(activeDeckRef.current, cue.windowSec);
+      } else if (cue.effect === "backspin") {
+        triggerBackspin(activeDeckRef.current, cue.windowSec);
+      } else if (cue.effect === "acapella-drop") {
+        triggerAcapellaDrop(activeDeckRef.current, cue.windowSec);
+      } else if (cue.effect === "drum-break") {
+        startBeatLoop(activeDeckRef.current, getAnalysis(track.id), currentTime, cue.barsCount, cue.repeatCount);
       }
     }
 
@@ -1054,7 +1227,7 @@ export function DualDeckStage() {
     }
 
     function tryAutoTransition() {
-      if (transitionRef.current || mashupRef.current) return;
+      if (transitionRef.current || mashupRef.current || loopRef.current || backspinRef.current) return;
       const state = useStore.getState();
       const track = state.currentTrack;
       if (!track) return;
@@ -1211,6 +1384,14 @@ export function DualDeckStage() {
         // Already stopped — harmless.
       }
       mashupRef.current = null;
+      if (loopRef.current?.tickIntervalId != null) {
+        clearInterval(loopRef.current.tickIntervalId);
+      }
+      loopRef.current = null;
+      if (backspinRef.current != null) {
+        clearInterval(backspinRef.current.intervalId);
+      }
+      backspinRef.current = null;
       elA?.removeEventListener("ended", onEndedA);
       elB?.removeEventListener("ended", onEndedB);
     };
@@ -1229,6 +1410,8 @@ export function DualDeckStage() {
 
     cancelTransition();
     cancelMashup();
+    cancelLoop();
+    cancelBackspin();
 
     const idleId: DeckId = activeDeck === "A" ? "B" : "A";
     const idleEl = deckEl(idleId);
@@ -1263,7 +1446,7 @@ export function DualDeckStage() {
       audioCtxRef.current?.resume().catch(() => {});
       activeEl.play().catch(() => {});
     }
-  }, [currentTrack, activeDeck, cancelMashup, cancelTransition, deckEl, resetDeckNodes]);
+  }, [currentTrack, activeDeck, cancelBackspin, cancelLoop, cancelMashup, cancelTransition, deckEl, resetDeckNodes]);
 
   useEffect(() => {
     const activeEl = deckEl(activeDeck);
@@ -1284,10 +1467,12 @@ export function DualDeckStage() {
     if (seekRequest == null) return;
     cancelTransition();
     cancelMashup();
+    cancelLoop();
+    cancelBackspin();
     const activeEl = deckEl(activeDeck);
     if (activeEl) activeEl.currentTime = seekRequest;
     clearSeekRequest();
-  }, [seekRequest, activeDeck, cancelMashup, clearSeekRequest, cancelTransition, deckEl]);
+  }, [seekRequest, activeDeck, cancelBackspin, cancelLoop, cancelMashup, clearSeekRequest, cancelTransition, deckEl]);
 
   return (
     <>

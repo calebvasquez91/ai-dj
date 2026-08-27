@@ -14,12 +14,16 @@ import type { TrackAnalysis } from "@/lib/audio-analysis";
 
 export type AmbienceFrequency = "off" | "occasional" | "frequent";
 
-export type AmbienceEffect = "riser" | "echo-tail" | "vocal-echo";
+export type AmbienceEffect = "riser" | "echo-tail" | "vocal-echo" | "backspin" | "drum-break" | "acapella-drop";
 
-export interface AmbienceCue {
-  effect: AmbienceEffect;
-  windowSec: number;
-}
+export type AmbienceCue =
+  | { effect: "riser"; windowSec: number }
+  | { effect: "echo-tail"; windowSec: number }
+  | { effect: "vocal-echo"; windowSec: number }
+  | { effect: "backspin"; windowSec: number }
+  /** A short, beat-aligned loop of the track's current (breakdown-adjacent) moment — repeated `repeatCount` times before releasing back into normal playback. */
+  | { effect: "drum-break"; windowSec: number; barsCount: number; repeatCount: number }
+  | { effect: "acapella-drop"; windowSec: number };
 
 export interface AmbienceInput {
   analysis: TrackAnalysis;
@@ -47,8 +51,38 @@ const BUILD_RISE_RATIO = 1.35;
 const BREAKDOWN_WINDOW_SEC = 6;
 /** Recent energy at or below this fraction of the track's own average counts as a lull, when no breakdownAtSec was detected. */
 const LOW_ENERGY_RATIO = 0.45;
-/** How often a breakdown moment reaches for the bigger acoustic-feel + stadium-echo vocal moment instead of the lighter echo-tail — it's meant to read as a rarer highlight, not the default breakdown treatment. */
-const VOCAL_ECHO_CHANCE = 0.35;
+/**
+ * Weighted split of which effect a build/breakdown moment reaches for —
+ * kept as explicit weights (not a flat random pick) so echo-tail stays the
+ * common, low-key default and the bigger moments (vocal-echo, drum-break,
+ * acapella-drop, backspin) read as rarer highlights, matching how a real
+ * DJ would use a dramatic effect occasionally, not on every single cue.
+ */
+const BUILD_EFFECT_WEIGHTS: { effect: "riser" | "backspin"; weight: number }[] = [
+  { effect: "riser", weight: 0.7 },
+  { effect: "backspin", weight: 0.3 },
+];
+const BREAKDOWN_EFFECT_WEIGHTS: { effect: "echo-tail" | "vocal-echo" | "drum-break" | "acapella-drop"; weight: number }[] = [
+  { effect: "echo-tail", weight: 0.4 },
+  { effect: "vocal-echo", weight: 0.2 },
+  { effect: "drum-break", weight: 0.2 },
+  { effect: "acapella-drop", weight: 0.2 },
+];
+/** 2-4 bar loop, repeated 3-5 times — long enough to read as a deliberate "ride the break," short enough to release before it overstays. */
+const DRUM_BREAK_MIN_BARS = 2;
+const DRUM_BREAK_MAX_BARS = 4;
+const DRUM_BREAK_MIN_REPEATS = 3;
+const DRUM_BREAK_MAX_REPEATS = 5;
+
+function weightedPick<T>(options: { effect: T; weight: number }[]): T {
+  const total = options.reduce((sum, o) => sum + o.weight, 0);
+  let roll = Math.random() * total;
+  for (const option of options) {
+    if (roll < option.weight) return option.effect;
+    roll -= option.weight;
+  }
+  return options[options.length - 1].effect;
+}
 
 function averagePeaks(peaks: number[]): number {
   if (peaks.length === 0) return 0;
@@ -70,7 +104,11 @@ function peakWindowAverage(peaks: number[], durationSec: number, fromSec: number
 function detectBuild(analysis: TrackAnalysis, durationSec: number, currentTimeSec: number): boolean {
   const { waveformPeaks, dropAtSec } = analysis;
   if (waveformPeaks.length === 0) return false;
-  if (dropAtSec != null) {
+  // A detected drop at or before t=0 (the loudest moment in the track being
+  // its very intro, e.g. a cold-open hit) isn't a meaningful lookahead
+  // target — treat it the same as "no drop known" rather than letting it
+  // permanently disqualify every later timestamp in the track.
+  if (dropAtSec != null && dropAtSec > 0) {
     const timeToDrop = dropAtSec - currentTimeSec;
     if (timeToDrop <= 0 || timeToDrop > BUILD_LOOKAHEAD_SEC) return false;
   }
@@ -116,11 +154,21 @@ export function shouldTriggerAmbience({
   if (lastTriggeredSec != null && currentTimeSec - lastTriggeredSec < cooldownSec) return null;
 
   if (detectBuild(analysis, durationSec, currentTimeSec)) {
+    const effect = weightedPick(BUILD_EFFECT_WEIGHTS);
+    if (effect === "backspin") return { effect: "backspin", windowSec: 2 };
     return { effect: "riser", windowSec: 6 };
   }
   if (detectBreakdown(analysis, durationSec, currentTimeSec)) {
-    if (Math.random() < VOCAL_ECHO_CHANCE) {
-      return { effect: "vocal-echo", windowSec: 9 };
+    const effect = weightedPick(BREAKDOWN_EFFECT_WEIGHTS);
+    if (effect === "vocal-echo") return { effect: "vocal-echo", windowSec: 9 };
+    if (effect === "acapella-drop") return { effect: "acapella-drop", windowSec: 8 };
+    if (effect === "drum-break") {
+      const barsCount = DRUM_BREAK_MIN_BARS + Math.round(Math.random() * (DRUM_BREAK_MAX_BARS - DRUM_BREAK_MIN_BARS));
+      const repeatCount =
+        DRUM_BREAK_MIN_REPEATS + Math.round(Math.random() * (DRUM_BREAK_MAX_REPEATS - DRUM_BREAK_MIN_REPEATS));
+      const effectiveBpm = analysis.bpm > 0 ? analysis.bpm : 120;
+      const windowSec = (barsCount * repeatCount * 4 * 60) / effectiveBpm;
+      return { effect: "drum-break", windowSec, barsCount, repeatCount };
     }
     return { effect: "echo-tail", windowSec: 3 };
   }
