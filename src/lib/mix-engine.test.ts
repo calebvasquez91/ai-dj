@@ -44,14 +44,17 @@ describe("planTransition", () => {
     expect(plan.windowBeats).toBeGreaterThanOrEqual(8);
   });
 
-  it("picks a cut transition for far-apart BPMs with a hip-hop persona", () => {
+  it("picks a tempo-insensitive, hip-hop-flavored transition for far-apart BPMs with a hip-hop persona", () => {
     const plan = planTransition({
       current: { track: makeTrack("a", 240), analysis: makeAnalysis({ bpm: 100 }) },
       next: { track: makeTrack("b", 240), analysis: makeAnalysis({ bpm: 137 }) },
       genreHint: "hip-hop",
     });
     expect(plan.tempoSync).toBe(false);
-    expect(plan.category).toBe("cut");
+    // "cut" (specifically Hard Cut) is disabled by user preference — see
+    // data/transitions.ts — so a mismatched-tempo hip-hop pair should land
+    // on some other tempo-insensitive, genre-appropriate technique instead.
+    expect(["cut", "scratch", "tag-sample", "word-play"]).toContain(plan.category);
   });
 
   it("never defaults the incoming entry point to zero when an energy onset was detected", () => {
@@ -125,13 +128,13 @@ describe("planTransition", () => {
     expect(plan.rationale.length).toBeGreaterThan(0);
   });
 
-  it("never floors a hard-cut/quick-chop window at the multi-second blend minimum", () => {
+  it("never floors a short/tempo-insensitive transition's window at the multi-second blend minimum", () => {
     const plan = planTransition({
       current: { track: makeTrack("a", 240), analysis: makeAnalysis({ bpm: 100 }) },
       next: { track: makeTrack("b", 240), analysis: makeAnalysis({ bpm: 137 }) },
       genreHint: "hip-hop",
     });
-    expect(plan.category).toBe("cut");
+    expect(plan.tempoSync).toBe(false);
     expect(plan.windowSec).toBeLessThan(3);
   });
 

@@ -46,10 +46,10 @@ export const transitions: TransitionEntry[] = [
     id: "hard-cut",
     name: "Hard Cut",
     category: "cut",
-    description: "An immediate, beat-aligned switch from one track to the next with no overlap.",
+    description: "An immediate, beat-aligned switch from one track to the next with no overlap. Disabled by user preference — Auto-DJ was reaching for this too often instead of actually blending; kept here as data/persona only, never picked to actually play.",
     idealBpmDeltaMax: Infinity,
     idealGenres: ["hip-hop", "breakbeat"],
-    executable: true,
+    executable: false,
     exampleDjs: ["Grandmaster Flash", "DJ Premier"],
   },
   {
