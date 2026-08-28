@@ -5,10 +5,13 @@ import { useStore } from "@/lib/store";
 import {
   AUTO_DJ_OFF_FADE_SEC,
   MAX_ACTIVE_PLAY_SEC,
+  MIN_ACTIVE_PLAY_SEC,
   TRACK_FADE_IN_SEC,
   TRACK_FADE_OUT_SEC,
+  bestTempoRatio,
   brakeGainCurves,
   equalPowerCurves,
+  isTempoRampEligible,
   mashupGainCurves,
   planSimpleFade,
   planTransition,
@@ -71,6 +74,42 @@ interface ActiveMashup {
   currentTempo: number;
   tickIntervalId: ReturnType<typeof setInterval> | null;
 }
+
+/**
+ * A pre-transition tempo ramp in progress: the *outgoing* deck's own track
+ * is temporarily played through a SoundTouchJS buffer-voice (the same
+ * mechanism the mashup engine uses, just applied to the other side) so its
+ * tempo can glide from 1x toward the upcoming track's native tempo — real,
+ * independent time-stretching, not playbackRate — before the actual blend
+ * starts. Once it reaches the target, playback hands back to the deck's own
+ * <audio> element at that matched rate (an ordinary, already-accepted
+ * playbackRate hold for the short blend window, same as any tempoSynced
+ * incoming deck today) and the pairing is recorded in
+ * tempoRampCompletedPairRef so the upcoming startTransition() call knows
+ * the outgoing side already did the matching work.
+ */
+interface ActiveTempoRamp {
+  deckId: DeckId;
+  trackId: string;
+  nextTrackId: string;
+  voice: TimeStretchVoice;
+  voiceGain: GainNode;
+  /** el.currentTime at the moment the buffer-voice took over. */
+  entryTrackTimeSec: number;
+  /** playbackRate the deck should end up holding — makes its effective tempo match the incoming track's native tempo. */
+  targetTempo: number;
+  startTime: number;
+  durationMs: number;
+  lastTickTime: number;
+  trackTimeElapsedSec: number;
+  currentTempo: number;
+  tickIntervalId: ReturnType<typeof setInterval> | null;
+}
+
+/** How long the pre-transition tempo ramp takes — matches tempo-ramp's own MIN_WINDOW_SEC_BY_CATEGORY floor in mix-engine.ts. */
+const TEMPO_RAMP_PRE_WINDOW_SEC = 8;
+/** Short fade at the <audio>-element/buffer-voice swap boundary (both directions) — belt-and-suspenders against a click even though both sides play identical content from the same position. */
+const TEMPO_RAMP_SWAP_FADE_SEC = 0.03;
 
 /** Per-deck nodes for the acoustic-feel + stadium-echo vocal moment — built lazily on first use, not part of the always-present per-deck graph, since it's a rarely-triggered effect. */
 interface VocalEchoNodes {
@@ -180,6 +219,15 @@ export function DualDeckStage() {
   const stadiumIrRef = useRef<AudioBuffer | null>(null);
   const loopRef = useRef<ActiveLoop | null>(null);
   const backspinRef = useRef<ActiveBackspin | null>(null);
+  const tempoRampRef = useRef<ActiveTempoRamp | null>(null);
+  // True synchronously as soon as a tempo-ramp decode kicks off, before
+  // tempoRampRef itself is populated — same reason mashupStartingRef exists.
+  const tempoRampStartingRef = useRef(false);
+  // Set once a pre-transition tempo ramp finishes for a given
+  // `${trackId}>${nextTrackId}` pairing — tryAutoTransition consults this so
+  // the eventual startTransition() call knows the outgoing deck already did
+  // the tempo-matching work and skips re-ramping the incoming deck on top of it.
+  const tempoRampCompletedPairRef = useRef<string | null>(null);
 
   const [activeDeck, setActiveDeck] = useState<DeckId>("A");
 
@@ -288,6 +336,33 @@ export function DualDeckStage() {
     const el = deckEl(b.deckId);
     if (el) el.playbackRate = 1;
     backspinRef.current = null;
+  }, [deckEl]);
+
+  /** Tears down an in-progress pre-transition tempo ramp (user skipped/seeked mid-ramp) — hands playback straight back to the deck's own <audio> element at wherever the buffer-voice got to, no smoothing, same as cancelTransition/cancelMashup treat an abrupt user-initiated interruption. */
+  const cancelTempoRamp = useCallback(() => {
+    const r = tempoRampRef.current;
+    if (!r) return;
+    if (r.tickIntervalId != null) clearInterval(r.tickIntervalId);
+    try {
+      r.voice.stop();
+    } catch {
+      // Already stopped — harmless.
+    }
+    r.voiceGain.disconnect();
+    const el = deckEl(r.deckId);
+    const nodes = deckNodesRef.current[r.deckId];
+    const ctx = audioCtxRef.current;
+    if (el) {
+      el.currentTime = r.entryTrackTimeSec + r.trackTimeElapsedSec;
+      el.playbackRate = 1;
+      el.play().catch(() => {});
+    }
+    if (nodes && ctx) {
+      nodes.gain.gain.cancelScheduledValues(ctx.currentTime);
+      nodes.gain.gain.setValueAtTime(1, ctx.currentTime);
+    }
+    tempoRampRef.current = null;
+    tempoRampCompletedPairRef.current = null;
   }, [deckEl]);
 
   // Background analysis: as soon as a track is reachable (now playing or
@@ -906,6 +981,160 @@ export function DualDeckStage() {
       useStore.getState().next();
     }
 
+    /**
+     * Begins gliding the outgoing deck's own track from its native tempo
+     * toward nextTrack's native tempo, using a SoundTouchJS buffer-voice in
+     * place of the deck's <audio> element — the same swap technique the
+     * mashup engine uses, just run on the other side, so the change is
+     * genuinely independent of pitch instead of a playbackRate shift. Only
+     * called for a plan.category === "tempo-ramp" pairing that already
+     * passed isTempoRampEligible(); safe to call speculatively — bails out
+     * on any staleness (track changed mid-decode) or if there isn't enough
+     * runway left for a worthwhile ramp.
+     */
+    async function startTempoRamp(
+      track: Track,
+      nextTrack: Track,
+      currentAnalysis: TrackAnalysis,
+      nextAnalysis: TrackAnalysis
+    ) {
+      if (transitionRef.current || mashupRef.current || tempoRampRef.current || tempoRampStartingRef.current) return;
+      tempoRampStartingRef.current = true;
+      const trackIdAtStart = track.id;
+      const nextTrackIdAtStart = nextTrack.id;
+      try {
+        const ctx = audioCtxRef.current;
+        const masterGain = masterGainRef.current;
+        if (!ctx || !masterGain) return;
+
+        const deckId = activeDeckRef.current;
+        const el = deckEl(deckId);
+        const nodes = deckNodesRef.current[deckId];
+        if (!el || !nodes) return;
+
+        const buffer = await decodeTrackBuffer(ctx, track.sourceUrl);
+
+        // The world may have moved on while decoding — abort rather than
+        // ramp a pairing that's no longer current.
+        const state = useStore.getState();
+        if (transitionRef.current || mashupRef.current || tempoRampRef.current) return;
+        if (state.currentTrack?.id !== trackIdAtStart || state.queue[0]?.id !== nextTrackIdAtStart) return;
+        if (activeDeckRef.current !== deckId) return;
+
+        const entryTrackTimeSec = el.currentTime;
+        const remainingSec = buffer.duration - entryTrackTimeSec;
+        // Not enough runway left for a worthwhile ramp — skip it, the
+        // existing incoming-deck playbackRate ramp in startTransition still
+        // covers this pairing as a fallback.
+        if (remainingSec < TEMPO_RAMP_PRE_WINDOW_SEC * 0.5) return;
+
+        const targetTempo = 1 / bestTempoRatio(currentAnalysis.bpm, nextAnalysis.bpm);
+
+        const voice = createTimeStretchVoice(ctx, buffer, { tempo: 1, pitchSemitones: 0 });
+        voice.setStartFraction(Math.max(0, Math.min(1, entryTrackTimeSec / buffer.duration)));
+        const voiceGain = ctx.createGain();
+        voiceGain.gain.value = 0;
+        voice.node.connect(voiceGain);
+        voiceGain.connect(masterGain);
+
+        const now = ctx.currentTime;
+        voiceGain.gain.setValueAtTime(0, now);
+        voiceGain.gain.linearRampToValueAtTime(1, now + TEMPO_RAMP_SWAP_FADE_SEC);
+        nodes.gain.gain.cancelScheduledValues(now);
+        nodes.gain.gain.setValueAtTime(nodes.gain.gain.value, now);
+        nodes.gain.gain.linearRampToValueAtTime(0, now + TEMPO_RAMP_SWAP_FADE_SEC);
+
+        // Brief overlap while the voice spins up — both sides play identical
+        // content from the same position at this instant, so a moment of
+        // overlap is inaudible, unlike a gap would be.
+        setTimeout(() => {
+          el.pause();
+        }, 150);
+
+        const ramp: ActiveTempoRamp = {
+          deckId,
+          trackId: trackIdAtStart,
+          nextTrackId: nextTrackIdAtStart,
+          voice,
+          voiceGain,
+          entryTrackTimeSec,
+          targetTempo,
+          startTime: performance.now(),
+          durationMs: TEMPO_RAMP_PRE_WINDOW_SEC * 1000,
+          lastTickTime: performance.now(),
+          trackTimeElapsedSec: 0,
+          currentTempo: 1,
+          tickIntervalId: null,
+        };
+        tempoRampRef.current = ramp;
+
+        const tick = () => {
+          const r = tempoRampRef.current;
+          if (!r) return;
+          // Staleness guard: if the pairing this ramp was computed for no
+          // longer matches reality (track skipped/changed underneath it),
+          // cancel outright rather than keep gliding toward a stale target.
+          const s = useStore.getState();
+          if (s.currentTrack?.id !== r.trackId || s.queue[0]?.id !== r.nextTrackId) {
+            if (r.tickIntervalId != null) clearInterval(r.tickIntervalId);
+            cancelTempoRamp();
+            return;
+          }
+          const nowMs = performance.now();
+          const realDeltaSec = (nowMs - r.lastTickTime) / 1000;
+          r.trackTimeElapsedSec += realDeltaSec * r.currentTempo;
+          r.lastTickTime = nowMs;
+
+          const progress = Math.min(1, (nowMs - r.startTime) / r.durationMs);
+          r.currentTempo = 1 + (r.targetTempo - 1) * progress;
+          r.voice.setTempo(r.currentTempo);
+
+          if (progress >= 1) {
+            if (r.tickIntervalId != null) clearInterval(r.tickIntervalId);
+            completeTempoRamp(r);
+          }
+        };
+        ramp.tickIntervalId = setInterval(tick, TICK_INTERVAL_MS);
+      } catch {
+        // Decode/SoundTouchJS failure — just skip the pre-ramp.
+        // tryAutoTransition falls back to the existing incoming-deck
+        // playbackRate ramp at blend time.
+      } finally {
+        tempoRampStartingRef.current = false;
+      }
+    }
+
+    /** Hands the tempo ramp back to the deck's own <audio> element at the matched rate it reached, then tears the buffer-voice down — mirrors completeMashup's own brief-overlap handoff. */
+    function completeTempoRamp(r: ActiveTempoRamp) {
+      const ctx = audioCtxRef.current;
+      const el = deckEl(r.deckId);
+      const nodes = deckNodesRef.current[r.deckId];
+      if (ctx && el && nodes) {
+        el.currentTime = r.entryTrackTimeSec + r.trackTimeElapsedSec;
+        el.playbackRate = r.targetTempo;
+        el.play().catch(() => {});
+        const now = ctx.currentTime;
+        nodes.gain.gain.cancelScheduledValues(now);
+        nodes.gain.gain.setValueAtTime(nodes.gain.gain.value, now);
+        nodes.gain.gain.linearRampToValueAtTime(1, now + TEMPO_RAMP_SWAP_FADE_SEC);
+        r.voiceGain.gain.cancelScheduledValues(now);
+        r.voiceGain.gain.setValueAtTime(r.voiceGain.gain.value, now);
+        r.voiceGain.gain.linearRampToValueAtTime(0, now + TEMPO_RAMP_SWAP_FADE_SEC);
+      }
+
+      const voice = r.voice;
+      setTimeout(() => {
+        try {
+          voice.stop();
+        } catch {
+          // Already stopped — harmless.
+        }
+      }, 150);
+
+      tempoRampRef.current = null;
+      tempoRampCompletedPairRef.current = `${r.trackId}>${r.nextTrackId}`;
+    }
+
     /** A synthesized noise-decay impulse response standing in for a real captured hall/stadium recording — no bundled audio asset, same zero-asset approach as every other FX in this app. Built once and shared across every deck's ConvolverNode. */
     function getStadiumImpulseResponse(ctx: AudioContext): AudioBuffer {
       if (stadiumIrRef.current) return stadiumIrRef.current;
@@ -1169,7 +1398,8 @@ export function DualDeckStage() {
 
     /** Occasional mid-track FX — never during an active transition, gated by ambienceEnabled/ambienceFrequency and shouldTriggerAmbience()'s own cooldown/energy-curve logic. */
     function tryAmbience() {
-      if (transitionRef.current || mashupRef.current || loopRef.current || backspinRef.current) return;
+      if (transitionRef.current || mashupRef.current || loopRef.current || backspinRef.current || tempoRampRef.current)
+        return;
       const state = useStore.getState();
       if (!state.ambienceEnabled || state.ambienceFrequency === "off") return;
       const track = state.currentTrack;
@@ -1235,7 +1465,16 @@ export function DualDeckStage() {
       if (!activeEl) return;
       const duration = activeEl.duration;
       if (!duration || !Number.isFinite(duration)) return;
-      const currentTime = activeEl.currentTime;
+      // While a pre-transition tempo ramp is running, the deck's own <audio>
+      // element is paused (the buffer-voice is carrying playback instead),
+      // so its currentTime is frozen — use the ramp's own running estimate
+      // of track position instead, or every timing trigger below would stop
+      // advancing for the whole ramp window.
+      const activeRamp =
+        tempoRampRef.current?.deckId === activeDeckRef.current ? tempoRampRef.current : null;
+      const currentTime = activeRamp
+        ? activeRamp.entryTrackTimeSec + activeRamp.trackTimeElapsedSec
+        : activeEl.currentTime;
 
       const nextTrack = state.queue[0];
       if (!nextTrack) {
@@ -1260,7 +1499,7 @@ export function DualDeckStage() {
       // own scoring. Needs a longer runway than a normal transition window
       // — it only fires once there's just enough of the current track left
       // for the whole planned overlap to actually fit before the file ends.
-      if (state.mashupEnabled && !mashupRef.current && !mashupStartingRef.current) {
+      if (state.mashupEnabled && !mashupRef.current && !mashupStartingRef.current && !tempoRampRef.current) {
         const cooldownOk =
           mashupLastAtRef.current == null || Date.now() - mashupLastAtRef.current >= MASHUP_COOLDOWN_SEC * 1000;
         if (cooldownOk) {
@@ -1280,9 +1519,10 @@ export function DualDeckStage() {
         }
       }
 
+      const nextAnalysis = getAnalysis(nextTrack.id);
       const plan = planTransition({
         current: { track, analysis: currentAnalysis },
-        next: { track: nextTrack, analysis: getAnalysis(nextTrack.id) },
+        next: { track: nextTrack, analysis: nextAnalysis },
         genreHint: state.styleGenreHint,
         overrideSec: state.crossfadeOverrideSec,
         currentElapsedSec: currentTime,
@@ -1309,28 +1549,81 @@ export function DualDeckStage() {
       // - Breakdown Mixing: the outgoing track's low-energy breakdown is
       //   imminent — an opportunistic early mix since there's less to
       //   clash with, for whichever transition style got chosen
+      // Double Drop and Breakdown Mixing are gated behind MIN_ACTIVE_PLAY_SEC
+      // (a floor, not a ceiling) — they're the two *opportunistic* triggers
+      // that could otherwise fire well before a track's had any real airtime.
       const nearNaturalEnd = duration - currentTime <= clampedWindow;
       const pastActiveCap = currentTime >= MAX_ACTIVE_PLAY_SEC - clampedWindow;
+      const pastMinFloor = currentTime >= MIN_ACTIVE_PLAY_SEC;
       const dropAligned =
+        pastMinFloor &&
         plan.category === "drop" &&
         currentAnalysis.dropAtSec != null &&
         currentTime >= currentAnalysis.dropAtSec - clampedWindow &&
         currentTime < currentAnalysis.dropAtSec + clampedWindow;
       const breakdownOpportunity =
+        pastMinFloor &&
         plan.category !== "drop" &&
         currentAnalysis.breakdownAtSec != null &&
         currentTime >= currentAnalysis.breakdownAtSec - clampedWindow &&
         currentTime < currentAnalysis.breakdownAtSec + clampedWindow;
+
+      const pairKey = `${track.id}>${nextTrack.id}`;
+      // A Tempo Ramp pick gets an earlier, separate anticipation check: start
+      // gliding the outgoing deck's tempo TEMPO_RAMP_PRE_WINDOW_SEC before
+      // any of the normal triggers below would actually fire, so both decks
+      // are already close in tempo by the time the real blend starts. Uses
+      // the same four trigger shapes, just widened by that lead time.
+      if (
+        plan.category === "tempo-ramp" &&
+        !tempoRampRef.current &&
+        !tempoRampStartingRef.current &&
+        tempoRampCompletedPairRef.current !== pairKey &&
+        isTempoRampEligible(currentAnalysis, nextAnalysis)
+      ) {
+        const anticipationWindow = clampedWindow + TEMPO_RAMP_PRE_WINDOW_SEC;
+        const nearNaturalEndSoon = duration - currentTime <= anticipationWindow;
+        const pastActiveCapSoon = currentTime >= MAX_ACTIVE_PLAY_SEC - anticipationWindow;
+        const pastMinFloorSoon = currentTime >= MIN_ACTIVE_PLAY_SEC - TEMPO_RAMP_PRE_WINDOW_SEC;
+        const breakdownOpportunitySoon =
+          pastMinFloorSoon &&
+          currentAnalysis.breakdownAtSec != null &&
+          currentTime >= currentAnalysis.breakdownAtSec - anticipationWindow &&
+          currentTime < currentAnalysis.breakdownAtSec + anticipationWindow;
+        if (nearNaturalEndSoon || pastActiveCapSoon || breakdownOpportunitySoon) {
+          void startTempoRamp(track, nextTrack, currentAnalysis, nextAnalysis);
+        }
+      }
+
       if (nearNaturalEnd || pastActiveCap || dropAligned || breakdownOpportunity) {
-        applyLearningNudge(track, nextTrack, state, currentTime, plan);
-        startTransition(nextTrack, { ...plan, windowSec: clampedWindow });
+        // If the outgoing deck already glided to the incoming track's tempo
+        // via startTempoRamp, the blend itself needs no further tempo
+        // ramping — both decks are already matched, so this is just a
+        // normal equal-power crossfade at native tempo on both sides.
+        const finalPlan =
+          tempoRampCompletedPairRef.current === pairKey
+            ? { ...plan, windowSec: clampedWindow, tempoSync: true, tempoRatioStart: 1 }
+            : { ...plan, windowSec: clampedWindow };
+        applyLearningNudge(track, nextTrack, state, currentTime, finalPlan);
+        startTransition(nextTrack, finalPlan);
+        tempoRampCompletedPairRef.current = null;
       }
     }
 
     const interval = setInterval(() => {
       const activeEl = deckEl(activeDeckRef.current);
       if (activeEl) {
-        useStore.getState().setCurrentTime(activeEl.currentTime);
+        // Same reasoning as tryAutoTransition's own currentTime read: the
+        // deck's <audio> element is paused during a pre-transition tempo
+        // ramp, so the displayed position needs the ramp's own running
+        // estimate instead, or the progress bar would appear to freeze.
+        const activeRamp =
+          tempoRampRef.current?.deckId === activeDeckRef.current ? tempoRampRef.current : null;
+        useStore
+          .getState()
+          .setCurrentTime(
+            activeRamp ? activeRamp.entryTrackTimeSec + activeRamp.trackTimeElapsedSec : activeEl.currentTime
+          );
       }
       tryAutoTransition();
       tryAmbience();
@@ -1392,10 +1685,19 @@ export function DualDeckStage() {
         clearInterval(backspinRef.current.intervalId);
       }
       backspinRef.current = null;
+      if (tempoRampRef.current?.tickIntervalId != null) {
+        clearInterval(tempoRampRef.current.tickIntervalId);
+      }
+      try {
+        tempoRampRef.current?.voice.stop();
+      } catch {
+        // Already stopped — harmless.
+      }
+      tempoRampRef.current = null;
       elA?.removeEventListener("ended", onEndedA);
       elB?.removeEventListener("ended", onEndedB);
     };
-  }, [deckEl, resetDeckNodes, stopOverlayNodes]);
+  }, [cancelTempoRamp, deckEl, resetDeckNodes, stopOverlayNodes]);
 
   // External track changes (library/queue click, next/previous, playlist
   // play) land here. Transitions we drive ourselves already have the new
@@ -1412,6 +1714,7 @@ export function DualDeckStage() {
     cancelMashup();
     cancelLoop();
     cancelBackspin();
+    cancelTempoRamp();
 
     const idleId: DeckId = activeDeck === "A" ? "B" : "A";
     const idleEl = deckEl(idleId);
@@ -1446,7 +1749,17 @@ export function DualDeckStage() {
       audioCtxRef.current?.resume().catch(() => {});
       activeEl.play().catch(() => {});
     }
-  }, [currentTrack, activeDeck, cancelBackspin, cancelLoop, cancelMashup, cancelTransition, deckEl, resetDeckNodes]);
+  }, [
+    currentTrack,
+    activeDeck,
+    cancelBackspin,
+    cancelLoop,
+    cancelMashup,
+    cancelTempoRamp,
+    cancelTransition,
+    deckEl,
+    resetDeckNodes,
+  ]);
 
   useEffect(() => {
     const activeEl = deckEl(activeDeck);
@@ -1469,10 +1782,21 @@ export function DualDeckStage() {
     cancelMashup();
     cancelLoop();
     cancelBackspin();
+    cancelTempoRamp();
     const activeEl = deckEl(activeDeck);
     if (activeEl) activeEl.currentTime = seekRequest;
     clearSeekRequest();
-  }, [seekRequest, activeDeck, cancelBackspin, cancelLoop, cancelMashup, clearSeekRequest, cancelTransition, deckEl]);
+  }, [
+    seekRequest,
+    activeDeck,
+    cancelBackspin,
+    cancelLoop,
+    cancelMashup,
+    cancelTempoRamp,
+    clearSeekRequest,
+    cancelTransition,
+    deckEl,
+  ]);
 
   return (
     <>

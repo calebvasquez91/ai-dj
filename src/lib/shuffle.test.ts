@@ -3,7 +3,7 @@ import { shuffleForPlay } from "./shuffle";
 import type { Track } from "@/types/music";
 
 function makeTrack(id: string, playPreference?: Track["playPreference"]): Track {
-  return { id, title: id, artist: "Test Artist", durationSec: 200, sourceUrl: `blob:${id}`, playPreference };
+  return { id, title: id, artist: "Test Artist", durationSec: 200, addedAt: 0, sourceUrl: `blob:${id}`, playPreference };
 }
 
 describe("shuffleForPlay", () => {

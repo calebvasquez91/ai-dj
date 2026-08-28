@@ -70,7 +70,7 @@ export function Sidebar() {
 
         <nav className="flex flex-col gap-1">
           <NavLink href="/" label="Home" onNavigate={closeOnMobile} />
-          <NavLink href="/library" label="Local Files" onNavigate={closeOnMobile} />
+          <NavLink href="/library" label="Music Library" onNavigate={closeOnMobile} />
           <NavLink href="/inspiration" label="DJ Inspiration" onNavigate={closeOnMobile} />
         </nav>
 

@@ -58,7 +58,7 @@ export function QueuePanel() {
             </p>
             {queue.length === 0 ? (
               <p className="px-1 text-xs text-muted">
-                Nothing queued. Add tracks from Local Files or a playlist.
+                Nothing queued. Add tracks from Music Library or a playlist.
               </p>
             ) : (
               <div className="flex flex-col gap-1">

@@ -41,6 +41,7 @@ export function toTrackApiResponse(track: PrismaTrack): TrackApiResponse {
     title: track.title,
     artist: track.artist,
     durationSec: track.durationSec,
+    addedAt: track.createdAt.getTime(),
     sourceUrl: trackSourceUrl(track),
     thumbnailUrl: track.thumbnailUrl ?? undefined,
     playPreference: isPlayPreference(track.playPreference) ? track.playPreference : undefined,

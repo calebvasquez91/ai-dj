@@ -8,6 +8,17 @@ export const MAX_CROSSFADE_SEC = 30;
 export const AUTO_DJ_OFF_FADE_SEC = 3;
 /** Auto-DJ never lets a track ride past this much active playback before forcing a transition into the next queued track, regardless of the file's real length. */
 export const MAX_ACTIVE_PLAY_SEC = 150;
+/**
+ * Auto-DJ won't reach for an *opportunistic* early transition (Double Drop,
+ * Breakdown Mixing) before this much active playback — a floor, not a
+ * ceiling, so a track always gets a minimum amount of airtime before the
+ * engine starts looking for an excuse to leave it. Deliberately doesn't gate
+ * the "near natural end" trigger: a track shorter than this floor still has
+ * to be allowed to transition out before it runs out, and doesn't gate the
+ * MAX_ACTIVE_PLAY_SEC ceiling either, since that's already well above this.
+ * Manual "Mix Now" is a separate code path entirely and always stays instant.
+ */
+export const MIN_ACTIVE_PLAY_SEC = 90;
 
 /** How long a track fades in from silence when it starts outside of a transition (a direct pick, or the very first track of a session) — avoids an abrupt full-volume start. */
 export const TRACK_FADE_IN_SEC = 1.5;
@@ -57,6 +68,26 @@ export function bestTempoRatio(bpmA: number, bpmB: number): number {
   const raw = bpmA / bpmB;
   const candidates = [raw, raw * 2, raw / 2];
   return candidates.reduce((best, r) => (Math.abs(r - 1) < Math.abs(best - 1) ? r : best));
+}
+
+/**
+ * Whether a real, independent-time-stretch tempo ramp is worth attempting
+ * for this pair: both tempo readings need to be genuinely trustworthy (a
+ * ramp toward a fabricated BPM is worse than not ramping at all — same
+ * reasoning as MIN_TEMPO_CONFIDENCE_FOR_TRUST elsewhere), and the gap has
+ * to sit within TEMPO_RAMP_MAX_BPM_DELTA. Below TEMPO_SYNC_MAX_DELTA a plain
+ * tempoSync blend already handles it with no ramp needed; this only governs
+ * whether it's worth reaching for the ramp at all.
+ */
+export function isTempoRampEligible(currentAnalysis: TrackAnalysis, nextAnalysis: TrackAnalysis): boolean {
+  if (
+    currentAnalysis.bpmConfidence < MIN_TEMPO_CONFIDENCE_FOR_TRUST ||
+    nextAnalysis.bpmConfidence < MIN_TEMPO_CONFIDENCE_FOR_TRUST
+  ) {
+    return false;
+  }
+  const bpmDelta = Math.abs(bestTempoRatio(currentAnalysis.bpm, nextAnalysis.bpm) - 1);
+  return bpmDelta <= TEMPO_RAMP_MAX_BPM_DELTA;
 }
 
 export function snapToBeatGrid(timeSec: number, beatGridOffsetSec: number, bpm: number): number {
@@ -427,9 +458,24 @@ export interface TransitionContext {
   categoryWeights?: Partial<Record<TransitionCategory, number>>;
 }
 
+/**
+ * How far apart two tracks' tempos can be (after best-octave adjustment)
+ * before a tempo-ramp stops sounding like a natural glide — the same 20%
+ * ceiling mashup-engine.ts's MASHUP_MAX_TEMPO_DELTA already established as
+ * where SoundTouchJS's WSOLA artifacts get noticeable, reused rather than
+ * inventing a second threshold. If anything a solo pre-transition ramp
+ * exposes those artifacts *more* than a mashup does (there's no second
+ * layer of audio masking them), so this is already the generous end, not
+ * the conservative one. Beyond this, scoring excludes the category outright
+ * and a mismatched pair falls back to whatever wins among the other
+ * (filter/EQ-driven) categories instead.
+ */
+export const TEMPO_RAMP_MAX_BPM_DELTA = 0.2;
+
 function scoreTransition(t: TransitionEntry, ctx: TransitionContext): number {
   if (!t.executable) return -Infinity;
   if (ctx.excludeTransitionIds?.includes(t.id)) return -Infinity;
+  if (t.category === "tempo-ramp" && ctx.bpmDelta > TEMPO_RAMP_MAX_BPM_DELTA) return -Infinity;
   let score = 0;
   score += bpmFitScore(ctx.bpmDelta, t.idealBpmDeltaMax, ctx.varietyBias);
   if (ctx.genreHint) {
