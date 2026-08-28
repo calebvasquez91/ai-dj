@@ -44,6 +44,8 @@ export function PlayerBar() {
   const setDjMode = useStore((s) => s.setDjMode);
   const analyzingTrackIds = useStore((s) => s.analyzingTrackIds);
   const nextTrackAnalyzing = queue[0] ? analyzingTrackIds.has(queue[0].id) : false;
+  const nowPlayingExpanded = useStore((s) => s.nowPlayingExpanded);
+  const setNowPlayingExpanded = useStore((s) => s.setNowPlayingExpanded);
 
   const durationSec = currentTrack?.durationSec ?? 0;
   const progressPercent =
@@ -57,19 +59,33 @@ export function PlayerBar() {
   }
 
   return (
-    <footer className="min-h-20 shrink-0 border-t-2 border-border bg-surface px-4 py-2 flex flex-wrap items-center gap-2 lg:gap-4">
+    <footer
+      className="min-h-20 shrink-0 border-t-2 border-border bg-surface px-4 py-2 flex flex-wrap items-center gap-2 lg:gap-4"
+      inert={nowPlayingExpanded ? true : undefined}
+    >
       <div className="flex items-center gap-3 w-28 sm:w-48 lg:w-64 min-w-0 shrink-0">
         {currentTrack ? (
           <>
             <DualDeckStage />
-            <TrackThumbnail
-              thumbnailUrl={currentTrack.thumbnailUrl}
-              title={currentTrack.title}
-              size={48}
-            />
-            <div className="min-w-0">
-              <p className="text-sm font-medium truncate">{currentTrack.title}</p>
-              <p className="text-xs text-muted truncate">{currentTrack.artist}</p>
+            <div
+              role="button"
+              tabIndex={0}
+              onClick={() => setNowPlayingExpanded(true)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" || e.key === " ") setNowPlayingExpanded(true);
+              }}
+              className="flex items-center gap-3 min-w-0 cursor-pointer"
+              title="Open full-screen now playing"
+            >
+              <TrackThumbnail
+                thumbnailUrl={currentTrack.thumbnailUrl}
+                title={currentTrack.title}
+                size={48}
+              />
+              <div className="min-w-0">
+                <p className="text-sm font-medium truncate">{currentTrack.title}</p>
+                <p className="text-xs text-muted truncate">{currentTrack.artist}</p>
+              </div>
             </div>
           </>
         ) : (

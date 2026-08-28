@@ -5,7 +5,7 @@ import { useSearchParams } from "next/navigation";
 import { useStore } from "@/lib/store";
 import { filesToTracks } from "@/lib/localAudio";
 import { TrackList } from "@/components/TrackList";
-import { shuffleForPlay } from "@/lib/shuffle";
+import { dropTheNeedle, shuffleForPlay } from "@/lib/shuffle";
 
 function LibraryContent() {
   const inputRef = useRef<HTMLInputElement>(null);
@@ -60,9 +60,18 @@ function LibraryContent() {
             onClick={() => playTrackList(shuffleForPlay(filtered, trackAnalysis, trackLyricalFingerprints), 0)}
             disabled={shufflableCount < 2}
             className="btn-retro-outline"
-            title="Play these tracks in a random order — skips Do-Not-Play tracks, puts Must-Play tracks first"
+            title="Play these tracks ordered by tempo/key/energy/theme compatibility — skips Do-Not-Play tracks, puts Must-Play tracks first"
           >
             🔀 Shuffle Play
+          </button>
+          <button
+            type="button"
+            onClick={() => playTrackList(dropTheNeedle(filtered), 0)}
+            disabled={shufflableCount < 2}
+            className="btn-retro-outline"
+            title="Play these tracks in a genuinely random order — skips Do-Not-Play tracks, puts Must-Play tracks first"
+          >
+            🎲 Drop the Needle
           </button>
           <button
             type="button"

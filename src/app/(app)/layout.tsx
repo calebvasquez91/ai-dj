@@ -5,6 +5,7 @@ import { AppDataLoader } from "@/components/AppDataLoader";
 import { Sidebar } from "@/components/Sidebar";
 import { TopBar } from "@/components/TopBar";
 import { PlayerBar } from "@/components/PlayerBar";
+import { NowPlayingView } from "@/components/NowPlayingView";
 import { QueuePanel } from "@/components/QueuePanel";
 import { DeckView } from "@/components/DeckView";
 import { KeyboardShortcuts } from "@/components/KeyboardShortcuts";
@@ -25,6 +26,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
         </div>
       </div>
       <PlayerBar />
+      <NowPlayingView />
       <QueuePanel />
       <DeckView />
     </AuthSessionProvider>

@@ -27,6 +27,8 @@ interface PlayerState {
   sidebarOpen: boolean;
   queuePanelOpen: boolean;
   deckViewOpen: boolean;
+  /** Full-screen now-playing view, expanded from the compact PlayerBar footer. */
+  nowPlayingExpanded: boolean;
   trackAnalysis: Record<string, TrackAnalysis>;
   /** Cached lyrical/thematic fingerprint per track id — present (even if empty) once looked up, absent if never attempted. Never the lyrics text itself, see lib/lyrics.ts. */
   trackLyricalFingerprints: Record<string, LyricalFingerprint>;
@@ -69,6 +71,7 @@ interface PlayerState {
   setSidebarOpen: (open: boolean) => void;
   toggleQueuePanel: () => void;
   toggleDeckView: () => void;
+  setNowPlayingExpanded: (expanded: boolean) => void;
   loadLibrary: () => Promise<void>;
   addLocalTracks: (tracks: Track[]) => void;
   removeLocalTrack: (trackId: string) => Promise<void>;
@@ -118,6 +121,7 @@ export const useStore = create<PlayerState>()(
       sidebarOpen: false,
       queuePanelOpen: false,
       deckViewOpen: false,
+      nowPlayingExpanded: false,
       trackAnalysis: {},
       trackLyricalFingerprints: {},
       analyzingTrackIds: new Set<string>(),
@@ -167,6 +171,7 @@ export const useStore = create<PlayerState>()(
       setSidebarOpen: (open) => set({ sidebarOpen: open }),
       toggleQueuePanel: () => set((s) => ({ queuePanelOpen: !s.queuePanelOpen })),
       toggleDeckView: () => set((s) => ({ deckViewOpen: !s.deckViewOpen })),
+      setNowPlayingExpanded: (expanded) => set({ nowPlayingExpanded: expanded }),
       // Populates the library from the server once on app start (replaces
       // the old IndexedDB-rehydration step — track sourceUrls are now
       // stable server URLs, not per-session blob: URLs, so there's nothing
