@@ -5,7 +5,8 @@ import { useSearchParams } from "next/navigation";
 import { useStore } from "@/lib/store";
 import { filesToTracks } from "@/lib/localAudio";
 import { TrackList } from "@/components/TrackList";
-import { dropTheNeedle, shuffleForPlay } from "@/lib/shuffle";
+import { AddSelectedToPlaylistButton } from "@/components/AddSelectedToPlaylistButton";
+import { shuffleForPlay } from "@/lib/shuffle";
 
 function LibraryContent() {
   const inputRef = useRef<HTMLInputElement>(null);
@@ -29,6 +30,31 @@ function LibraryContent() {
   const shufflableCount = filtered.filter((t) => t.playPreference !== "do-not").length;
 
   const [uploadError, setUploadError] = useState<string | null>(null);
+
+  // Bulk "add to playlist" — selecting and moving tracks into a playlist
+  // never removes them from the library; it only adds a reference, exactly
+  // like the existing single-track "+" button already does.
+  const [selectMode, setSelectMode] = useState(false);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const selectedTracks = filtered.filter((t) => selectedIds.has(t.id));
+
+  function toggleSelect(trackId: string) {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(trackId)) next.delete(trackId);
+      else next.add(trackId);
+      return next;
+    });
+  }
+
+  function toggleSelectAll() {
+    setSelectedIds((prev) => (prev.size === filtered.length ? new Set() : new Set(filtered.map((t) => t.id))));
+  }
+
+  function exitSelectMode() {
+    setSelectMode(false);
+    setSelectedIds(new Set());
+  }
 
   async function handleFilesSelected(e: React.ChangeEvent<HTMLInputElement>) {
     const files = Array.from(e.target.files ?? []);
@@ -66,12 +92,13 @@ function LibraryContent() {
           </button>
           <button
             type="button"
-            onClick={() => playTrackList(dropTheNeedle(filtered), 0)}
-            disabled={shufflableCount < 2}
+            onClick={() => (selectMode ? exitSelectMode() : setSelectMode(true))}
+            disabled={filtered.length === 0}
+            data-active={selectMode}
             className="btn-retro-outline"
-            title="Play these tracks in a genuinely random order — skips Do-Not-Play tracks, puts Must-Play tracks first"
+            title="Select tracks to add to a playlist — they stay in your library too"
           >
-            🎲 Drop the Needle
+            {selectMode ? "Cancel" : "☑ Select"}
           </button>
           <button
             type="button"
@@ -92,6 +119,23 @@ function LibraryContent() {
         />
       </div>
 
+      {selectMode && (
+        <div className="flex flex-wrap items-center gap-3 rounded-xl border-2 border-border bg-surface px-4 py-2">
+          <label className="flex items-center gap-2 text-sm cursor-pointer">
+            <input
+              type="checkbox"
+              checked={filtered.length > 0 && selectedIds.size === filtered.length}
+              onChange={toggleSelectAll}
+              className="w-4 h-4 accent-accent-purple"
+            />
+            Select all
+          </label>
+          <span className="text-sm text-muted">{selectedIds.size} selected</span>
+          <div className="flex-1" />
+          <AddSelectedToPlaylistButton tracks={selectedTracks} onDone={exitSelectMode} />
+        </div>
+      )}
+
       {uploadError && <p className="text-xs text-accent-pink">{uploadError}</p>}
 
       {!libraryLoaded ? (
@@ -105,7 +149,12 @@ function LibraryContent() {
       ) : filtered.length === 0 ? (
         <p className="text-sm text-muted">No local files match &quot;{query}&quot;.</p>
       ) : (
-        <TrackList tracks={filtered} onRemove={handleRemove} />
+        <TrackList
+          tracks={filtered}
+          onRemove={handleRemove}
+          selectedIds={selectMode ? selectedIds : undefined}
+          onToggleSelect={selectMode ? toggleSelect : undefined}
+        />
       )}
     </div>
   );

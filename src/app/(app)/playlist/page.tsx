@@ -5,7 +5,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { useStore } from "@/lib/store";
 import { formatTime } from "@/lib/format";
 import { TrackThumbnail } from "@/components/TrackThumbnail";
-import { dropTheNeedle, shuffleForPlay } from "@/lib/shuffle";
+import { shuffleForPlay } from "@/lib/shuffle";
 
 function PlaylistContent() {
   const id = useSearchParams().get("id") ?? "";
@@ -78,15 +78,6 @@ function PlaylistContent() {
             >
               🔀 Shuffle Play
             </button>
-            <button
-              type="button"
-              onClick={() => playTrackList(dropTheNeedle(playlist.tracks), 0)}
-              disabled={playlist.tracks.filter((t) => t.playPreference !== "do-not").length < 2}
-              className="btn-retro-outline self-start"
-              title="Play this playlist in a genuinely random order — skips Do-Not-Play tracks, puts Must-Play tracks first"
-            >
-              🎲 Drop the Needle
-            </button>
           </div>
 
           <div className="flex flex-col gap-1">
@@ -134,7 +125,7 @@ function PlaylistContent() {
                     title={
                       track.playPreference === "must"
                         ? "Must-Play — click to clear"
-                        : "Mark Must-Play (guaranteed + first in Shuffle Play / Drop the Needle)"
+                        : "Mark Must-Play (guaranteed + first in Shuffle Play)"
                     }
                   >
                     ★
@@ -149,8 +140,8 @@ function PlaylistContent() {
                     }`}
                     title={
                       track.playPreference === "do-not"
-                        ? "Do-Not-Play — excluded from Shuffle Play / Drop the Needle (click to clear). A direct click here still plays it."
-                        : "Mark Do-Not-Play (excluded from Shuffle Play / Drop the Needle)"
+                        ? "Do-Not-Play — excluded from Shuffle Play (click to clear). A direct click here still plays it."
+                        : "Mark Do-Not-Play (excluded from Shuffle Play)"
                     }
                   >
                     🚫

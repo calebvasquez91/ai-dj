@@ -39,32 +39,3 @@ export function shuffleForPlay(
 
   return [...orderedMust, ...orderedRest].map((c) => c.track);
 }
-
-function randomShuffle<T>(items: T[]): T[] {
-  const result = [...items];
-  for (let i = result.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1));
-    [result[i], result[j]] = [result[j], result[i]];
-  }
-  return result;
-}
-
-/**
- * "Drop the Needle" — a simple, opt-in genuinely-random reorder. Distinct
- * from shuffleForPlay above: that one reasons about the whole library
- * (tempo/key/energy/lyrical-theme compatibility); this one is pure chance,
- * for when the user just wants a quick random mix rather than a
- * compatibility-scored set. Same curation-flag handling as shuffleForPlay
- * (Do-Not-Play excluded, Must-Play guaranteed and first) since those are
- * user intent regardless of *how* the remaining order gets picked — but no
- * scoring, no lookahead, just a fair shuffle. Whatever order this lands
- * on, the auto-DJ's transition engine still smooths over each pairing
- * exactly as it does for any other queue order — a random track order
- * never means an abrupt or unblended handoff.
- */
-export function dropTheNeedle(tracks: Track[]): Track[] {
-  const eligible = tracks.filter((t) => t.playPreference !== "do-not");
-  const must = eligible.filter((t) => t.playPreference === "must");
-  const rest = eligible.filter((t) => t.playPreference !== "must");
-  return [...randomShuffle(must), ...randomShuffle(rest)];
-}
