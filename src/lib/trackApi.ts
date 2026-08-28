@@ -4,10 +4,13 @@
 import type { Track as PrismaTrack } from "@/generated/prisma/client";
 import type { Track } from "@/types/music";
 import type { TrackAnalysis } from "@/lib/audio-analysis";
+import type { SerializedLyricalFingerprint } from "@/lib/lyrics";
 import { getStorageBackend } from "@/lib/storage";
 
 export interface TrackApiResponse extends Track {
   analysis: TrackAnalysis | null;
+  /** null means "not looked up yet" — an empty-but-present fingerprint means "looked up, nothing found," so the client knows not to retry. */
+  lyricalFingerprint: SerializedLyricalFingerprint | null;
 }
 
 export function trackSourceUrl(track: Pick<PrismaTrack, "id" | "storageKey">): string {
@@ -36,6 +39,10 @@ export function toTrackApiResponse(track: PrismaTrack): TrackApiResponse {
           fallback: false,
         };
 
+  const lyricalFingerprint: SerializedLyricalFingerprint | null = track.lyricalFingerprintJson
+    ? JSON.parse(track.lyricalFingerprintJson)
+    : null;
+
   return {
     id: track.id,
     title: track.title,
@@ -46,5 +53,6 @@ export function toTrackApiResponse(track: PrismaTrack): TrackApiResponse {
     thumbnailUrl: track.thumbnailUrl ?? undefined,
     playPreference: isPlayPreference(track.playPreference) ? track.playPreference : undefined,
     analysis,
+    lyricalFingerprint,
   };
 }

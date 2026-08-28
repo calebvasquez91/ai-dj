@@ -21,6 +21,7 @@ import {
   type TransitionPlan,
 } from "@/lib/mix-engine";
 import { analyzeTrackFromUrl, fallbackAnalysis, type TrackAnalysis } from "@/lib/audio-analysis";
+import { getLyricalFingerprint } from "@/lib/lyrics";
 import { cancelHypePhrase, speakHypePhrase } from "@/lib/wordPlay";
 import { shouldTriggerAmbience } from "@/lib/ambience";
 import { useDjWeights, LEARNING_NUDGE_UP, LEARNING_NUDGE_DOWN } from "@/lib/dj-weights";
@@ -199,6 +200,7 @@ export function DualDeckStage() {
   });
   const activeDeckRef = useRef<DeckId>("A");
   const analyzingRef = useRef<Set<string>>(new Set());
+  const lyricsFetchingRef = useRef<Set<string>>(new Set());
   const mashupRef = useRef<ActiveMashup | null>(null);
   // True synchronously as soon as a mashup decode kicks off, before mashupRef
   // itself is populated — guards against the tick loop starting a second
@@ -381,6 +383,32 @@ export function DualDeckStage() {
         .finally(() => {
           analyzingRef.current.delete(track.id);
           useStore.getState().stopAnalyzing(track.id);
+        });
+    }
+  }, [currentTrack, queue]);
+
+  // Same reachability rule as the analysis effect above, for the lyrical
+  // fingerprint (track-sequencing.ts's compatibility score) — a separate
+  // effect since it's an independent lookup (LRCLIB by title/artist, not
+  // decoded audio) with its own once-ever-per-track cache.
+  useEffect(() => {
+    const tracks = currentTrack ? [currentTrack, ...queue] : queue;
+    for (const track of tracks) {
+      const state = useStore.getState();
+      if (state.trackLyricalFingerprints[track.id] || lyricsFetchingRef.current.has(track.id)) continue;
+      lyricsFetchingRef.current.add(track.id);
+      getLyricalFingerprint(track.title, track.artist)
+        .then((fingerprint) => {
+          // A real fingerprint or a genuine "searched, nothing found" are
+          // both safe to cache permanently — only a thrown error (below)
+          // isn't, since that's a transient failure, not a real answer.
+          useStore.getState().setLyricalFingerprint(track.id, fingerprint ?? { words: new Set(), moodTags: new Set() });
+        })
+        .catch(() => {
+          // Network/parse failure — don't cache a negative; a later session tries again.
+        })
+        .finally(() => {
+          lyricsFetchingRef.current.delete(track.id);
         });
     }
   }, [currentTrack, queue]);

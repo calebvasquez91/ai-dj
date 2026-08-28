@@ -22,6 +22,7 @@ function PlaylistContent() {
   const currentTrack = useStore((s) => s.currentTrack);
   const setTrackPlayPreference = useStore((s) => s.setTrackPlayPreference);
   const trackAnalysis = useStore((s) => s.trackAnalysis);
+  const trackLyricalFingerprints = useStore((s) => s.trackLyricalFingerprints);
 
   if (!playlist) {
     return (
@@ -70,7 +71,7 @@ function PlaylistContent() {
             </button>
             <button
               type="button"
-              onClick={() => playTrackList(shuffleForPlay(playlist.tracks, trackAnalysis), 0)}
+              onClick={() => playTrackList(shuffleForPlay(playlist.tracks, trackAnalysis, trackLyricalFingerprints), 0)}
               disabled={playlist.tracks.filter((t) => t.playPreference !== "do-not").length < 2}
               className="btn-retro-outline self-start"
               title="Play this playlist in a random order — skips Do-Not-Play tracks, puts Must-Play tracks first"

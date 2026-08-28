@@ -42,6 +42,17 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
     if (typeof a.dropAtSec === "number" || a.dropAtSec === null) data.dropAtSec = a.dropAtSec;
     if (Array.isArray(a.waveformPeaks)) data.waveformPeaksJson = JSON.stringify(a.waveformPeaks);
   }
+  if (body.lyricalFingerprint === null) {
+    data.lyricalFingerprintJson = null;
+  } else if (body.lyricalFingerprint && typeof body.lyricalFingerprint === "object") {
+    const f = body.lyricalFingerprint;
+    if (Array.isArray(f.words) && Array.isArray(f.moodTags)) {
+      data.lyricalFingerprintJson = JSON.stringify({
+        words: f.words.filter((w: unknown) => typeof w === "string"),
+        moodTags: f.moodTags.filter((m: unknown) => typeof m === "string"),
+      });
+    }
+  }
 
   if (Object.keys(data).length === 0) {
     return NextResponse.json({ error: "No recognized fields to update." }, { status: 400 });

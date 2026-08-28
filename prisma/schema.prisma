@@ -53,6 +53,14 @@ model Track {
   dropAtSec         Float?
   waveformPeaksJson String? // JSON.stringify(number[]) — plain String, not Prisma Json (SQLite portability)
 
+  // Cached lyrical/thematic fingerprint (src/lib/lyrics.ts's LyricalFingerprint,
+  // words/moodTags serialized as arrays) — never the lyrics text itself, just
+  // a derived word/mood signal for compatibility scoring. null means "not
+  // looked up yet"; an empty-but-present fingerprint means "looked up, no
+  // lyrics found" — both are distinct from never having tried, so a track
+  // with no findable lyrics doesn't get re-queried forever.
+  lyricalFingerprintJson String?
+
   playlistTracks PlaylistTrack[]
 
   @@index([userId])

@@ -16,6 +16,7 @@ function LibraryContent() {
   const playTrackList = useStore((s) => s.playTrackList);
   const libraryLoaded = useStore((s) => s.libraryLoaded);
   const trackAnalysis = useStore((s) => s.trackAnalysis);
+  const trackLyricalFingerprints = useStore((s) => s.trackLyricalFingerprints);
   const query = (useSearchParams().get("q") ?? "").trim().toLowerCase();
 
   const filtered = query
@@ -56,7 +57,7 @@ function LibraryContent() {
         <div className="flex items-center gap-3 shrink-0">
           <button
             type="button"
-            onClick={() => playTrackList(shuffleForPlay(filtered, trackAnalysis), 0)}
+            onClick={() => playTrackList(shuffleForPlay(filtered, trackAnalysis, trackLyricalFingerprints), 0)}
             disabled={shufflableCount < 2}
             className="btn-retro-outline"
             title="Play these tracks in a random order — skips Do-Not-Play tracks, puts Must-Play tracks first"

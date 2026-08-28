@@ -3,6 +3,12 @@ import type { Playlist, Track } from "@/types/music";
 import type { TrackAnalysis } from "@/lib/audio-analysis";
 import type { DjSetMode } from "@/lib/mix-engine";
 import type { AmbienceFrequency } from "@/lib/ambience";
+import {
+  deserializeFingerprint,
+  serializeFingerprint,
+  type LyricalFingerprint,
+  type SerializedLyricalFingerprint,
+} from "@/lib/lyrics";
 
 const MAX_HISTORY = 50;
 
@@ -22,6 +28,8 @@ interface PlayerState {
   queuePanelOpen: boolean;
   deckViewOpen: boolean;
   trackAnalysis: Record<string, TrackAnalysis>;
+  /** Cached lyrical/thematic fingerprint per track id — present (even if empty) once looked up, absent if never attempted. Never the lyrics text itself, see lib/lyrics.ts. */
+  trackLyricalFingerprints: Record<string, LyricalFingerprint>;
   analyzingTrackIds: Set<string>;
   styleGenreHint: string | null;
   djMode: DjSetMode;
@@ -65,6 +73,7 @@ interface PlayerState {
   addLocalTracks: (tracks: Track[]) => void;
   removeLocalTrack: (trackId: string) => Promise<void>;
   setTrackAnalysis: (trackId: string, analysis: TrackAnalysis) => void;
+  setLyricalFingerprint: (trackId: string, fingerprint: LyricalFingerprint) => void;
   startAnalyzing: (trackId: string) => void;
   stopAnalyzing: (trackId: string) => void;
   setStyleGenreHint: (genreId: string | null) => void;
@@ -110,6 +119,7 @@ export const useStore = create<PlayerState>()(
       queuePanelOpen: false,
       deckViewOpen: false,
       trackAnalysis: {},
+      trackLyricalFingerprints: {},
       analyzingTrackIds: new Set<string>(),
       styleGenreHint: null,
       djMode: "auto",
@@ -165,13 +175,22 @@ export const useStore = create<PlayerState>()(
         try {
           const res = await fetch("/api/tracks");
           if (!res.ok) return;
-          const tracks = (await res.json()) as (Track & { analysis: TrackAnalysis | null })[];
+          const tracks = (await res.json()) as (Track & {
+            analysis: TrackAnalysis | null;
+            lyricalFingerprint: SerializedLyricalFingerprint | null;
+          })[];
           const trackAnalysis: Record<string, TrackAnalysis> = {};
-          const localLibrary: Track[] = tracks.map(({ analysis, ...track }) => {
+          const trackLyricalFingerprints: Record<string, LyricalFingerprint> = {};
+          const localLibrary: Track[] = tracks.map(({ analysis, lyricalFingerprint, ...track }) => {
             if (analysis) trackAnalysis[track.id] = analysis;
+            if (lyricalFingerprint) trackLyricalFingerprints[track.id] = deserializeFingerprint(lyricalFingerprint);
             return track;
           });
-          set((s) => ({ localLibrary, trackAnalysis: { ...s.trackAnalysis, ...trackAnalysis } }));
+          set((s) => ({
+            localLibrary,
+            trackAnalysis: { ...s.trackAnalysis, ...trackAnalysis },
+            trackLyricalFingerprints: { ...s.trackLyricalFingerprints, ...trackLyricalFingerprints },
+          }));
         } finally {
           set({ libraryLoaded: true });
         }
@@ -192,6 +211,18 @@ export const useStore = create<PlayerState>()(
           method: "PATCH",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ analysis }),
+        });
+      },
+      setLyricalFingerprint: (trackId, fingerprint) => {
+        set((s) => ({ trackLyricalFingerprints: { ...s.trackLyricalFingerprints, [trackId]: fingerprint } }));
+        // Cache it server-side (fingerprint only, never the lyrics text) so
+        // it's never re-looked-up for this track again, even an empty
+        // "found nothing" result — see the schema comment on
+        // lyricalFingerprintJson for why that distinction matters.
+        void fetch(`/api/tracks/${trackId}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ lyricalFingerprint: serializeFingerprint(fingerprint) }),
         });
       },
       startAnalyzing: (trackId) =>

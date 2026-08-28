@@ -1,5 +1,6 @@
 import type { Track } from "@/types/music";
 import type { TrackAnalysis } from "@/lib/audio-analysis";
+import type { LyricalFingerprint } from "@/lib/lyrics";
 import { buildCompatibleOrder, type SequencingCandidate } from "@/lib/track-sequencing";
 
 /**
@@ -16,13 +17,21 @@ import { buildCompatibleOrder, type SequencingCandidate } from "@/lib/track-sequ
  * Do-Not-Play track still plays it, since curation flags should never
  * block an explicit request.
  */
-export function shuffleForPlay(tracks: Track[], trackAnalysis: Record<string, TrackAnalysis> = {}): Track[] {
+export function shuffleForPlay(
+  tracks: Track[],
+  trackAnalysis: Record<string, TrackAnalysis> = {},
+  lyricalFingerprints: Record<string, LyricalFingerprint> = {}
+): Track[] {
   const eligible = tracks.filter((t) => t.playPreference !== "do-not");
   const must = eligible.filter((t) => t.playPreference === "must");
   const rest = eligible.filter((t) => t.playPreference !== "must");
 
   const toCandidates = (list: Track[]): SequencingCandidate[] =>
-    list.map((track) => ({ track, analysis: trackAnalysis[track.id] ?? null }));
+    list.map((track) => ({
+      track,
+      analysis: trackAnalysis[track.id] ?? null,
+      lyricalFingerprint: lyricalFingerprints[track.id] ?? null,
+    }));
 
   const orderedMust = buildCompatibleOrder(toCandidates(must));
   const lastMust = orderedMust[orderedMust.length - 1] ?? null;
