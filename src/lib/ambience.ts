@@ -58,9 +58,11 @@ const LOW_ENERGY_RATIO = 0.45;
  * acapella-drop, backspin) read as rarer highlights, matching how a real
  * DJ would use a dramatic effect occasionally, not on every single cue.
  */
+// TEMP: biased toward backspin for live listening verification — revert to
+// riser 0.7 / backspin 0.3 once confirmed.
 const BUILD_EFFECT_WEIGHTS: { effect: "riser" | "backspin"; weight: number }[] = [
-  { effect: "riser", weight: 0.7 },
-  { effect: "backspin", weight: 0.3 },
+  { effect: "riser", weight: 0.1 },
+  { effect: "backspin", weight: 0.9 },
 ];
 const BREAKDOWN_EFFECT_WEIGHTS: { effect: "echo-tail" | "vocal-echo" | "drum-break" | "acapella-drop"; weight: number }[] = [
   { effect: "echo-tail", weight: 0.4 },

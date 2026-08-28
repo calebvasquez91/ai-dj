@@ -46,7 +46,7 @@ describe("shouldTriggerAmbience", () => {
   });
 
   it("fires a riser cue on a sharp energy rise approaching a detected drop, most of the time", () => {
-    vi.spyOn(Math, "random").mockReturnValue(0.1); // below the riser/backspin split — takes the riser branch
+    vi.spyOn(Math, "random").mockReturnValue(0.05); // TEMP: below the temporarily-biased riser/backspin split — takes the riser branch
     const peaks = flatPeaks(0.2).map((v, i) => (i >= 66 && i < 70 ? 0.9 : v));
     const analysis = makeAnalysis(peaks, { dropAtSec: 75 });
     const cue = shouldTriggerAmbience({
