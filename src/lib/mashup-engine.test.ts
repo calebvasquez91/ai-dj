@@ -4,7 +4,7 @@ import type { TrackAnalysis } from "./audio-analysis";
 import type { Track } from "@/types/music";
 
 function makeTrack(id: string, durationSec = 240): Track {
-  return { id, title: id, artist: "Test Artist", durationSec, addedAt: 0, sourceUrl: `blob:${id}` };
+  return { id, title: id, artist: "Test Artist", durationSec, addedAt: 0, source: "local", sourceUrl: `blob:${id}` };
 }
 
 function makeAnalysis(overrides: Partial<TrackAnalysis> = {}): TrackAnalysis {

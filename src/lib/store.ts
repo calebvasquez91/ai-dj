@@ -53,6 +53,11 @@ interface PlayerState {
   localLibrary: Track[];
   libraryLoaded: boolean;
 
+  /** In-memory only (never persisted) — see lib/googleAuth.ts. Cleared on reload; the user reconnects via "Connect YouTube". */
+  youtubeAccessToken: string | null;
+  youtubeTokenExpiresAt: number | null;
+  setYoutubeToken: (token: string | null, expiresAt: number | null) => void;
+
   setQueue: (tracks: Track[]) => void;
   enqueue: (track: Track) => void;
   removeFromQueue: (trackId: string) => void;
@@ -139,6 +144,10 @@ export const useStore = create<PlayerState>()(
       playlistsLoaded: false,
       localLibrary: [],
       libraryLoaded: false,
+
+      youtubeAccessToken: null,
+      youtubeTokenExpiresAt: null,
+      setYoutubeToken: (token, expiresAt) => set({ youtubeAccessToken: token, youtubeTokenExpiresAt: expiresAt }),
 
       setQueue: (tracks) => set({ queue: tracks }),
       enqueue: (track) => set((s) => ({ queue: [...s.queue, track] })),

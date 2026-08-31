@@ -6,6 +6,8 @@ import { useStore } from "@/lib/store";
 import { filesToTracks } from "@/lib/localAudio";
 import { TrackList } from "@/components/TrackList";
 import { AddSelectedToPlaylistButton } from "@/components/AddSelectedToPlaylistButton";
+import { ConnectYouTubeButton } from "@/components/ConnectYouTubeButton";
+import { YouTubeImportModal } from "@/components/YouTubeImportModal";
 import { shuffleForPlay } from "@/lib/shuffle";
 
 function LibraryContent() {
@@ -30,6 +32,7 @@ function LibraryContent() {
   const shufflableCount = filtered.filter((t) => t.playPreference !== "do-not").length;
 
   const [uploadError, setUploadError] = useState<string | null>(null);
+  const [youtubeModalOpen, setYoutubeModalOpen] = useState(false);
 
   // Bulk "add to playlist" — selecting and moving tracks into a playlist
   // never removes them from the library; it only adds a reference, exactly
@@ -108,6 +111,7 @@ function LibraryContent() {
           >
             {loading ? "Adding…" : "+ Add Files"}
           </button>
+          <ConnectYouTubeButton onReady={() => setYoutubeModalOpen(true)} />
         </div>
         <input
           ref={inputRef}
@@ -156,6 +160,8 @@ function LibraryContent() {
           onToggleSelect={selectMode ? toggleSelect : undefined}
         />
       )}
+
+      {youtubeModalOpen && <YouTubeImportModal onClose={() => setYoutubeModalOpen(false)} />}
     </div>
   );
 }

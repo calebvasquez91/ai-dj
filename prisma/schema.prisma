@@ -33,8 +33,9 @@ model Track {
   title          String
   artist         String
   durationSec    Float
-  storageKey     String // local backend: file id under ./uploads ; blob backend: full public URL
-  mimeType       String @default("audio/mpeg") // from the browser File's .type at upload time — served back as Content-Type
+  source         String   @default("local") // "local" | "youtube" — enforced in app code, not a DB enum
+  storageKey     String // local backend: file id under ./uploads ; blob backend: full public URL ; youtube: the video id
+  mimeType       String @default("audio/mpeg") // from the browser File's .type at upload time — served back as Content-Type ; unused for source="youtube"
   thumbnailUrl   String?
   playPreference String? // "must" | "do-not" | null — enforced in app code, not a DB enum
   createdAt      DateTime @default(now())
@@ -64,6 +65,10 @@ model Track {
   playlistTracks PlaylistTrack[]
 
   @@index([userId])
+  // Prevents re-importing the same YouTube video twice for the same user
+  // (storageKey holds the video id for source="youtube" rows); harmless for
+  // local/blob rows since their storageKey is already unique by construction.
+  @@unique([userId, storageKey])
 }
 
 model Playlist {

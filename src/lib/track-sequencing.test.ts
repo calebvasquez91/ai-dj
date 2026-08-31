@@ -5,7 +5,7 @@ import type { TrackAnalysis } from "@/lib/audio-analysis";
 import { fingerprintFromText } from "@/lib/lyrics";
 
 function makeTrack(id: string): Track {
-  return { id, title: id, artist: "Test Artist", durationSec: 200, addedAt: 0, sourceUrl: `blob:${id}` };
+  return { id, title: id, artist: "Test Artist", durationSec: 200, addedAt: 0, source: "local", sourceUrl: `blob:${id}` };
 }
 
 function makeAnalysis(overrides: Partial<TrackAnalysis> = {}): TrackAnalysis {

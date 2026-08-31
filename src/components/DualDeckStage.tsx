@@ -27,7 +27,7 @@ import { shouldTriggerAmbience } from "@/lib/ambience";
 import { useDjWeights, LEARNING_NUDGE_UP, LEARNING_NUDGE_DOWN } from "@/lib/dj-weights";
 import { planMashup, MASHUP_COOLDOWN_SEC, type MashupPlan } from "@/lib/mashup-engine";
 import { createTimeStretchVoice, type TimeStretchVoice } from "@/lib/time-stretch";
-import type { Track } from "@/types/music";
+import type { LocalTrack, Track } from "@/types/music";
 
 type DeckId = "A" | "B";
 
@@ -62,7 +62,7 @@ interface ActiveTransition {
 interface ActiveMashup {
   fromDeckId: DeckId; // still playing normally, unprocessed
   toDeckId: DeckId; // idle <audio> deck — receives the handoff once the mashup resolves
-  nextTrack: Track;
+  nextTrack: LocalTrack;
   plan: MashupPlan;
   voice: TimeStretchVoice;
   voiceGain: GainNode;
@@ -230,6 +230,11 @@ export function DualDeckStage() {
   // the eventual startTransition() call knows the outgoing deck already did
   // the tempo-matching work and skips re-ramping the incoming deck on top of it.
   const tempoRampCompletedPairRef = useRef<string | null>(null);
+  // A local track ending into a YouTube track (or vice versa) has no shared
+  // audio graph to blend through, so instead of an overlapping crossfade the
+  // outgoing local deck just fades to silence over the normal transition
+  // window, then hands off to the queue — see fadeThenAdvance().
+  const crossSourceFadeTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const [activeDeck, setActiveDeck] = useState<DeckId>("A");
 
@@ -373,6 +378,10 @@ export function DualDeckStage() {
   useEffect(() => {
     const tracks = currentTrack ? [currentTrack, ...queue] : queue;
     for (const track of tracks) {
+      // YouTube tracks have no fetchable/decodable audio buffer to analyze
+      // — trackAnalysis simply never gets an entry for them, which the
+      // compatibility scorer and mix engine already treat as neutral.
+      if (track.source === "youtube") continue;
       const state = useStore.getState();
       if (state.trackAnalysis[track.id] || analyzingRef.current.has(track.id)) continue;
       analyzingRef.current.add(track.id);
@@ -678,7 +687,7 @@ export function DualDeckStage() {
       return { source, filter, gain };
     }
 
-    function startTransition(nextTrack: Track, plan: TransitionPlan) {
+    function startTransition(nextTrack: LocalTrack, plan: TransitionPlan) {
       if (transitionRef.current) return;
       const ctx = audioCtxRef.current;
       const fromDeckId = activeDeckRef.current;
@@ -872,7 +881,7 @@ export function DualDeckStage() {
      * and the eventual handoff need a JS tick, since SoundTouchJS's
      * tempo/pitch aren't AudioParams.
      */
-    async function startMashup(nextTrack: Track, plan: MashupPlan) {
+    async function startMashup(nextTrack: LocalTrack, plan: MashupPlan) {
       if (transitionRef.current || mashupRef.current || mashupStartingRef.current) return;
       mashupStartingRef.current = true;
       const currentTrackIdAtStart = useStore.getState().currentTrack?.id;
@@ -1021,7 +1030,7 @@ export function DualDeckStage() {
      * runway left for a worthwhile ramp.
      */
     async function startTempoRamp(
-      track: Track,
+      track: LocalTrack,
       nextTrack: Track,
       currentAnalysis: TrackAnalysis,
       nextAnalysis: TrackAnalysis
@@ -1484,11 +1493,36 @@ export function DualDeckStage() {
       nodes.gain.gain.linearRampToValueAtTime(0, now + Math.max(0.05, remaining));
     }
 
+    /**
+     * Cross-source hand-off (local -> YouTube or YouTube -> local): the two
+     * playback engines never share an audio graph, so there's no overlapping
+     * blend to run — instead the outgoing local deck fades to silence over
+     * `windowSec` (the same window a normal transition would use) and the
+     * queue advances once that fade completes. Still never an abrupt cut,
+     * just not a true overlapping crossfade — that remains a stretch goal.
+     */
+    function fadeThenAdvance(windowSec: number) {
+      if (crossSourceFadeTimeoutRef.current != null) return; // already fading out
+      const ctx = audioCtxRef.current;
+      const nodes = deckNodesRef.current[activeDeckRef.current];
+      if (ctx && nodes) {
+        const now = ctx.currentTime;
+        nodes.gain.gain.cancelScheduledValues(now);
+        nodes.gain.gain.setValueAtTime(nodes.gain.gain.value, now);
+        nodes.gain.gain.linearRampToValueAtTime(0, now + Math.max(0.05, windowSec));
+      }
+      crossSourceFadeTimeoutRef.current = setTimeout(() => {
+        crossSourceFadeTimeoutRef.current = null;
+        useStore.getState().next();
+      }, Math.max(50, windowSec * 1000));
+    }
+
     function tryAutoTransition() {
       if (transitionRef.current || mashupRef.current || loopRef.current || backspinRef.current) return;
       const state = useStore.getState();
       const track = state.currentTrack;
       if (!track) return;
+      if (track.source === "youtube") return; // owned by YouTubeDeckStage
       const activeEl = deckEl(activeDeckRef.current);
       if (!activeEl) return;
       const duration = activeEl.duration;
@@ -1514,7 +1548,11 @@ export function DualDeckStage() {
         const plan = planSimpleFade(AUTO_DJ_OFF_FADE_SEC);
         const clampedWindow = Math.min(plan.windowSec, duration / 2);
         if (duration - currentTime <= clampedWindow) {
-          startTransition(nextTrack, { ...plan, windowSec: clampedWindow });
+          if (nextTrack.source !== "local") {
+            fadeThenAdvance(clampedWindow);
+          } else {
+            startTransition(nextTrack, { ...plan, windowSec: clampedWindow });
+          }
         }
         return;
       }
@@ -1527,7 +1565,13 @@ export function DualDeckStage() {
       // own scoring. Needs a longer runway than a normal transition window
       // — it only fires once there's just enough of the current track left
       // for the whole planned overlap to actually fit before the file ends.
-      if (state.mashupEnabled && !mashupRef.current && !mashupStartingRef.current && !tempoRampRef.current) {
+      if (
+        state.mashupEnabled &&
+        nextTrack.source === "local" &&
+        !mashupRef.current &&
+        !mashupStartingRef.current &&
+        !tempoRampRef.current
+      ) {
         const cooldownOk =
           mashupLastAtRef.current == null || Date.now() - mashupLastAtRef.current >= MASHUP_COOLDOWN_SEC * 1000;
         if (cooldownOk) {
@@ -1624,6 +1668,11 @@ export function DualDeckStage() {
       }
 
       if (nearNaturalEnd || pastActiveCap || dropAligned || breakdownOpportunity) {
+        if (nextTrack.source !== "local") {
+          fadeThenAdvance(clampedWindow);
+          tempoRampCompletedPairRef.current = null;
+          return;
+        }
         // If the outgoing deck already glided to the incoming track's tempo
         // via startTempoRamp, the blend itself needs no further tempo
         // ramping — both decks are already matched, so this is just a
@@ -1639,6 +1688,7 @@ export function DualDeckStage() {
     }
 
     const interval = setInterval(() => {
+      if (useStore.getState().currentTrack?.source === "youtube") return; // owned by YouTubeDeckStage
       const activeEl = deckEl(activeDeckRef.current);
       if (activeEl) {
         // Same reasoning as tryAutoTransition's own currentTime read: the
@@ -1663,6 +1713,11 @@ export function DualDeckStage() {
       const track = state.currentTrack;
       const nextTrack = state.queue[0];
       if (!track || !nextTrack) return;
+      if (track.source === "youtube") return; // owned by YouTubeDeckStage
+      if (nextTrack.source !== "local") {
+        fadeThenAdvance(AUTO_DJ_OFF_FADE_SEC);
+        return;
+      }
       const activeEl = deckEl(activeDeckRef.current);
       const plan = planTransition({
         current: { track, analysis: getAnalysis(track.id) },
@@ -1722,6 +1777,10 @@ export function DualDeckStage() {
         // Already stopped — harmless.
       }
       tempoRampRef.current = null;
+      if (crossSourceFadeTimeoutRef.current != null) {
+        clearTimeout(crossSourceFadeTimeoutRef.current);
+        crossSourceFadeTimeoutRef.current = null;
+      }
       elA?.removeEventListener("ended", onEndedA);
       elB?.removeEventListener("ended", onEndedB);
     };
@@ -1736,6 +1795,22 @@ export function DualDeckStage() {
   // transitions use the analyzed entry point).
   useEffect(() => {
     if (!currentTrack) return;
+    if (crossSourceFadeTimeoutRef.current != null) {
+      clearTimeout(crossSourceFadeTimeoutRef.current);
+      crossSourceFadeTimeoutRef.current = null;
+    }
+    if (currentTrack.source === "youtube") {
+      // Ownership transferred to YouTubeDeckStage — release both local
+      // decks so nothing local keeps playing underneath a YouTube track.
+      cancelTransition();
+      cancelMashup();
+      cancelLoop();
+      cancelBackspin();
+      cancelTempoRamp();
+      (["A", "B"] as DeckId[]).forEach((id) => deckEl(id)?.pause());
+      loadedTrackId.current = { A: null, B: null };
+      return;
+    }
     if (loadedTrackId.current[activeDeck] === currentTrack.id) return;
 
     cancelTransition();
@@ -1791,7 +1866,7 @@ export function DualDeckStage() {
 
   useEffect(() => {
     const activeEl = deckEl(activeDeck);
-    if (!activeEl || !currentTrack) return;
+    if (!activeEl || !currentTrack || currentTrack.source === "youtube") return;
     if (isPlaying) {
       audioCtxRef.current?.resume().catch(() => {});
       activeEl.play().catch(() => {});
@@ -1805,7 +1880,7 @@ export function DualDeckStage() {
   }, [volume]);
 
   useEffect(() => {
-    if (seekRequest == null) return;
+    if (seekRequest == null || currentTrack?.source === "youtube") return; // owned by YouTubeDeckStage
     cancelTransition();
     cancelMashup();
     cancelLoop();
@@ -1817,6 +1892,7 @@ export function DualDeckStage() {
   }, [
     seekRequest,
     activeDeck,
+    currentTrack,
     cancelBackspin,
     cancelLoop,
     cancelMashup,
