@@ -234,7 +234,7 @@ export function YouTubeDeckStage() {
       const state = useStore.getState();
       if (state.currentTrack?.source !== "youtube") return;
       const activePlayer = playersRef.current[activeDeckRef.current];
-      if (!activePlayer) return;
+      if (!activePlayer || !playersReadyRef.current[activeDeckRef.current]) return;
 
       const fade = fadeRef.current;
       if (fade) {
