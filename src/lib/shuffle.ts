@@ -39,3 +39,29 @@ export function shuffleForPlay(
 
   return [...orderedMust, ...orderedRest].map((c) => c.track);
 }
+
+/** Fisher-Yates in place on a copy — every permutation equally likely. */
+function randomShuffle<T>(list: T[]): T[] {
+  const result = [...list];
+  for (let i = result.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [result[i], result[j]] = [result[j], result[i]];
+  }
+  return result;
+}
+
+/**
+ * A genuinely random play order — no compatibility scoring at all, unlike
+ * shuffleForPlay above. Same curation-flag handling (Do-Not-Play excluded,
+ * Must-Play guaranteed first) so the two shuffle modes only differ in how
+ * they order what's left, not in what's eligible. Whatever order it lands
+ * on still goes through playTrackList like any other queue, so the
+ * transition engine blends between tracks exactly as it always does — a
+ * random order doesn't mean abrupt transitions.
+ */
+export function dropTheNeedle(tracks: Track[]): Track[] {
+  const eligible = tracks.filter((t) => t.playPreference !== "do-not");
+  const must = eligible.filter((t) => t.playPreference === "must");
+  const rest = eligible.filter((t) => t.playPreference !== "must");
+  return [...randomShuffle(must), ...randomShuffle(rest)];
+}

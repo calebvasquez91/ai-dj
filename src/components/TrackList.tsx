@@ -91,7 +91,7 @@ export function TrackList({
                 title={
                   track.playPreference === "must"
                     ? "Must-Play — click to clear"
-                    : "Mark Must-Play (guaranteed + first in Shuffle Play)"
+                    : "Mark Must-Play (guaranteed + first in Shuffle Play / Drop the Needle)"
                 }
               >
                 ★
@@ -109,8 +109,8 @@ export function TrackList({
                 }`}
                 title={
                   track.playPreference === "do-not"
-                    ? "Do-Not-Play — excluded from Shuffle Play (click to clear). A direct click here still plays it."
-                    : "Mark Do-Not-Play (excluded from Shuffle Play)"
+                    ? "Do-Not-Play — excluded from Shuffle Play / Drop the Needle (click to clear). A direct click here still plays it."
+                    : "Mark Do-Not-Play (excluded from Shuffle Play / Drop the Needle)"
                 }
               >
                 🚫
