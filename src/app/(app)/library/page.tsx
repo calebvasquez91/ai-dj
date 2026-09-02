@@ -6,10 +6,9 @@ import { useStore } from "@/lib/store";
 import { filesToTracks } from "@/lib/localAudio";
 import { TrackList } from "@/components/TrackList";
 import { AddSelectedToPlaylistButton } from "@/components/AddSelectedToPlaylistButton";
-import { ConnectYouTubeButton } from "@/components/ConnectYouTubeButton";
 import { YouTubeImportModal } from "@/components/YouTubeImportModal";
-import { ConnectSpotifyButton } from "@/components/ConnectSpotifyButton";
 import { SpotifyImportModal } from "@/components/SpotifyImportModal";
+import { ConnectMenu } from "@/components/ConnectMenu";
 import { shuffleForPlay, dropTheNeedle } from "@/lib/shuffle";
 
 function LibraryContent() {
@@ -102,7 +101,7 @@ function LibraryContent() {
     <div className="p-6 flex flex-col gap-4">
       <div className="flex flex-wrap items-center justify-between gap-4">
         <h1 className="text-2xl font-bold retro-heading">Music Library</h1>
-        <div className="flex items-center gap-3 shrink-0">
+        <div className="flex flex-wrap items-center justify-end gap-3">
           <button
             type="button"
             onClick={() => playTrackList(shuffleForPlay(filtered, trackAnalysis, trackLyricalFingerprints), 0)}
@@ -139,8 +138,10 @@ function LibraryContent() {
           >
             {loading ? "Adding…" : "+ Add Files"}
           </button>
-          <ConnectYouTubeButton onReady={() => setYoutubeModalOpen(true)} />
-          <ConnectSpotifyButton onReady={() => setSpotifyModalOpen(true)} />
+          <ConnectMenu
+            onYouTubeReady={() => setYoutubeModalOpen(true)}
+            onSpotifyReady={() => setSpotifyModalOpen(true)}
+          />
         </div>
         <input
           ref={inputRef}

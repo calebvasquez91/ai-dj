@@ -4,8 +4,16 @@ import { useEffect, useState } from "react";
 import { useStore } from "@/lib/store";
 import { connectSpotify, getValidSpotifyToken, hasSpotifyRefreshToken } from "@/lib/spotifyAuth";
 
+interface ConnectSpotifyButtonProps {
+  onReady: () => void;
+  /** "button" (default): standalone pill button. "menuItem": a full-width row for ConnectMenu.tsx's dropdown — same connect logic, different chrome. */
+  variant?: "button" | "menuItem";
+  /** menuItem variant only — called whenever this row's click leads to a state the dropdown should close for (already-connected -> Import; the redirect case doesn't need it since the whole page navigates away). */
+  onClose?: () => void;
+}
+
 /** "Connect Spotify" until an access token exists, then doubles as the "Import from Spotify" trigger — mirrors ConnectYouTubeButton.tsx. The one addition: since the refresh token survives a page reload (unlike YouTube's in-memory-only token), this silently re-derives an access token on mount instead of always showing "Connect" first. */
-export function ConnectSpotifyButton({ onReady }: { onReady: () => void }) {
+export function ConnectSpotifyButton({ onReady, variant = "button", onClose }: ConnectSpotifyButtonProps) {
   const connected = useStore((s) => s.spotifyAccessToken != null);
   const [checking, setChecking] = useState(true);
   const [connecting, setConnecting] = useState(false);
@@ -26,6 +34,7 @@ export function ConnectSpotifyButton({ onReady }: { onReady: () => void }) {
 
   async function handleClick() {
     if (connected) {
+      onClose?.();
       onReady();
       return;
     }
@@ -37,6 +46,26 @@ export function ConnectSpotifyButton({ onReady }: { onReady: () => void }) {
       setError(err instanceof Error ? err.message : "Failed to connect to Spotify.");
       setConnecting(false);
     }
+  }
+
+  const status = checking ? "Checking…" : connecting ? "Connecting…" : connected ? "Import ▸" : "Connect";
+
+  if (variant === "menuItem") {
+    return (
+      <div>
+        <button
+          type="button"
+          onClick={handleClick}
+          disabled={connecting || checking}
+          className="w-full flex items-center justify-between px-3 py-2 text-sm text-left hover:bg-surface-hover disabled:opacity-60"
+          title="Import playlists from your Spotify account — playback requires Spotify Premium"
+        >
+          <span>Spotify</span>
+          <span className="text-xs text-muted">{status}</span>
+        </button>
+        {error && <p className="px-3 pb-2 text-xs text-accent-pink">{error}</p>}
+      </div>
+    );
   }
 
   return (
