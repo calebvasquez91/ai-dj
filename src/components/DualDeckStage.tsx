@@ -378,10 +378,10 @@ export function DualDeckStage() {
   useEffect(() => {
     const tracks = currentTrack ? [currentTrack, ...queue] : queue;
     for (const track of tracks) {
-      // YouTube tracks have no fetchable/decodable audio buffer to analyze
-      // — trackAnalysis simply never gets an entry for them, which the
-      // compatibility scorer and mix engine already treat as neutral.
-      if (track.source === "youtube") continue;
+      // YouTube/Spotify tracks have no fetchable/decodable audio buffer to
+      // analyze — trackAnalysis simply never gets an entry for them, which
+      // the compatibility scorer and mix engine already treat as neutral.
+      if (track.source !== "local") continue;
       const state = useStore.getState();
       if (state.trackAnalysis[track.id] || analyzingRef.current.has(track.id)) continue;
       analyzingRef.current.add(track.id);
@@ -1522,7 +1522,7 @@ export function DualDeckStage() {
       const state = useStore.getState();
       const track = state.currentTrack;
       if (!track) return;
-      if (track.source === "youtube") return; // owned by YouTubeDeckStage
+      if (track.source !== "local") return; // owned by YouTubeDeckStage/SpotifyDeckStage
       const activeEl = deckEl(activeDeckRef.current);
       if (!activeEl) return;
       const duration = activeEl.duration;
@@ -1688,7 +1688,7 @@ export function DualDeckStage() {
     }
 
     const interval = setInterval(() => {
-      if (useStore.getState().currentTrack?.source === "youtube") return; // owned by YouTubeDeckStage
+      if (useStore.getState().currentTrack?.source !== "local") return; // owned by YouTubeDeckStage/SpotifyDeckStage
       const activeEl = deckEl(activeDeckRef.current);
       if (activeEl) {
         // Same reasoning as tryAutoTransition's own currentTime read: the
@@ -1713,7 +1713,7 @@ export function DualDeckStage() {
       const track = state.currentTrack;
       const nextTrack = state.queue[0];
       if (!track || !nextTrack) return;
-      if (track.source === "youtube") return; // owned by YouTubeDeckStage
+      if (track.source !== "local") return; // owned by YouTubeDeckStage/SpotifyDeckStage
       if (nextTrack.source !== "local") {
         fadeThenAdvance(AUTO_DJ_OFF_FADE_SEC);
         return;
@@ -1799,9 +1799,9 @@ export function DualDeckStage() {
       clearTimeout(crossSourceFadeTimeoutRef.current);
       crossSourceFadeTimeoutRef.current = null;
     }
-    if (currentTrack.source === "youtube") {
-      // Ownership transferred to YouTubeDeckStage — release both local
-      // decks so nothing local keeps playing underneath a YouTube track.
+    if (currentTrack.source !== "local") {
+      // Ownership transferred to YouTubeDeckStage/SpotifyDeckStage — release
+      // both local decks so nothing local keeps playing underneath.
       cancelTransition();
       cancelMashup();
       cancelLoop();
@@ -1866,7 +1866,7 @@ export function DualDeckStage() {
 
   useEffect(() => {
     const activeEl = deckEl(activeDeck);
-    if (!activeEl || !currentTrack || currentTrack.source === "youtube") return;
+    if (!activeEl || !currentTrack || currentTrack.source !== "local") return;
     if (isPlaying) {
       audioCtxRef.current?.resume().catch(() => {});
       activeEl.play().catch(() => {});
@@ -1880,7 +1880,7 @@ export function DualDeckStage() {
   }, [volume]);
 
   useEffect(() => {
-    if (seekRequest == null || currentTrack?.source === "youtube") return; // owned by YouTubeDeckStage
+    if (seekRequest == null || currentTrack?.source !== "local") return; // owned by YouTubeDeckStage/SpotifyDeckStage
     cancelTransition();
     cancelMashup();
     cancelLoop();

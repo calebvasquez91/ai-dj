@@ -58,6 +58,11 @@ interface PlayerState {
   youtubeTokenExpiresAt: number | null;
   setYoutubeToken: (token: string | null, expiresAt: number | null) => void;
 
+  /** In-memory only — see lib/spotifyAuth.ts, which separately persists just the refresh token (not this access token) to localStorage so reconnecting doesn't require the full OAuth redirect every session. */
+  spotifyAccessToken: string | null;
+  spotifyTokenExpiresAt: number | null;
+  setSpotifyToken: (token: string | null, expiresAt: number | null) => void;
+
   setQueue: (tracks: Track[]) => void;
   enqueue: (track: Track) => void;
   removeFromQueue: (trackId: string) => void;
@@ -148,6 +153,10 @@ export const useStore = create<PlayerState>()(
       youtubeAccessToken: null,
       youtubeTokenExpiresAt: null,
       setYoutubeToken: (token, expiresAt) => set({ youtubeAccessToken: token, youtubeTokenExpiresAt: expiresAt }),
+
+      spotifyAccessToken: null,
+      spotifyTokenExpiresAt: null,
+      setSpotifyToken: (token, expiresAt) => set({ spotifyAccessToken: token, spotifyTokenExpiresAt: expiresAt }),
 
       setQueue: (tracks) => set({ queue: tracks }),
       enqueue: (track) => set((s) => ({ queue: [...s.queue, track] })),

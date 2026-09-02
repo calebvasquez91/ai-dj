@@ -4,6 +4,7 @@ import { useStore } from "@/lib/store";
 import { formatTime } from "@/lib/format";
 import { DualDeckStage } from "@/components/DualDeckStage";
 import { YouTubeDeckStage } from "@/components/YouTubeDeckStage";
+import { SpotifyDeckStage } from "@/components/SpotifyDeckStage";
 import { TrackThumbnail } from "@/components/TrackThumbnail";
 import { genreFamilies } from "@/data/styles";
 import type { DjSetMode } from "@/lib/mix-engine";
@@ -69,6 +70,7 @@ export function PlayerBar() {
           <>
             <DualDeckStage />
             <YouTubeDeckStage />
+            <SpotifyDeckStage />
             <div
               role="button"
               tabIndex={0}

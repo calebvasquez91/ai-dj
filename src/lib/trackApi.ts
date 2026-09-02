@@ -61,5 +61,11 @@ export function toTrackApiResponse(track: PrismaTrack): TrackApiResponse {
     return { ...base, source: "youtube", youtubeVideoId: track.storageKey };
   }
 
+  if (track.source === "spotify") {
+    // Same reasoning as YouTube — no sourceUrl/analysis, just the id the
+    // Web Playback SDK plays via the Web API.
+    return { ...base, source: "spotify", spotifyTrackId: track.storageKey };
+  }
+
   return { ...base, source: "local", sourceUrl: trackSourceUrl(track) };
 }

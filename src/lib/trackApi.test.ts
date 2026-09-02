@@ -49,4 +49,16 @@ describe("toTrackApiResponse", () => {
     }
     expect(response.analysis).toBeNull();
   });
+
+  it("returns a SpotifyTrack shape with spotifyTrackId (from storageKey) and no sourceUrl/analysis for source='spotify'", () => {
+    const response = toTrackApiResponse(
+      makePrismaTrack({ source: "spotify", storageKey: "4uLU6hMCjMI75M1A2tKUQC", bpm: null })
+    );
+    expect(response.source).toBe("spotify");
+    expect(response).not.toHaveProperty("sourceUrl");
+    if (response.source === "spotify") {
+      expect(response.spotifyTrackId).toBe("4uLU6hMCjMI75M1A2tKUQC");
+    }
+    expect(response.analysis).toBeNull();
+  });
 });
