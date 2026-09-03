@@ -162,6 +162,15 @@ export function SpotifyDeckStage() {
     player.addListener("not_ready", () => {
       readyRef.current = false;
     });
+    // Previously unhandled entirely — a failure here (bad/expired token,
+    // non-Premium account, a track the account can't play) left the SDK
+    // silently stuck pre-"ready" forever, with nothing in the console to
+    // explain why playback never started.
+    for (const event of ["initialization_error", "authentication_error", "account_error", "playback_error"]) {
+      player.addListener(event, (data) => {
+        console.error(`[Spotify SDK] ${event}:`, (data as { message?: string })?.message ?? data);
+      });
+    }
     void player.connect();
     playerRef.current = player;
   }, [sdkReady, loadAndPlay]);
