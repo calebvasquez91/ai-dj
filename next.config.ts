@@ -7,8 +7,6 @@ const nextConfig: NextConfig = {
     remotePatterns: [
       // YouTube video thumbnails (TrackThumbnail.tsx renders these for imported tracks).
       { protocol: "https", hostname: "i.ytimg.com" },
-      // Spotify album art.
-      { protocol: "https", hostname: "i.scdn.co" },
     ],
   },
 };

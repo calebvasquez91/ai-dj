@@ -28,21 +28,7 @@ export interface YouTubeTrack extends TrackBase {
   youtubeVideoId: string;
 }
 
-/**
- * A track imported from a Spotify playlist, played through the Web
- * Playback SDK. Same no-raw-audio-buffer ceiling as YouTube (no real
- * BPM/key/energy analysis), plus a platform-specific one: only one
- * Spotify player can exist per page, so unlike YouTube there's no
- * overlapping crossfade between two Spotify tracks — see
- * SpotifyDeckStage.tsx. Requires the connecting account to have Spotify
- * Premium; the Web Playback SDK plays nothing at all otherwise.
- */
-export interface SpotifyTrack extends TrackBase {
-  source: "spotify";
-  spotifyTrackId: string;
-}
-
-export type Track = LocalTrack | YouTubeTrack | SpotifyTrack;
+export type Track = LocalTrack | YouTubeTrack;
 
 export interface Playlist {
   id: string;

@@ -71,8 +71,8 @@ export async function DELETE(request: Request, { params }: { params: Promise<{ i
   if (!existing) return new NextResponse(null, { status: 404 });
 
   try {
-    if (existing.source === "youtube" || existing.source === "spotify") {
-      // Nothing stored — storageKey holds the video/track id, not a file/blob.
+    if (existing.source === "youtube") {
+      // Nothing stored — storageKey holds the video id, not a file/blob.
     } else if (getStorageBackend() === "local") {
       await deleteLocalFile(existing.storageKey);
     } else {

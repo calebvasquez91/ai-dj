@@ -13,11 +13,10 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
   // runtime despite the env var being set in Vercel).
   secret: process.env.AUTH_SECRET,
   // Without this, Auth.js only trusts a "localhost" host header in dev and
-  // silently redirects anything else (e.g. 127.0.0.1, needed locally since
-  // Spotify's PKCE flow requires a loopback IP literal, not "localhost")
-  // back to a hardcoded localhost URL — the actual cause of credentials
-  // sign-in silently failing when testing via 127.0.0.1. Safe in production
-  // too; it's Vercel's own recommended setting there.
+  // silently redirects anything else (e.g. 127.0.0.1) back to a hardcoded
+  // localhost URL — the actual cause of credentials sign-in silently
+  // failing when testing via 127.0.0.1. Safe in production too; it's
+  // Vercel's own recommended setting there.
   trustHost: true,
   session: { strategy: "jwt" },
   pages: {

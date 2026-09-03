@@ -1,18 +1,16 @@
 "use client";
 
-import { Suspense, useEffect, useRef, useState } from "react";
-import { useRouter, useSearchParams } from "next/navigation";
+import { Suspense, useRef, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import { useStore } from "@/lib/store";
 import { filesToTracks } from "@/lib/localAudio";
 import { TrackList } from "@/components/TrackList";
 import { AddSelectedToPlaylistButton } from "@/components/AddSelectedToPlaylistButton";
+import { ConnectYouTubeButton } from "@/components/ConnectYouTubeButton";
 import { YouTubeImportModal } from "@/components/YouTubeImportModal";
-import { SpotifyImportModal } from "@/components/SpotifyImportModal";
-import { ConnectMenu } from "@/components/ConnectMenu";
 import { shuffleForPlay, dropTheNeedle } from "@/lib/shuffle";
 
 function LibraryContent() {
-  const router = useRouter();
   const inputRef = useRef<HTMLInputElement>(null);
   const [loading, setLoading] = useState(false);
   const localLibrary = useStore((s) => s.localLibrary);
@@ -35,22 +33,6 @@ function LibraryContent() {
 
   const [uploadError, setUploadError] = useState<string | null>(null);
   const [youtubeModalOpen, setYoutubeModalOpen] = useState(false);
-  const [spotifyModalOpen, setSpotifyModalOpen] = useState(false);
-
-  // Spotify's OAuth is a full-page redirect (unlike YouTube's popup), so
-  // /spotify/callback lands back here with a marker instead of being able
-  // to open the import modal directly itself — pick up that hand-off once.
-  const spotifyJustConnected = useSearchParams().get("spotify") === "connected";
-  useEffect(() => {
-    if (!spotifyJustConnected) return;
-    // One-shot: reacting to the query param this page landed with, not
-    // state synced from an external system.
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    setSpotifyModalOpen(true);
-    router.replace("/library");
-    // Only ever fires once per redirect landing, not on every render.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [spotifyJustConnected]);
 
   // Bulk "add to playlist" — selecting and moving tracks into a playlist
   // never removes them from the library; it only adds a reference, exactly
@@ -138,10 +120,7 @@ function LibraryContent() {
           >
             {loading ? "Adding…" : "+ Add Files"}
           </button>
-          <ConnectMenu
-            onYouTubeReady={() => setYoutubeModalOpen(true)}
-            onSpotifyReady={() => setSpotifyModalOpen(true)}
-          />
+          <ConnectYouTubeButton onReady={() => setYoutubeModalOpen(true)} />
         </div>
         <input
           ref={inputRef}
@@ -192,7 +171,6 @@ function LibraryContent() {
       )}
 
       {youtubeModalOpen && <YouTubeImportModal onClose={() => setYoutubeModalOpen(false)} />}
-      {spotifyModalOpen && <SpotifyImportModal onClose={() => setSpotifyModalOpen(false)} />}
     </div>
   );
 }
