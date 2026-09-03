@@ -189,7 +189,10 @@ export function SpotifyDeckStage() {
   useEffect(() => {
     if (!currentTrack) return;
     if (currentTrack.source !== "spotify") {
-      playerRef.current?.pause().catch(() => {});
+      // Only pause if something was actually loaded — pausing an idle
+      // player (nothing ever queued via putPlay) logs a harmless but noisy
+      // "no list was loaded" playback_error from the SDK for no reason.
+      if (loadedTrackId.current !== null) playerRef.current?.pause().catch(() => {});
       return;
     }
     if (fadeRef.current) return; // a fade already owns the swap
