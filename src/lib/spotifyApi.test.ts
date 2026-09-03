@@ -14,7 +14,7 @@ describe("listMyPlaylists", () => {
       if (url.includes("offset=50")) {
         return new Response(
           JSON.stringify({
-            items: [{ id: "pl2", name: "Chill", images: [], tracks: { total: 3 } }],
+            items: [{ id: "pl2", name: "Chill", images: [], items: { total: 3 } }],
             next: null,
           })
         ) as unknown as Response;
@@ -23,7 +23,7 @@ describe("listMyPlaylists", () => {
         return new Response(
           JSON.stringify({
             items: [
-              { id: "pl1", name: "Road Trip", images: [{ url: "https://i.scdn.co/pl1.jpg" }], tracks: { total: 12 } },
+              { id: "pl1", name: "Road Trip", images: [{ url: "https://i.scdn.co/pl1.jpg" }], items: { total: 12 } },
             ],
             next: "https://api.spotify.com/v1/me/playlists?offset=50&limit=50",
           })
@@ -55,7 +55,7 @@ describe("listPlaylistTracks", () => {
         JSON.stringify({
           items: [
             {
-              track: {
+              item: {
                 id: "t1",
                 name: "Real Song",
                 artists: [{ name: "Real Artist" }],
@@ -64,9 +64,9 @@ describe("listPlaylistTracks", () => {
                 is_local: false,
               },
             },
-            { track: null }, // removed/unavailable item
+            { item: null }, // removed/unavailable item
             {
-              track: {
+              item: {
                 id: null,
                 name: "Uploaded MP3",
                 artists: [{ name: "Someone" }],

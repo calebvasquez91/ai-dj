@@ -1,8 +1,17 @@
 // Thin client for the Spotify Web API endpoints this app needs, called
 // directly from the browser with the user's own OAuth access token. Unlike
-// YouTube's Data API, Spotify's playlist-tracks endpoint already includes
+// YouTube's Data API, Spotify's playlist-items endpoint already includes
 // duration, artist names, and album art in one call — no second batched
 // lookup needed.
+//
+// Uses /playlists/{id}/items, not the older /playlists/{id}/tracks —
+// Spotify deprecated the latter in a March 2026 migration; Development Mode
+// apps get a 403 from it now regardless of scope. The field names changed
+// to match: each playlist's own track-count field is `items` (was
+// `tracks`), and each entry in the items list carries the track under
+// `item` (was `track`). Development Mode is also restricted to playlists
+// the connected account owns or collaborates on — `items` is simply absent
+// for anything else, which surfaces here as 0 tracks, not an error.
 import { getValidSpotifyToken } from "@/lib/spotifyAuth";
 
 const API_BASE = "https://api.spotify.com/v1";
@@ -22,16 +31,24 @@ export interface SpotifyImportedTrack {
   thumbnailUrl?: string;
 }
 
+async function errorMessage(res: Response): Promise<string> {
+  const reason = await res
+    .json()
+    .then((body) => body?.error?.message as string | undefined)
+    .catch(() => undefined);
+  return reason ? `Spotify Web API error (${res.status}): ${reason}` : `Spotify Web API error (${res.status}).`;
+}
+
 async function spotifyFetch(path: string, token: string): Promise<Record<string, unknown>> {
   const res = await fetch(`${API_BASE}${path}`, { headers: { Authorization: `Bearer ${token}` } });
   if (res.status === 401) {
     const refreshed = await getValidSpotifyToken();
     if (!refreshed) throw new Error("Spotify session expired — reconnect your account.");
     const retry = await fetch(`${API_BASE}${path}`, { headers: { Authorization: `Bearer ${refreshed}` } });
-    if (!retry.ok) throw new Error(`Spotify Web API error (${retry.status}).`);
+    if (!retry.ok) throw new Error(await errorMessage(retry));
     return retry.json();
   }
-  if (!res.ok) throw new Error(`Spotify Web API error (${res.status}).`);
+  if (!res.ok) throw new Error(await errorMessage(res));
   return res.json();
 }
 
@@ -46,12 +63,12 @@ export async function listMyPlaylists(): Promise<SpotifyPlaylistSummary[]> {
     const items = (data.items as Array<Record<string, unknown>>) ?? [];
     for (const item of items) {
       const images = item.images as Array<{ url?: string }> | null;
-      const tracks = item.tracks as Record<string, unknown> | undefined;
+      const playlistItems = item.items as Record<string, unknown> | undefined;
       playlists.push({
         id: item.id as string,
         title: (item.name as string) ?? "Untitled playlist",
         thumbnailUrl: images?.[0]?.url,
-        itemCount: (tracks?.total as number) ?? 0,
+        itemCount: (playlistItems?.total as number) ?? 0,
       });
     }
     const next = data.next as string | null;
@@ -66,12 +83,12 @@ export async function listPlaylistTracks(playlistId: string): Promise<SpotifyImp
   if (!token) throw new Error("Not connected to Spotify.");
 
   const tracks: SpotifyImportedTrack[] = [];
-  let path: string | null = `/playlists/${playlistId}/tracks?limit=100`;
+  let path: string | null = `/playlists/${playlistId}/items?limit=100`;
   while (path) {
     const data = await spotifyFetch(path, token);
     const items = (data.items as Array<Record<string, unknown>>) ?? [];
     for (const item of items) {
-      const track = item.track as Record<string, unknown> | null;
+      const track = item.item as Record<string, unknown> | null;
       if (!track || track.is_local || !track.id) continue;
       const artists = (track.artists as Array<{ name?: string }>) ?? [];
       const album = track.album as Record<string, unknown> | undefined;
