@@ -86,17 +86,27 @@ export function SpotifyImportModal({ onClose }: { onClose: () => void }) {
             {playlists && playlists.length === 0 && (
               <p className="text-sm text-muted">No playlists found on this Spotify account.</p>
             )}
+            {playlists && playlists.some((p) => !p.accessible) && (
+              <p className="text-xs text-muted">
+                Greyed-out playlists are ones you follow rather than own — Spotify&apos;s developer platform only
+                allows importing playlists you created or collaborate on.
+              </p>
+            )}
             {playlists && playlists.length > 0 && (
               <div className="flex-1 overflow-y-auto flex flex-col gap-1">
                 {playlists.map((p) => (
                   <label
                     key={p.id}
-                    className="flex items-center gap-2 text-sm cursor-pointer px-2 py-1.5 rounded-lg hover:bg-surface-hover"
+                    className={`flex items-center gap-2 text-sm px-2 py-1.5 rounded-lg ${
+                      p.accessible ? "cursor-pointer hover:bg-surface-hover" : "opacity-40 cursor-not-allowed"
+                    }`}
+                    title={p.accessible ? undefined : "Followed, not owned — can't be imported"}
                   >
                     <input
                       type="checkbox"
                       checked={selected.has(p.id)}
                       onChange={() => toggle(p.id)}
+                      disabled={!p.accessible}
                       className="w-4 h-4 accent-accent-purple shrink-0"
                     />
                     <span className="flex-1 truncate">{p.title}</span>

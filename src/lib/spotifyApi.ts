@@ -9,9 +9,16 @@
 // apps get a 403 from it now regardless of scope. The field names changed
 // to match: each playlist's own track-count field is `items` (was
 // `tracks`), and each entry in the items list carries the track under
-// `item` (was `track`). Development Mode is also restricted to playlists
-// the connected account owns or collaborates on — `items` is simply absent
-// for anything else, which surfaces here as 0 tracks, not an error.
+// `item` (was `track`).
+//
+// Development Mode is also permanently restricted to playlists the
+// connected account owns or collaborates on — confirmed by testing, not
+// just documentation: a followed/Spotify-curated playlist 403s even though
+// its metadata (title, track count) is visible via /me/playlists. There's
+// no way around this short of Spotify's Extended Quota approval (which
+// requires a registered business), so listMyPlaylists() flags each
+// playlist's accessibility up front via its own `owner`/`collaborative`
+// fields, rather than letting the user discover it via a failed import.
 import { getValidSpotifyToken } from "@/lib/spotifyAuth";
 
 const API_BASE = "https://api.spotify.com/v1";
@@ -21,6 +28,8 @@ export interface SpotifyPlaylistSummary {
   title: string;
   thumbnailUrl?: string;
   itemCount: number;
+  /** false for a playlist the account only follows (not owned, not collaborative) — Development Mode 403s on its items regardless of scope, so the UI should disable rather than offer it. */
+  accessible: boolean;
 }
 
 export interface SpotifyImportedTrack {
@@ -56,6 +65,9 @@ export async function listMyPlaylists(): Promise<SpotifyPlaylistSummary[]> {
   const token = await getValidSpotifyToken();
   if (!token) throw new Error("Not connected to Spotify.");
 
+  const me = await spotifyFetch("/me", token);
+  const myUserId = me.id as string;
+
   const playlists: SpotifyPlaylistSummary[] = [];
   let path: string | null = "/me/playlists?limit=50";
   while (path) {
@@ -64,11 +76,14 @@ export async function listMyPlaylists(): Promise<SpotifyPlaylistSummary[]> {
     for (const item of items) {
       const images = item.images as Array<{ url?: string }> | null;
       const playlistItems = item.items as Record<string, unknown> | undefined;
+      const owner = item.owner as Record<string, unknown> | undefined;
+      const accessible = item.collaborative === true || owner?.id === myUserId;
       playlists.push({
         id: item.id as string,
         title: (item.name as string) ?? "Untitled playlist",
         thumbnailUrl: images?.[0]?.url,
         itemCount: (playlistItems?.total as number) ?? 0,
+        accessible,
       });
     }
     const next = data.next as string | null;
