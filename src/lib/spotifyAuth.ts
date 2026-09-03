@@ -18,6 +18,12 @@ const SCOPES = [
   "user-modify-playback-state",
   "playlist-read-private",
   "playlist-read-collaborative",
+  // Counterintuitive for a read-only import feature, but Spotify's own
+  // developer community confirms GET /playlists/{id}/items 403s on owned
+  // playlists post-migration without these — a permission-check quirk in
+  // the new endpoint, not an app bug. We never call any write endpoint.
+  "playlist-modify-private",
+  "playlist-modify-public",
 ].join(" ");
 
 const VERIFIER_STORAGE_KEY = "spotify_pkce_verifier";
