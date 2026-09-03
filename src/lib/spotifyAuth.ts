@@ -122,9 +122,16 @@ export async function getValidSpotifyToken(): Promise<string | null> {
       body: new URLSearchParams({ grant_type: "refresh_token", refresh_token: refreshToken, client_id: clientId }),
     });
     const data = (await res.json()) as TokenResponse;
-    if (!res.ok || data.error) return null;
+    if (!res.ok || data.error) {
+      // Temporary diagnostic: pin down why the Web Playback SDK gets an
+      // empty token from getOAuthToken() — this refresh call failing
+      // silently (expired/revoked refresh token) is one candidate cause.
+      console.error("[Spotify] refresh_token exchange failed:", res.status, data.error ?? data);
+      return null;
+    }
     return applyTokenResponse(data);
-  } catch {
+  } catch (err) {
+    console.error("[Spotify] refresh_token exchange threw:", err);
     return null;
   }
 }

@@ -145,7 +145,16 @@ export function SpotifyDeckStage() {
     const player = new Spotify.Player({
       name: "AI DJ",
       getOAuthToken: (cb) => {
-        void getValidSpotifyToken().then((token) => cb(token ?? ""));
+        // Temporary diagnostic for the SDK's authentication_error — confirms
+        // whether the SDK is actually receiving a non-empty token at all,
+        // since getValidSpotifyToken() silently returns null on any failure.
+        void getValidSpotifyToken().then((token) => {
+          console.log(
+            "[Spotify SDK] getOAuthToken ->",
+            token ? `token present (len ${token.length}, starts "${token.slice(0, 8)}…")` : "NULL/EMPTY"
+          );
+          cb(token ?? "");
+        });
       },
       volume: useStore.getState().volume,
     });
