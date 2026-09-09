@@ -81,9 +81,9 @@ function LibraryContent() {
 
   return (
     <div className="p-6 flex flex-col gap-4">
-      <div className="flex flex-wrap items-center justify-between gap-4">
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 sm:gap-4">
         <h1 className="text-2xl heading">Music Library</h1>
-        <div className="flex flex-wrap items-center justify-end gap-3">
+        <div className="flex items-center justify-between sm:justify-end gap-1.5 sm:gap-3">
           <button
             type="button"
             onClick={() => playTrackList(shuffleForPlay(filtered, trackAnalysis, trackLyricalFingerprints), 0)}
@@ -91,7 +91,8 @@ function LibraryContent() {
             className="btn-outline"
             title="Play these tracks ordered by tempo/key/energy/theme compatibility — skips Do-Not-Play tracks, puts Must-Play tracks first"
           >
-            🔀 Shuffle Play
+            <span className="sm:hidden" aria-hidden="true">🔀</span>
+            <span className="hidden sm:inline">🔀 Shuffle Play</span>
           </button>
           <button
             type="button"
@@ -101,7 +102,8 @@ function LibraryContent() {
             className="btn-outline"
             title="Select tracks to add to a playlist — they stay in your library too"
           >
-            {selectMode ? "Cancel" : "☑ Select"}
+            <span className="sm:hidden" aria-hidden="true">{selectMode ? "✕" : "☑"}</span>
+            <span className="hidden sm:inline">{selectMode ? "Cancel" : "☑ Select"}</span>
           </button>
           <button
             type="button"
@@ -109,7 +111,8 @@ function LibraryContent() {
             disabled={loading}
             className="btn"
           >
-            {loading ? "Adding…" : "+ Add Files"}
+            <span className="sm:hidden" aria-hidden="true">{loading ? "…" : "+"}</span>
+            <span className="hidden sm:inline">{loading ? "Adding…" : "+ Add Files"}</span>
           </button>
           <ConnectYouTubeButton onReady={() => setYoutubeModalOpen(true)} />
         </div>

@@ -36,7 +36,10 @@ export function ConnectYouTubeButton({ onReady }: { onReady: () => void }) {
         className="btn-outline"
         title="Import playlists from your YouTube account (read-only)"
       >
-        {connecting ? "Connecting…" : connected ? "Import from YouTube" : "Connect YouTube"}
+        <span className="sm:hidden" aria-hidden="true">{connecting ? "…" : "▶"}</span>
+        <span className="hidden sm:inline">
+          {connecting ? "Connecting…" : connected ? "Import from YouTube" : "Connect YouTube"}
+        </span>
       </button>
       {error && <p className="text-xs text-accent-pink max-w-48 text-right">{error}</p>}
     </div>
