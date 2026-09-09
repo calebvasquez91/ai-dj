@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useStore } from "@/lib/store";
+import { Que } from "@/components/Que";
 
 function greetingForHour(hour: number) {
   if (hour < 12) return "Good morning";
@@ -36,8 +37,9 @@ export default function Home() {
 
   return (
     <div className="p-6 flex flex-col gap-8">
-      <div className="flex flex-col gap-2">
+      <div className="flex flex-col gap-3">
         <h1 className="text-3xl heading">{greeting}</h1>
+        <Que size={56} welcomeMessage="Cue something up — I've got the transitions covered." />
       </div>
 
       <section className="flex flex-col gap-3">

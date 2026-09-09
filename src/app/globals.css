@@ -217,8 +217,7 @@ body {
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 40px;
-  height: 40px;
+  flex-shrink: 0;
   border-radius: 9999px;
   background: var(--surface);
   box-shadow: 0 2px 8px color-mix(in srgb, var(--foreground) 10%, transparent);
