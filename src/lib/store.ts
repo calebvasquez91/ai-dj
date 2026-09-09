@@ -42,6 +42,8 @@ interface PlayerState {
   djVarietyBias: boolean;
   /** Rationale text for the mix currently in progress, captured at the moment it started — so the DJ Decks panel keeps showing what's actually playing out instead of a live recompute that goes stale the instant a one-shot override clears. */
   activeTransitionRationale: string | null;
+  /** Terse version of the same rationale, for Que's dismissible player-side label — set/cleared at the exact same moments as activeTransitionRationale, see mix-engine.ts's shortWhy. */
+  activeTransitionShortWhy: string | null;
   /** Occasional mid-track FX (filter/riser builds, echo throws on breakdowns) — separate from transition FX, which always fire regardless of this setting. */
   ambienceEnabled: boolean;
   ambienceFrequency: AmbienceFrequency;
@@ -91,6 +93,7 @@ interface PlayerState {
   clearRerolledTransitionIds: () => void;
   setDjVarietyBias: (enabled: boolean) => void;
   setActiveTransitionRationale: (rationale: string | null) => void;
+  setActiveTransitionShortWhy: (shortWhy: string | null) => void;
   setAmbienceEnabled: (enabled: boolean) => void;
   setAmbienceFrequency: (frequency: AmbienceFrequency) => void;
   setMashupEnabled: (enabled: boolean) => void;
@@ -136,6 +139,7 @@ export const useStore = create<PlayerState>()(
       rerolledTransitionIds: [],
       djVarietyBias: false,
       activeTransitionRationale: null,
+      activeTransitionShortWhy: null,
       ambienceEnabled: true,
       ambienceFrequency: "occasional",
       mashupEnabled: true,
@@ -255,6 +259,7 @@ export const useStore = create<PlayerState>()(
       clearRerolledTransitionIds: () => set({ rerolledTransitionIds: [] }),
       setDjVarietyBias: (enabled) => set({ djVarietyBias: enabled }),
       setActiveTransitionRationale: (rationale) => set({ activeTransitionRationale: rationale }),
+      setActiveTransitionShortWhy: (shortWhy) => set({ activeTransitionShortWhy: shortWhy }),
       setAmbienceEnabled: (enabled) => set({ ambienceEnabled: enabled }),
       setAmbienceFrequency: (frequency) => set({ ambienceFrequency: frequency }),
       setMashupEnabled: (enabled) => set({ mashupEnabled: enabled }),

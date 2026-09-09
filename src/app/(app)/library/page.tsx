@@ -82,13 +82,13 @@ function LibraryContent() {
   return (
     <div className="p-6 flex flex-col gap-4">
       <div className="flex flex-wrap items-center justify-between gap-4">
-        <h1 className="text-2xl font-bold retro-heading">Music Library</h1>
+        <h1 className="text-2xl heading">Music Library</h1>
         <div className="flex flex-wrap items-center justify-end gap-3">
           <button
             type="button"
             onClick={() => playTrackList(shuffleForPlay(filtered, trackAnalysis, trackLyricalFingerprints), 0)}
             disabled={shufflableCount < 2}
-            className="btn-retro-outline"
+            className="btn-outline"
             title="Play these tracks ordered by tempo/key/energy/theme compatibility — skips Do-Not-Play tracks, puts Must-Play tracks first"
           >
             🔀 Shuffle Play
@@ -98,7 +98,7 @@ function LibraryContent() {
             onClick={() => (selectMode ? exitSelectMode() : setSelectMode(true))}
             disabled={filtered.length === 0}
             data-active={selectMode}
-            className="btn-retro-outline"
+            className="btn-outline"
             title="Select tracks to add to a playlist — they stay in your library too"
           >
             {selectMode ? "Cancel" : "☑ Select"}
@@ -107,7 +107,7 @@ function LibraryContent() {
             type="button"
             onClick={() => inputRef.current?.click()}
             disabled={loading}
-            className="btn-retro"
+            className="btn"
           >
             {loading ? "Adding…" : "+ Add Files"}
           </button>
@@ -124,7 +124,7 @@ function LibraryContent() {
       </div>
 
       {selectMode && (
-        <div className="flex flex-wrap items-center gap-3 rounded-xl border-2 border-border bg-surface px-4 py-2">
+        <div className="flex flex-wrap items-center gap-3 rounded-xl bg-surface shadow-elevate-sm px-4 py-2">
           <label className="flex items-center gap-2 text-sm cursor-pointer">
             <input
               type="checkbox"

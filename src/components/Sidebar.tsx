@@ -59,12 +59,12 @@ export function Sidebar() {
         />
       )}
       <aside
-        className={`fixed inset-y-0 left-0 z-40 w-60 shrink-0 bg-surface border-r-2 border-border flex flex-col gap-4 p-3 overflow-y-auto md:static ${
+        className={`fixed inset-y-0 left-0 z-40 w-60 shrink-0 bg-surface shadow-elevate-right flex flex-col gap-4 p-3 overflow-y-auto md:static ${
           sidebarOpen ? "" : "max-md:hidden"
         }`}
       >
         <div className="px-2 py-2 flex flex-col gap-2">
-          <span className="text-xl retro-heading">AI DJ</span>
+          <span className="text-xl wordmark">AI DJ</span>
           <div className="retro-stripe" />
         </div>
 
@@ -105,7 +105,7 @@ export function Sidebar() {
           )}
         </div>
 
-        <div className="mt-auto flex items-center justify-between gap-2 px-2 pt-2 border-t-2 border-border">
+        <div className="mt-auto flex items-center justify-between gap-2 px-2 pt-2 border-t border-border/10">
           <span className="text-xs text-muted truncate" title={session?.user?.email ?? undefined}>
             {session?.user?.name || session?.user?.email}
           </span>

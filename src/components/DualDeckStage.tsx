@@ -308,6 +308,7 @@ export function DualDeckStage() {
     transitionRef.current = null;
     useStore.getState().setIsTransitioning(false);
     useStore.getState().setActiveTransitionRationale(null);
+    useStore.getState().setActiveTransitionShortWhy(null);
   }, [deckEl, resetDeckNodes, stopOverlayNodes]);
 
   /** Tears down an in-progress mashup cleanly (user seeked or picked a different track mid-mashup) — the idle toDeck was never touched yet, so only the buffer-voice and the still-playing fromDeck need resetting. */
@@ -325,6 +326,7 @@ export function DualDeckStage() {
     mashupRef.current = null;
     useStore.getState().setIsTransitioning(false);
     useStore.getState().setActiveTransitionRationale(null);
+    useStore.getState().setActiveTransitionShortWhy(null);
   }, [resetDeckNodes]);
 
   /** Stops an in-progress freeform beat-loop from rewinding again — the deck's own playback just continues forward untouched, since the loop never altered gain or node state, only currentTime. */
@@ -767,6 +769,7 @@ export function DualDeckStage() {
       transitionRef.current = transition;
       useStore.getState().setIsTransitioning(true);
       useStore.getState().setActiveTransitionRationale(plan.rationale);
+      useStore.getState().setActiveTransitionShortWhy(plan.shortWhy);
 
       // Gain/filter automation is native (AudioParam-scheduled) and keeps
       // running even if this JS timer is delayed. The timer's only audio
@@ -822,6 +825,7 @@ export function DualDeckStage() {
       setActiveDeck(t.toDeckId);
       useStore.getState().setIsTransitioning(false);
       useStore.getState().setActiveTransitionRationale(null);
+    useStore.getState().setActiveTransitionShortWhy(null);
       useStore.getState().next();
     }
 
@@ -938,6 +942,10 @@ export function DualDeckStage() {
         mashupRef.current = mashup;
         useStore.getState().setIsTransitioning(true);
         useStore.getState().setActiveTransitionRationale(plan.rationale);
+        // MashupPlan has no shortWhy of its own (a different scoring system
+        // from mix-engine.ts's transitions) — a mashup is by definition
+        // already tempo/key-matched, so a static phrase is accurate here.
+        useStore.getState().setActiveTransitionShortWhy("Mashing up a tempo + key match");
 
         // Resolve phase starts at this fraction of the total duration — the
         // last stretch of mashupGainCurves' own resolve taper, kept in sync
@@ -1015,6 +1023,7 @@ export function DualDeckStage() {
       mashupLastAtRef.current = Date.now();
       useStore.getState().setIsTransitioning(false);
       useStore.getState().setActiveTransitionRationale(null);
+    useStore.getState().setActiveTransitionShortWhy(null);
       useStore.getState().next();
     }
 

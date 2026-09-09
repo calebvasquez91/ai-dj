@@ -20,7 +20,7 @@ export function TopBar() {
   }
 
   return (
-    <header className="h-16 shrink-0 flex items-center gap-4 px-4 sm:px-6 border-b-2 border-border bg-surface/90 backdrop-blur">
+    <header className="h-16 shrink-0 flex items-center gap-4 px-4 sm:px-6 shadow-elevate-md bg-surface/90 backdrop-blur">
       <button
         type="button"
         onClick={() => setSidebarOpen(!sidebarOpen)}
@@ -35,7 +35,7 @@ export function TopBar() {
           onChange={(e) => setQuery(e.target.value)}
           type="search"
           placeholder="Filter your local files..."
-          className="w-full rounded-full bg-background px-4 py-2 text-sm outline-none border-2 border-border focus:border-accent-purple placeholder:text-muted"
+          className="w-full rounded-full bg-background px-4 py-2 text-sm outline-none shadow-elevate-sm focus:shadow-none focus:border focus:border-accent-purple placeholder:text-muted"
         />
       </form>
     </header>

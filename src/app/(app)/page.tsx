@@ -37,8 +37,7 @@ export default function Home() {
   return (
     <div className="p-6 flex flex-col gap-8">
       <div className="flex flex-col gap-2">
-        <h1 className="text-3xl retro-heading">{greeting}</h1>
-        <div className="retro-stripe w-32" />
+        <h1 className="text-3xl heading">{greeting}</h1>
       </div>
 
       <section className="flex flex-col gap-3">
@@ -46,27 +45,27 @@ export default function Home() {
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
           <Link
             href="/library"
-            className="card-retro hover:-translate-y-0.5 transition-transform p-4 flex items-center gap-4"
+            className="card hover:-translate-y-0.5 transition-transform p-4 flex items-center gap-4"
           >
-            <div className="w-14 h-14 rounded-md bg-gradient-to-br from-accent-teal via-accent-purple to-accent-pink border-2 border-border shrink-0" />
+            <div className="w-14 h-14 rounded-md bg-gradient-to-br from-accent-teal to-accent-purple shadow-elevate-sm shrink-0" />
             <p className="text-sm font-medium">Add local files to get started</p>
           </Link>
 
           <button
             type="button"
             onClick={handleBuildPlaylist}
-            className="card-retro hover:-translate-y-0.5 transition-transform p-4 flex items-center gap-4 text-left"
+            className="card hover:-translate-y-0.5 transition-transform p-4 flex items-center gap-4 text-left"
           >
-            <div className="w-14 h-14 rounded-md bg-gradient-to-br from-accent-teal via-accent-purple to-accent-pink border-2 border-border shrink-0" />
+            <div className="w-14 h-14 rounded-md bg-gradient-to-br from-accent-teal to-accent-purple shadow-elevate-sm shrink-0" />
             <p className="text-sm font-medium">Build a playlist and let Auto-DJ blend it</p>
           </button>
 
           <button
             type="button"
             onClick={() => toggleQueuePanel()}
-            className="card-retro hover:-translate-y-0.5 transition-transform p-4 flex items-center gap-4 text-left"
+            className="card hover:-translate-y-0.5 transition-transform p-4 flex items-center gap-4 text-left"
           >
-            <div className="w-14 h-14 rounded-md bg-gradient-to-br from-accent-teal via-accent-purple to-accent-pink border-2 border-border shrink-0" />
+            <div className="w-14 h-14 rounded-md bg-gradient-to-br from-accent-teal to-accent-purple shadow-elevate-sm shrink-0" />
             <p className="text-sm font-medium">Transitions get smoother the more you queue</p>
           </button>
         </div>

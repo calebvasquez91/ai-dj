@@ -33,7 +33,7 @@ export function ConnectYouTubeButton({ onReady }: { onReady: () => void }) {
         type="button"
         onClick={handleClick}
         disabled={connecting}
-        className="btn-retro-outline"
+        className="btn-outline"
         title="Import playlists from your YouTube account (read-only)"
       >
         {connecting ? "Connecting…" : connected ? "Import from YouTube" : "Connect YouTube"}

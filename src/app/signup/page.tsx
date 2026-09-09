@@ -43,9 +43,9 @@ export default function SignupPage() {
 
   return (
     <div className="min-h-full flex items-center justify-center p-6">
-      <form onSubmit={handleSubmit} className="card-retro w-full max-w-sm p-6 flex flex-col gap-4">
+      <form onSubmit={handleSubmit} className="card w-full max-w-sm p-6 flex flex-col gap-4">
         <div className="flex flex-col gap-2">
-          <span className="text-2xl retro-heading">AI DJ</span>
+          <span className="text-2xl wordmark">AI DJ</span>
           <div className="retro-stripe w-24" />
         </div>
         <h1 className="text-lg font-semibold">Create your account</h1>
@@ -59,7 +59,7 @@ export default function SignupPage() {
             autoComplete="name"
             value={name}
             onChange={(e) => setName(e.target.value)}
-            className="rounded-full bg-background px-4 py-2 outline-none border-2 border-border focus:border-accent-purple"
+            className="rounded-full bg-background px-4 py-2 outline-none shadow-elevate-sm focus:shadow-none focus:border focus:border-accent-purple"
           />
         </label>
         <label className="flex flex-col gap-1 text-sm">
@@ -70,7 +70,7 @@ export default function SignupPage() {
             autoComplete="email"
             value={email}
             onChange={(e) => setEmail(e.target.value)}
-            className="rounded-full bg-background px-4 py-2 outline-none border-2 border-border focus:border-accent-purple"
+            className="rounded-full bg-background px-4 py-2 outline-none shadow-elevate-sm focus:shadow-none focus:border focus:border-accent-purple"
           />
         </label>
         <label className="flex flex-col gap-1 text-sm">
@@ -82,11 +82,11 @@ export default function SignupPage() {
             autoComplete="new-password"
             value={password}
             onChange={(e) => setPassword(e.target.value)}
-            className="rounded-full bg-background px-4 py-2 outline-none border-2 border-border focus:border-accent-purple"
+            className="rounded-full bg-background px-4 py-2 outline-none shadow-elevate-sm focus:shadow-none focus:border focus:border-accent-purple"
           />
         </label>
 
-        <button type="submit" disabled={loading} className="btn-retro justify-center">
+        <button type="submit" disabled={loading} className="btn justify-center">
           {loading ? "Creating account…" : "Sign up"}
         </button>
 

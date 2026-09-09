@@ -49,7 +49,7 @@ function PlaylistContent() {
             removePlaylist(playlist.id);
             router.push("/");
           }}
-          className="text-xs text-muted hover:text-accent-pink border-2 border-border rounded-full px-3 py-1.5 shrink-0"
+          className="text-xs text-muted hover:text-accent-pink shadow-elevate-sm rounded-full px-3 py-1.5 shrink-0"
         >
           Delete playlist
         </button>
@@ -65,7 +65,7 @@ function PlaylistContent() {
             <button
               type="button"
               onClick={() => playTrackList(playlist.tracks, 0)}
-              className="btn-retro self-start"
+              className="btn self-start"
             >
               ▶ Play
             </button>
@@ -73,7 +73,7 @@ function PlaylistContent() {
               type="button"
               onClick={() => playTrackList(shuffleForPlay(playlist.tracks, trackAnalysis, trackLyricalFingerprints), 0)}
               disabled={playlist.tracks.filter((t) => t.playPreference !== "do-not").length < 2}
-              className="btn-retro-outline self-start"
+              className="btn-outline self-start"
               title="Play this playlist ordered by tempo/key/energy/theme compatibility — skips Do-Not-Play tracks, puts Must-Play tracks first"
             >
               🔀 Shuffle Play

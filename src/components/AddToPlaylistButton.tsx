@@ -39,7 +39,7 @@ export function AddToPlaylistButton({ track }: { track: Track }) {
         +
       </button>
       {open && (
-        <div className="absolute right-0 z-10 mt-1 w-48 rounded-xl border-2 border-border bg-surface shadow-lg py-1">
+        <div className="absolute right-0 z-10 mt-1 w-48 rounded-xl bg-surface shadow-elevate-lg py-1">
           {playlists.length === 0 ? (
             <p className="px-3 py-2 text-xs text-muted">No playlists yet.</p>
           ) : (
@@ -62,7 +62,7 @@ export function AddToPlaylistButton({ track }: { track: Track }) {
               );
             })
           )}
-          <div className="border-t-2 border-border mt-1 pt-1">
+          <div className="border-t border-border/10 mt-1 pt-1">
             <button
               type="button"
               onClick={async () => {

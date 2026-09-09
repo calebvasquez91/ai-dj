@@ -87,7 +87,7 @@ function DeckCard({
 }) {
   if (!track) {
     return (
-      <div className="card-retro p-3 flex flex-col gap-2 flex-1 min-w-0">
+      <div className="card p-3 flex flex-col gap-2 flex-1 min-w-0">
         <p className="text-xs font-semibold text-muted uppercase tracking-wide">{label}</p>
         <p className="text-sm text-muted">Nothing here yet.</p>
       </div>
@@ -96,7 +96,7 @@ function DeckCard({
   const camelot =
     analysis && analysis.keyConfidence >= MIN_KEY_CONFIDENCE_FOR_DISPLAY ? analysis.camelotKey : null;
   return (
-    <div className="card-retro p-3 flex flex-col gap-2 flex-1 min-w-0">
+    <div className="card p-3 flex flex-col gap-2 flex-1 min-w-0">
       <p className="text-xs font-semibold text-accent-purple uppercase tracking-wide">{label}</p>
       <div className="flex items-center gap-2 min-w-0">
         <TrackThumbnail thumbnailUrl={track.thumbnailUrl} title={track.title} size={36} />
@@ -216,9 +216,9 @@ export function DeckView() {
   return (
     <>
       <div className="fixed inset-0 z-40 bg-black/50" onClick={toggle} aria-hidden="true" />
-      <div className="fixed inset-x-4 bottom-32 md:bottom-24 z-50 mx-auto max-w-3xl max-h-[70vh] overflow-y-auto rounded-2xl border-2 border-border bg-surface p-4 flex flex-col gap-3 shadow-xl">
+      <div className="fixed inset-x-4 bottom-32 md:bottom-24 z-50 mx-auto max-w-3xl max-h-[70vh] overflow-y-auto rounded-2xl bg-surface p-4 flex flex-col gap-3 shadow-elevate-lg">
         <div className="flex flex-wrap items-center justify-between gap-2">
-          <h2 className="text-sm retro-heading">DJ Decks</h2>
+          <h2 className="text-sm heading">DJ Decks</h2>
           <div className="flex flex-wrap items-center gap-3">
             <label
               className="flex items-center gap-1.5 text-xs text-muted cursor-pointer"
@@ -249,7 +249,7 @@ export function DeckView() {
                 value={ambienceFrequency}
                 onChange={(e) => setAmbienceFrequency(e.target.value as AmbienceFrequency)}
                 title="How often mid-track ambience FX can fire"
-                className="bg-surface border-2 border-border rounded-full text-xs text-muted px-2 py-1 outline-none"
+                className="bg-surface shadow-elevate-sm rounded-full text-xs text-muted px-2 py-1 outline-none"
               >
                 {AMBIENCE_FREQUENCIES.map((f) => (
                   <option key={f.id} value={f.id}>
@@ -286,7 +286,7 @@ export function DeckView() {
             value={djMode}
             onChange={(e) => setDjMode(e.target.value as DjSetMode)}
             title="DJ set mode — biases which transition techniques get chosen"
-            className="bg-surface border-2 border-border rounded-full text-xs text-muted px-2 py-1.5 outline-none"
+            className="bg-surface shadow-elevate-sm rounded-full text-xs text-muted px-2 py-1.5 outline-none"
           >
             {DJ_MODES.map((m) => (
               <option key={m.id} value={m.id} title={m.title}>
@@ -298,7 +298,7 @@ export function DeckView() {
             value={styleGenreHint ?? "auto"}
             onChange={(e) => setStyleGenreHint(e.target.value === "auto" ? null : e.target.value)}
             title="Style influence for chosen transitions"
-            className="bg-surface border-2 border-border rounded-full text-xs text-muted px-2 py-1.5 outline-none"
+            className="bg-surface shadow-elevate-sm rounded-full text-xs text-muted px-2 py-1.5 outline-none"
           >
             <option value="auto">Style: Auto</option>
             {genreFamilies.map((g) => (
@@ -311,7 +311,7 @@ export function DeckView() {
             value={crossfadeOverrideSec ?? "auto"}
             onChange={(e) => setCrossfadeOverride(e.target.value === "auto" ? null : Number(e.target.value))}
             title="Crossfade length"
-            className="bg-surface border-2 border-border rounded-full text-xs text-muted px-2 py-1.5 outline-none"
+            className="bg-surface shadow-elevate-sm rounded-full text-xs text-muted px-2 py-1.5 outline-none"
           >
             <option value="auto">Crossfade: Auto</option>
             {CROSSFADE_PRESETS.map((sec) => (
@@ -362,7 +362,7 @@ export function DeckView() {
                 value={forcedTransitionId ?? ""}
                 onChange={(e) => setForcedTransitionId(e.target.value || null)}
                 title="Pick a specific transition for the upcoming mix, or let Auto-DJ choose"
-                className="bg-surface border-2 border-border rounded-full text-xs text-muted px-2 py-1 outline-none max-w-[55%]"
+                className="bg-surface shadow-elevate-sm rounded-full text-xs text-muted px-2 py-1 outline-none max-w-[55%]"
               >
                 <option value="">Auto-DJ chooses</option>
                 {PICKABLE_TRANSITIONS.map((t) => (
@@ -375,7 +375,7 @@ export function DeckView() {
                 type="button"
                 onClick={() => addRerolledTransitionId(preview.transitionId)}
                 disabled={Boolean(forcedTransitionId)}
-                className="btn-retro-outline disabled:opacity-40 disabled:cursor-not-allowed"
+                className="btn-outline disabled:opacity-40 disabled:cursor-not-allowed"
                 title="Try a different transition for the upcoming mix"
               >
                 🎲 Try another

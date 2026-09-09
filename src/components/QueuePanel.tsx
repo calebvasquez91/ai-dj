@@ -21,9 +21,9 @@ export function QueuePanel() {
         onClick={toggle}
         aria-hidden="true"
       />
-      <aside className="fixed inset-y-0 right-0 z-50 w-[85vw] max-w-80 bg-surface border-l-2 border-border flex flex-col">
-        <div className="flex items-center justify-between px-4 h-16 shrink-0 border-b-2 border-border">
-          <h2 className="text-sm retro-heading">Queue</h2>
+      <aside className="fixed inset-y-0 right-0 z-50 w-[85vw] max-w-80 bg-surface shadow-elevate-left flex flex-col">
+        <div className="flex items-center justify-between px-4 h-16 shrink-0 border-b border-border/10">
+          <h2 className="text-sm heading">Queue</h2>
           <button
             type="button"
             onClick={toggle}

@@ -41,14 +41,14 @@ export function TrackList({
             if (selectMode) onToggleSelect!(track.id);
             else playTrackList(tracks, index);
           }}
-          className={`group flex items-center gap-3 rounded-xl px-3 py-2 cursor-pointer border transition-colors ${
+          className={`group flex items-center gap-3 rounded-xl px-3 py-2 cursor-pointer transition-all ${
             isSelected
-              ? "bg-accent-purple/10 border-accent-purple/50"
+              ? "bg-accent-purple/10 shadow-elevate-sm"
               : currentTrack?.id === track.id
-                ? "bg-surface-hover border-accent/40"
+                ? "bg-surface-hover shadow-elevate-sm"
                 : isNew
-                  ? "border-accent-teal/50 bg-accent-teal/5 hover:border-accent-teal/70"
-                  : "border-transparent hover:border-accent/40 hover:bg-surface-hover"
+                  ? "bg-accent-teal/5 hover:bg-accent-teal/10 hover:shadow-elevate-sm"
+                  : "hover:bg-surface-hover hover:shadow-elevate-sm"
           }`}
         >
           {selectMode && (

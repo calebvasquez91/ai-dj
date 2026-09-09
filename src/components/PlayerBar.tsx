@@ -5,6 +5,7 @@ import { formatTime } from "@/lib/format";
 import { DualDeckStage } from "@/components/DualDeckStage";
 import { YouTubeDeckStage } from "@/components/YouTubeDeckStage";
 import { TrackThumbnail } from "@/components/TrackThumbnail";
+import { Que } from "@/components/Que";
 import { genreFamilies } from "@/data/styles";
 import type { DjSetMode } from "@/lib/mix-engine";
 import { speakHypePhrase } from "@/lib/wordPlay";
@@ -61,9 +62,14 @@ export function PlayerBar() {
 
   return (
     <footer
-      className="min-h-20 shrink-0 border-t-2 border-border bg-surface px-4 py-2 flex flex-wrap items-center gap-2 lg:gap-4"
+      className="relative min-h-20 shrink-0 shadow-elevate-top bg-surface px-4 py-2 flex flex-wrap items-center gap-2 lg:gap-4"
       inert={nowPlayingExpanded ? true : undefined}
     >
+      {currentTrack && (
+        <div className="absolute -top-9 left-4 z-10">
+          <Que />
+        </div>
+      )}
       <div className="flex items-center gap-3 w-28 sm:w-48 lg:w-64 min-w-0 shrink-0">
         {currentTrack ? (
           <>
@@ -110,7 +116,7 @@ export function PlayerBar() {
             type="button"
             onClick={togglePlay}
             disabled={!currentTrack}
-            className="w-9 h-9 rounded-full bg-gradient-to-br from-accent-teal to-accent-purple text-white border-2 border-border flex items-center justify-center disabled:opacity-40 shadow-[2px_2px_0_var(--border)]"
+            className="w-9 h-9 rounded-full bg-gradient-to-br from-accent-teal to-accent-purple text-white flex items-center justify-center disabled:opacity-40 shadow-elevate-md"
             title={isPlaying ? "Pause (Space)" : "Play (Space)"}
           >
             {isPlaying ? "⏸" : "▶"}
@@ -134,11 +140,11 @@ export function PlayerBar() {
             <>
               <span>{formatTime(currentTimeSec)}</span>
               <div
-                className="flex-1 h-1.5 rounded-full bg-background overflow-hidden cursor-pointer border border-border"
+                className="flex-1 h-1.5 rounded-full bg-background overflow-hidden cursor-pointer"
                 onClick={handleSeekClick}
               >
                 <div
-                  className="h-full bg-gradient-to-r from-accent-teal via-accent-purple to-accent-pink"
+                  className="h-full rounded-full bg-gradient-to-r from-accent-teal to-accent-purple"
                   style={{ width: `${progressPercent}%` }}
                 />
               </div>
@@ -183,7 +189,7 @@ export function PlayerBar() {
           type="button"
           onClick={requestMixNow}
           disabled={!currentTrack || queue.length === 0 || isTransitioning || nextTrackAnalyzing}
-          className="btn-retro-outline"
+          className="btn-outline"
           title={
             nextTrackAnalyzing
               ? "Analyzing next track's beat/tempo…"
@@ -196,7 +202,7 @@ export function PlayerBar() {
           value={djMode}
           onChange={(e) => setDjMode(e.target.value as DjSetMode)}
           title="DJ set mode — biases which transition techniques get chosen"
-          className="hidden xl:block bg-surface border-2 border-border rounded-full text-xs text-muted px-2 py-1.5 outline-none"
+          className="hidden xl:block bg-surface shadow-elevate-sm rounded-full text-xs text-muted px-2 py-1.5 outline-none"
         >
           {DJ_MODES.map((m) => (
             <option key={m.id} value={m.id} title={m.title}>
@@ -208,7 +214,7 @@ export function PlayerBar() {
           value={styleGenreHint ?? "auto"}
           onChange={(e) => setStyleGenreHint(e.target.value === "auto" ? null : e.target.value)}
           title="Style influence for chosen transitions"
-          className="hidden xl:block bg-surface border-2 border-border rounded-full text-xs text-muted px-2 py-1.5 outline-none"
+          className="hidden xl:block bg-surface shadow-elevate-sm rounded-full text-xs text-muted px-2 py-1.5 outline-none"
         >
           <option value="auto">Style: Auto</option>
           {genreFamilies.map((g) => (
@@ -225,7 +231,7 @@ export function PlayerBar() {
             )
           }
           title="Crossfade length"
-          className="hidden xl:block bg-surface border-2 border-border rounded-full text-xs text-muted px-2 py-1.5 outline-none"
+          className="hidden xl:block bg-surface shadow-elevate-sm rounded-full text-xs text-muted px-2 py-1.5 outline-none"
         >
           <option value="auto">Auto</option>
           {CROSSFADE_PRESETS.map((sec) => (
@@ -238,7 +244,7 @@ export function PlayerBar() {
           type="button"
           onClick={() => setAutoDj(!autoDjEnabled)}
           data-active={autoDjEnabled}
-          className="btn-retro-outline"
+          className="btn-outline"
           title="Toggle automatic DJ transitions"
         >
           Auto-DJ {autoDjEnabled ? "On" : "Off"}

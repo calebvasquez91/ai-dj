@@ -84,11 +84,11 @@ export function NowPlayingView() {
               <div className="flex items-center gap-3 text-xs text-muted">
                 <span>{formatTime(currentTimeSec)}</span>
                 <div
-                  className="flex-1 h-2 rounded-full bg-surface overflow-hidden cursor-pointer border border-border"
+                  className="flex-1 h-2 rounded-full bg-surface overflow-hidden cursor-pointer"
                   onClick={handleSeekClick}
                 >
                   <div
-                    className="h-full bg-gradient-to-r from-accent-teal via-accent-purple to-accent-pink"
+                    className="h-full rounded-full bg-gradient-to-r from-accent-teal to-accent-purple"
                     style={{ width: `${progressPercent}%` }}
                   />
                 </div>
@@ -109,7 +109,7 @@ export function NowPlayingView() {
             <button
               type="button"
               onClick={togglePlay}
-              className="w-16 h-16 rounded-full bg-gradient-to-br from-accent-teal to-accent-purple text-white border-2 border-border flex items-center justify-center text-2xl shadow-[3px_3px_0_var(--border)]"
+              className="w-16 h-16 rounded-full bg-gradient-to-br from-accent-teal to-accent-purple text-white flex items-center justify-center text-2xl shadow-elevate-md"
               title={isPlaying ? "Pause (Space)" : "Play (Space)"}
             >
               {isPlaying ? "⏸" : "▶"}
@@ -133,14 +133,14 @@ export function NowPlayingView() {
 function TrackThumbnailFill({ thumbnailUrl, title }: { thumbnailUrl?: string; title: string }) {
   if (!thumbnailUrl) {
     return (
-      <div className="w-full h-full rounded-2xl border-2 border-border bg-gradient-to-br from-accent-teal via-accent-purple to-accent-pink flex items-center justify-center text-white text-6xl">
+      <div className="w-full h-full rounded-2xl shadow-elevate-md bg-gradient-to-br from-accent-teal to-accent-purple flex items-center justify-center text-white text-6xl">
         ♪
       </div>
     );
   }
   return (
     <div className="relative w-full h-full">
-      <Image src={thumbnailUrl} alt={title} fill className="rounded-2xl object-cover border-2 border-border" />
+      <Image src={thumbnailUrl} alt={title} fill className="rounded-2xl object-cover shadow-elevate-md" />
     </div>
   );
 }

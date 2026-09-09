@@ -59,11 +59,11 @@ export function YouTubeImportModal({ onClose }: { onClose: () => void }) {
       <div
         role="dialog"
         aria-modal="true"
-        className="bg-surface border-2 border-border rounded-2xl p-6 max-w-md w-full max-h-[80vh] flex flex-col gap-4"
+        className="bg-surface shadow-elevate-lg rounded-2xl p-6 max-w-md w-full max-h-[80vh] flex flex-col gap-4"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-center justify-between">
-          <h2 className="text-lg font-bold retro-heading">Import from YouTube</h2>
+          <h2 className="text-lg heading">Import from YouTube</h2>
           <button type="button" onClick={onClose} className="text-muted hover:text-foreground" title="Close">
             ✕
           </button>
@@ -75,7 +75,7 @@ export function YouTubeImportModal({ onClose }: { onClose: () => void }) {
               Imported {result.imported} track{result.imported === 1 ? "" : "s"}
               {result.skipped > 0 ? ` (${result.skipped} already in your library)` : ""}.
             </p>
-            <button type="button" onClick={onClose} className="btn-retro self-end">
+            <button type="button" onClick={onClose} className="btn self-end">
               Done
             </button>
           </>
@@ -109,7 +109,7 @@ export function YouTubeImportModal({ onClose }: { onClose: () => void }) {
               type="button"
               onClick={handleImport}
               disabled={selected.size === 0 || importing}
-              className="btn-retro self-end"
+              className="btn self-end"
             >
               {importing ? "Importing…" : `Import selected${selected.size > 0 ? ` (${selected.size})` : ""}`}
             </button>

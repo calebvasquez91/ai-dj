@@ -431,6 +431,45 @@ describe("mashupGainCurves", () => {
   });
 });
 
+describe("planTransition — shortWhy (Que's terse reason)", () => {
+  it("credits tempo + key match when both are strong and learned weight isn't a factor", () => {
+    const plan = planTransition({
+      current: { track: makeTrack("a", 240), analysis: makeAnalysis({ bpm: 128, camelotKey: "8A" }) },
+      next: { track: makeTrack("b", 240), analysis: makeAnalysis({ bpm: 128.5, camelotKey: "8A" }) },
+    });
+    expect(plan.tempoSync).toBe(true);
+    expect(plan.shortWhy).toBe("Blending on tempo + key match");
+  });
+
+  it("credits the learned weight when it's the dominant, decisive factor", () => {
+    const plan = planTransition({
+      current: { track: makeTrack("a", 240), analysis: makeAnalysis({ bpm: 100 }) },
+      next: { track: makeTrack("b", 240), analysis: makeAnalysis({ bpm: 140 }) },
+      categoryWeights: { reverb: 12 },
+    });
+    expect(plan.category).toBe("reverb");
+    expect(plan.shortWhy).toContain("Leaning into your usual pick");
+  });
+
+  it("doesn't credit learned weight below the callout threshold — a single small nudge isn't a pattern yet", () => {
+    const plan = planTransition({
+      current: { track: makeTrack("a", 240), analysis: makeAnalysis({ bpm: 100 }) },
+      next: { track: makeTrack("b", 240), analysis: makeAnalysis({ bpm: 140 }) },
+      categoryWeights: { reverb: 2 },
+    });
+    expect(plan.shortWhy).not.toContain("usual pick");
+  });
+
+  it("labels a manual override as the user's own pick, not a scored reason", () => {
+    const plan = planTransition({
+      current: { track: makeTrack("a", 240), analysis: makeAnalysis() },
+      next: { track: makeTrack("b", 240), analysis: makeAnalysis() },
+      forceTransitionId: "reverb-wash",
+    });
+    expect(plan.shortWhy).toContain("your pick");
+  });
+});
+
 describe("chooseTransition — Spin Up vs. its near-twin Spinback", () => {
   it("prefers Spin Up when Spinback (identical genre/persona fit) was just used", () => {
     const t = chooseTransition({

@@ -472,54 +472,98 @@ export interface TransitionContext {
  */
 export const TEMPO_RAMP_MAX_BPM_DELTA = 0.2;
 
-function scoreTransition(t: TransitionEntry, ctx: TransitionContext): number {
-  if (!t.executable) return -Infinity;
-  if (ctx.excludeTransitionIds?.includes(t.id)) return -Infinity;
-  if (t.category === "tempo-ramp" && ctx.bpmDelta > TEMPO_RAMP_MAX_BPM_DELTA) return -Infinity;
-  let score = 0;
-  score += bpmFitScore(ctx.bpmDelta, t.idealBpmDeltaMax, ctx.varietyBias);
-  if (ctx.genreHint) {
-    if (t.idealGenres.includes(ctx.genreHint)) score += 6;
-    else if (t.idealGenres.length > 0) score -= 2;
-  }
-  if (ctx.personaDjNames.some((name) => t.exampleDjs.includes(name))) score += 8;
-  if (t.idealGenres.length === 0) score += 1;
-  score += (ctx.camelotScore ?? 0) * 3;
-  score += MODE_CATEGORY_BIAS[ctx.djMode ?? "auto"][t.category] ?? 0;
-  score += ctx.categoryWeights?.[t.category] ?? 0;
-  if (ctx.varietyBias && t.category === "cut") score -= VARIETY_CUT_PENALTY;
-  if (ctx.recentTransitionIds?.includes(t.id)) {
-    score -= ctx.varietyBias ? REPETITION_PENALTY_VARIETY : REPETITION_PENALTY;
-  }
-  return score;
+/**
+ * The same additive terms scoreTransition always computed, just kept
+ * separate instead of folded straight into one number — this is what lets
+ * the "why" UI (Que) say which factor actually won a pick instead of only
+ * knowing the final score. Nothing about the scoring itself changes: `total`
+ * is still the exact sum every candidate is compared on.
+ */
+export interface ScoreBreakdown {
+  bpmFit: number;
+  genreMatch: number;
+  personaMatch: number;
+  harmonicMatch: number;
+  modeBias: number;
+  learnedWeight: number;
+  repetitionPenalty: number;
+  total: number;
 }
 
-function bestScoringTransition(ctx: TransitionContext): { entry: TransitionEntry; score: number } {
+const EXCLUDED_BREAKDOWN: ScoreBreakdown = {
+  bpmFit: 0,
+  genreMatch: 0,
+  personaMatch: 0,
+  harmonicMatch: 0,
+  modeBias: 0,
+  learnedWeight: 0,
+  repetitionPenalty: 0,
+  total: -Infinity,
+};
+
+function scoreTransition(t: TransitionEntry, ctx: TransitionContext): ScoreBreakdown {
+  if (!t.executable) return EXCLUDED_BREAKDOWN;
+  if (ctx.excludeTransitionIds?.includes(t.id)) return EXCLUDED_BREAKDOWN;
+  if (t.category === "tempo-ramp" && ctx.bpmDelta > TEMPO_RAMP_MAX_BPM_DELTA) return EXCLUDED_BREAKDOWN;
+
+  const bpmFit = bpmFitScore(ctx.bpmDelta, t.idealBpmDeltaMax, ctx.varietyBias);
+  let genreMatch = 0;
+  if (ctx.genreHint) {
+    if (t.idealGenres.includes(ctx.genreHint)) genreMatch += 6;
+    else if (t.idealGenres.length > 0) genreMatch -= 2;
+  }
+  if (t.idealGenres.length === 0) genreMatch += 1;
+  const personaMatch = ctx.personaDjNames.some((name) => t.exampleDjs.includes(name)) ? 8 : 0;
+  const harmonicMatch = (ctx.camelotScore ?? 0) * 3;
+  const modeBias = MODE_CATEGORY_BIAS[ctx.djMode ?? "auto"][t.category] ?? 0;
+  const learnedWeight = ctx.categoryWeights?.[t.category] ?? 0;
+  let repetitionPenalty = 0;
+  if (ctx.varietyBias && t.category === "cut") repetitionPenalty -= VARIETY_CUT_PENALTY;
+  if (ctx.recentTransitionIds?.includes(t.id)) {
+    repetitionPenalty -= ctx.varietyBias ? REPETITION_PENALTY_VARIETY : REPETITION_PENALTY;
+  }
+  const total = bpmFit + genreMatch + personaMatch + harmonicMatch + modeBias + learnedWeight + repetitionPenalty;
+  return { bpmFit, genreMatch, personaMatch, harmonicMatch, modeBias, learnedWeight, repetitionPenalty, total };
+}
+
+function bestScoringTransition(ctx: TransitionContext): { entry: TransitionEntry; breakdown: ScoreBreakdown } {
   let best = transitions[0];
-  let bestScore = -Infinity;
+  let bestBreakdown = EXCLUDED_BREAKDOWN;
   for (const t of transitions) {
-    const score = scoreTransition(t, ctx);
-    if (score > bestScore) {
-      bestScore = score;
+    const breakdown = scoreTransition(t, ctx);
+    if (breakdown.total > bestBreakdown.total) {
+      bestBreakdown = breakdown;
       best = t;
     }
   }
-  return { entry: best, score: bestScore };
+  return { entry: best, breakdown: bestBreakdown };
 }
 
 export function chooseTransition(ctx: TransitionContext): TransitionEntry {
+  return chooseTransitionWithBreakdown(ctx).entry;
+}
+
+/**
+ * Same pick as chooseTransition, but also hands back the winning
+ * candidate's score breakdown (null when forced — a manual pick bypasses
+ * scoring entirely, so there's nothing to explain) for planTransition to
+ * turn into Que's short "why" text.
+ */
+export function chooseTransitionWithBreakdown(
+  ctx: TransitionContext
+): { entry: TransitionEntry; breakdown: ScoreBreakdown | null } {
   if (ctx.forceTransitionId) {
     const forced = transitions.find((t) => t.id === ctx.forceTransitionId && t.executable);
-    if (forced) return forced;
+    if (forced) return { entry: forced, breakdown: null };
   }
   const result = bestScoringTransition(ctx);
   // Excluding candidates (reroll) can in principle exhaust every viable
   // option — fall back to unrestricted scoring rather than ever returning
   // an arbitrary/wrong pick.
-  if (result.score === -Infinity && ctx.excludeTransitionIds?.length) {
-    return bestScoringTransition({ ...ctx, excludeTransitionIds: [] }).entry;
+  if (result.breakdown.total === -Infinity && ctx.excludeTransitionIds?.length) {
+    return bestScoringTransition({ ...ctx, excludeTransitionIds: [] });
   }
-  return result.entry;
+  return result;
 }
 
 export interface TransitionPlan {
@@ -532,6 +576,8 @@ export interface TransitionPlan {
   tempoRatioStart: number; // incoming deck's playbackRate at transition start (1 = no adjustment)
   effect: TransitionEffect;
   rationale: string;
+  /** A terse, single-factor-led version of `rationale` for Que's dismissible player-side label — see buildShortWhy(). */
+  shortWhy: string;
 }
 
 interface PlanTransitionArgs {
@@ -576,6 +622,65 @@ function buildRationale(
 }
 
 /**
+ * Below this, a learned-weight nudge isn't confidently "your usual pick"
+ * yet — dj-weights.ts's LEARNING_NUDGE_UP is +2 per override, so this
+ * requires roughly two-plus consistent overrides before Que credits
+ * learned preference as the deciding factor rather than one lucky nudge.
+ */
+const LEARNED_WEIGHT_CALLOUT_THRESHOLD = 4;
+
+/** Short "for {context}" clause for the "leaning into your usual pick" phrasing — same DjSetMode set as MODE_CATEGORY_BIAS, phrased for a sentence rather than a UI label. */
+const MODE_WHY_CONTEXT: Record<DjSetMode, string> = {
+  auto: "moments like this",
+  club: "club sets",
+  wedding: "wedding sets",
+  party: "high-energy moments",
+  chill: "chill sets",
+  "open-format": "genre-bridging moments",
+};
+
+/**
+ * A terse, single-sentence version of buildRationale's narrative, for a
+ * small dismissible label near the player rather than the full DeckView
+ * panel. Picks whichever factor(s) actually decided this pick instead of
+ * narrating every input every time — genuinely driven by the winning
+ * breakdown, not a canned rotation of phrases.
+ */
+function buildShortWhy(
+  t: TransitionEntry,
+  genreHint: string | null,
+  personaDjNames: string[],
+  djMode: DjSetMode,
+  tempoSync: boolean,
+  camelotScore: number,
+  breakdown: ScoreBreakdown | null,
+  wasForced: boolean
+): string {
+  if (wasForced) return `${t.name} — your pick`;
+  if (!breakdown) return `${t.name} — best fit available`;
+
+  const genre = genreHint ? genreFamilies.find((g) => g.id === genreHint) : null;
+  const candidateDjNames = genre?.exampleDjs.length ? genre.exampleDjs : t.exampleDjs;
+  const matchedDjNames = candidateDjNames.filter((name) => personaDjNames.includes(name));
+
+  const isTopFactor =
+    breakdown.learnedWeight >= breakdown.personaMatch &&
+    breakdown.learnedWeight >= breakdown.harmonicMatch &&
+    breakdown.learnedWeight >= breakdown.genreMatch;
+  if (breakdown.learnedWeight >= LEARNED_WEIGHT_CALLOUT_THRESHOLD && isTopFactor) {
+    return `Leaning into your usual pick for ${MODE_WHY_CONTEXT[djMode]}`;
+  }
+  if (tempoSync && camelotScore >= 1) return "Blending on tempo + key match";
+  if (tempoSync) return "Blending on a tempo match";
+  if (camelotScore >= 1) return "Matched on key compatibility";
+  if (breakdown.personaMatch > 0 && matchedDjNames.length > 0) {
+    return `Channeling ${matchedDjNames.slice(0, 2).join(" & ")}'s style`;
+  }
+  if (breakdown.genreMatch >= 4 && genre) return `Matching the ${genre.name} vibe`;
+  return `${t.name} — best overall fit`;
+}
+
+/**
  * Plans a musically-aware transition between two tracks: picks a transition
  * style from the repertoire in data/transitions.ts (factoring in tempo,
  * genre, persona, and Camelot-wheel key compatibility), sizes the overlap
@@ -617,7 +722,7 @@ export function planTransition({
       ? camelotCompatibility(current.analysis.camelotKey, next.analysis.camelotKey)
       : 0;
 
-  const transition = chooseTransition({
+  const { entry: transition, breakdown } = chooseTransitionWithBreakdown({
     bpmDelta: scoringBpmDelta,
     tempoSync,
     genreHint,
@@ -691,6 +796,7 @@ export function planTransition({
     tempoRatioStart,
     effect: TRANSITION_EFFECT_BY_ID[transition.id] ?? "none",
     rationale: buildRationale(transition, genreHint, tempoSync, camelotScore, hasConfidentTempo, wasForced),
+    shortWhy: buildShortWhy(transition, genreHint, personaDjNames, djMode, tempoSync, camelotScore, breakdown, wasForced),
   };
 }
 
@@ -706,5 +812,6 @@ export function planSimpleFade(windowSec = AUTO_DJ_OFF_FADE_SEC): TransitionPlan
     tempoRatioStart: 1,
     effect: "none",
     rationale: "Simple fade (Auto-DJ off, or analysis unavailable).",
+    shortWhy: "Simple fade",
   };
 }
