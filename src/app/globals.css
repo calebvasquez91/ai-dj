@@ -391,3 +391,25 @@ body {
     animation: none;
   }
 }
+
+/* ---- Now Playing panel collapse ----
+   translate-y-full already pushes this fully below the viewport, but that
+   alone depends on the element's own box height exactly matching the
+   viewport at every moment — one edge case (a resize mid-transition, a
+   viewport-height quirk) and a sliver can stay visible/interactive behind
+   the compact PlayerBar. visibility makes the collapsed state absolute
+   regardless of the transform math: switching to hidden is delayed until
+   the slide-down finishes (so the closing animation still plays), but
+   switching back to visible on open is instant. */
+.now-playing-panel {
+  visibility: hidden;
+  /* Tailwind v4's translate-y-* utilities animate the standalone `translate`
+     property, not `transform` — listing both keeps this working regardless
+     of which one is actually in play. */
+  transition: translate 300ms ease-in-out, transform 300ms ease-in-out, visibility 0ms linear 300ms;
+}
+
+.now-playing-panel.translate-y-0 {
+  visibility: visible;
+  transition: translate 300ms ease-in-out, transform 300ms ease-in-out, visibility 0ms linear 0ms;
+}

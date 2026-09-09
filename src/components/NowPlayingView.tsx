@@ -46,7 +46,7 @@ export function NowPlayingView() {
 
   return (
     <div
-      className={`fixed inset-0 z-50 bg-background flex flex-col transition-transform duration-300 ease-in-out ${
+      className={`now-playing-panel fixed inset-0 z-50 bg-background flex flex-col ${
         expanded ? "translate-y-0" : "translate-y-full"
       }`}
       aria-hidden={!expanded}
@@ -66,7 +66,7 @@ export function NowPlayingView() {
 
       {currentTrack && (
         <div className="flex-1 flex flex-col items-center justify-center gap-8 px-6 pb-10 min-h-0">
-          <div className="w-full max-w-xs sm:max-w-sm aspect-square">
+          <div className="w-[min(100%,24rem,45vh)] aspect-square">
             <TrackThumbnailFill thumbnailUrl={currentTrack.thumbnailUrl} title={currentTrack.title} />
           </div>
 
