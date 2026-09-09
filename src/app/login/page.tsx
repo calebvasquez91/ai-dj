@@ -74,6 +74,9 @@ function LoginForm() {
             Sign up
           </Link>
         </p>
+        <Link href="/privacy" className="text-xs text-muted hover:text-foreground text-center">
+          Privacy Policy
+        </Link>
       </form>
     </div>
   );

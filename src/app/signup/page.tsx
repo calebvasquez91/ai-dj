@@ -96,6 +96,9 @@ export default function SignupPage() {
             Log in
           </Link>
         </p>
+        <Link href="/privacy" className="text-xs text-muted hover:text-foreground text-center">
+          Privacy Policy
+        </Link>
       </form>
     </div>
   );
