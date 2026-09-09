@@ -322,3 +322,72 @@ body {
 .que-why-pill:hover span {
   color: var(--foreground);
 }
+
+/* ---- Home hero ----
+   A deliberately dark, self-contained section — not a site-wide dark mode,
+   just this welcome moment matching the mascot concept page's own dark
+   palette (#150f20/#f3edff/#ab9bc4). Everything below it (Get started)
+   stays on the normal light surface tokens. */
+
+.home-hero {
+  background:
+    radial-gradient(circle at 50% 25%, color-mix(in srgb, var(--accent-purple) 22%, transparent), transparent 60%),
+    #150f20;
+  color: #f3edff;
+}
+
+.home-hero-eyebrow {
+  font-family: var(--font-mono), monospace;
+  font-size: 0.75rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--accent-purple-bright);
+}
+
+.home-hero-heading {
+  font-family: var(--font-sans), Arial, Helvetica, sans-serif;
+  font-weight: 700;
+  font-size: clamp(2rem, 5vw, 3rem);
+  letter-spacing: -0.01em;
+  color: #f3edff;
+}
+
+.home-hero-subtitle {
+  color: #ab9bc4;
+  max-width: 32rem;
+  font-size: 0.95rem;
+}
+
+.home-hero-shuffle {
+  margin-top: 0.5rem;
+}
+
+.home-hero-scroll-cue {
+  position: absolute;
+  bottom: 24px;
+  left: 50%;
+  transform: translateX(-50%);
+  font-size: 1.75rem;
+  line-height: 1;
+  color: #ab9bc4;
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 8px;
+  animation: home-hero-scroll-bounce 1.8s ease-in-out infinite;
+}
+
+.home-hero-scroll-cue:hover {
+  color: #f3edff;
+}
+
+@keyframes home-hero-scroll-bounce {
+  0%, 100% { transform: translateX(-50%) translateY(0); }
+  50% { transform: translateX(-50%) translateY(6px); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .home-hero-scroll-cue {
+    animation: none;
+  }
+}
