@@ -56,9 +56,13 @@ export function toTrackApiResponse(track: PrismaTrack): TrackApiResponse {
   };
 
   if (track.source === "youtube") {
-    // No sourceUrl/analysis — there's no fetchable audio buffer for a
-    // YouTube video, only the id the IFrame Player API plays directly.
-    return { ...base, source: "youtube", youtubeVideoId: track.storageKey };
+    // No sourceUrl — there's no fetchable audio buffer for a YouTube video,
+    // only the id the IFrame Player API plays directly. `analysis` (in
+    // `base`) still flows through as-is when bpm is set — a metadata
+    // lookup or manual tap populates the same bpm/bpmConfidence columns a
+    // local track's real analysis does, so no branch is needed for it here.
+    const bpmSource = track.bpmSource === "metadata" || track.bpmSource === "tap" ? track.bpmSource : undefined;
+    return { ...base, source: "youtube", youtubeVideoId: track.storageKey, bpmSource };
   }
 
   return { ...base, source: "local", sourceUrl: trackSourceUrl(track) };

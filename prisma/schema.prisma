@@ -45,6 +45,10 @@ model Track {
   // recomputing after the first time.
   bpm               Float?
   bpmConfidence     Float?
+  // How a YouTube track's bpm was determined — "metadata" (Deezer lookup)
+  // or "tap" (manual tap-tempo); null/unused for local tracks, whose bpm
+  // always comes from real per-sample analysis.
+  bpmSource         String?
   beatGridOffsetSec Float?
   energyOnsetSec    Float?
   key               String?

@@ -13,6 +13,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useStore } from "@/lib/store";
 import { equalPowerGains } from "@/lib/mix-engine";
+import { lookupYoutubeBpm } from "@/lib/youtubeBpm";
 import type { YouTubeTrack } from "@/types/music";
 
 type DeckId = "A" | "B";
@@ -99,6 +100,7 @@ export function YouTubeDeckStage() {
   const pendingLoadRef = useRef<Record<DeckId, { videoId: string; play: boolean } | null>>({ A: null, B: null });
   const loadedVideoId = useRef<Record<DeckId, string | null>>({ A: null, B: null });
   const activeDeckRef = useRef<DeckId>("A");
+  const attemptedBpmLookupRef = useRef<Set<string>>(new Set());
   const fadeRef = useRef<ActiveFade | null>(null);
   const [apiReady, setApiReady] = useState(false);
   const [activeDeck, setActiveDeck] = useState<DeckId>("A");
@@ -116,6 +118,21 @@ export function YouTubeDeckStage() {
   useEffect(() => {
     activeDeckRef.current = activeDeck;
   }, [activeDeck]);
+
+  // Metadata-BPM kickoff: mirrors DualDeckStage's own analysis-kickoff
+  // effect, just for a different source of the same trackAnalysis map
+  // entry (see lib/youtubeBpm.ts) — one attempt per track per session,
+  // never repeated even on a no-match/failure.
+  useEffect(() => {
+    const tracks = currentTrack ? [currentTrack, ...queue] : queue;
+    for (const track of tracks) {
+      if (track.source !== "youtube") continue;
+      if (useStore.getState().trackAnalysis[track.id]) continue;
+      if (attemptedBpmLookupRef.current.has(track.id)) continue;
+      attemptedBpmLookupRef.current.add(track.id);
+      void lookupYoutubeBpm(track.id);
+    }
+  }, [currentTrack, queue]);
 
   const applyLoad = useCallback((id: DeckId, videoId: string, play: boolean) => {
     const player = playersRef.current[id];

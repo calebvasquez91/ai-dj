@@ -1,10 +1,12 @@
 "use client";
 
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { useStore } from "@/lib/store";
 import { camelotCompatibility, planTransition, type DjSetMode } from "@/lib/mix-engine";
 import { fallbackAnalysis, type TrackAnalysis } from "@/lib/audio-analysis";
 import { useDjWeights } from "@/lib/dj-weights";
+import { useTapTempo } from "@/lib/tapTempo";
+import { submitYoutubeTapTempo } from "@/lib/youtubeBpm";
 import { TrackThumbnail } from "@/components/TrackThumbnail";
 import { transitions } from "@/data/transitions";
 import { genreFamilies } from "@/data/styles";
@@ -107,7 +109,11 @@ function DeckCard({
       </div>
       <div className="flex items-center gap-2 text-[11px]">
         <span className="rounded-full border border-border px-2 py-0.5 font-mono">
-          {analysis && !analysis.fallback ? `${Math.round(analysis.bpm)} BPM` : "Analyzing…"}
+          {analysis && !analysis.fallback
+            ? `${Math.round(analysis.bpm)} BPM${track.source === "youtube" && track.bpmSource === "metadata" ? " (est.)" : ""}`
+            : track.source === "youtube"
+              ? "No BPM yet"
+              : "Analyzing…"}
         </span>
         {camelot && (
           <span
@@ -118,7 +124,50 @@ function DeckCard({
           </span>
         )}
       </div>
+      {track.source === "youtube" && <TapTempoControl key={track.id} trackId={track.id} />}
       <Waveform peaks={analysis?.waveformPeaks ?? []} progressRatio={progressRatio} markerRatio={markerRatio} />
+    </div>
+  );
+}
+
+/**
+ * Manual tap-tempo — the fallback/override for a YouTube track's bpm when
+ * there's no metadata match (lib/youtubeBpm.ts) or the match is wrong.
+ * Keyed by track id from DeckCard so switching tracks always starts a
+ * fresh reading instead of carrying over stale taps.
+ */
+function TapTempoControl({ trackId }: { trackId: string }) {
+  const { bpm, canCommit, tap, reset } = useTapTempo();
+  const [justSaved, setJustSaved] = useState(false);
+
+  function handleCommit() {
+    if (bpm == null) return;
+    submitYoutubeTapTempo(trackId, bpm);
+    reset();
+    setJustSaved(true);
+    setTimeout(() => setJustSaved(false), 2000);
+  }
+
+  return (
+    <div className="flex items-center gap-1.5 text-[11px]">
+      <button
+        type="button"
+        onClick={tap}
+        className="btn-outline !px-2 !py-0.5"
+        title="Tap along with the beat a few times to set (or correct) this track's tempo by hand"
+      >
+        👆 Tap{bpm != null ? ` (${bpm})` : ""}
+      </button>
+      {canCommit && (
+        <button
+          type="button"
+          onClick={handleCommit}
+          className="text-accent-teal font-semibold"
+          title="Save this tempo"
+        >
+          {justSaved ? "Saved ✓" : "Set"}
+        </button>
+      )}
     </div>
   );
 }

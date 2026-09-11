@@ -26,6 +26,8 @@ export interface LocalTrack extends TrackBase {
 export interface YouTubeTrack extends TrackBase {
   source: "youtube";
   youtubeVideoId: string;
+  /** How its bpm (surfaced through the trackAnalysis map, not stored here) was determined — undefined until a metadata lookup or a manual tap resolves one. */
+  bpmSource?: "metadata" | "tap";
 }
 
 export type Track = LocalTrack | YouTubeTrack;

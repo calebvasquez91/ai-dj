@@ -83,6 +83,21 @@ interface PlayerState {
   addLocalTracks: (tracks: Track[]) => void;
   removeLocalTrack: (trackId: string) => Promise<void>;
   setTrackAnalysis: (trackId: string, analysis: TrackAnalysis) => void;
+  /**
+   * Syncs a YouTube track's resolved bpm across every place a Track object
+   * lives (mirrors setTrackPlayPreference's pattern) plus the trackAnalysis
+   * map mix-engine.ts actually reads. `persist: false` skips the PATCH —
+   * used when the caller already wrote it server-side itself (the
+   * bpm-lookup route, which has to call Deezer server-side anyway); pass
+   * `true` for a value that's only ever lived in the browser so far (a
+   * fresh tap-tempo reading).
+   */
+  setYoutubeBpm: (
+    trackId: string,
+    analysis: TrackAnalysis,
+    bpmSource: "metadata" | "tap",
+    persist: boolean
+  ) => void;
   setLyricalFingerprint: (trackId: string, fingerprint: LyricalFingerprint) => void;
   startAnalyzing: (trackId: string) => void;
   stopAnalyzing: (trackId: string) => void;
@@ -281,6 +296,25 @@ export const useStore = create<PlayerState>()(
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ playPreference: preference ?? null }),
         });
+      },
+      setYoutubeBpm: (trackId, analysis, bpmSource, persist) => {
+        set((s) => {
+          const patch = (t: Track) => (t.id === trackId && t.source === "youtube" ? { ...t, bpmSource } : t);
+          return {
+            localLibrary: s.localLibrary.map(patch),
+            playlists: s.playlists.map((p) => ({ ...p, tracks: p.tracks.map(patch) })),
+            queue: s.queue.map(patch),
+            currentTrack: s.currentTrack ? patch(s.currentTrack) : s.currentTrack,
+            trackAnalysis: { ...s.trackAnalysis, [trackId]: analysis },
+          };
+        });
+        if (persist) {
+          void fetch(`/api/tracks/${trackId}`, {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ analysis, bpmSource }),
+          });
+        }
       },
 
       next: () => {

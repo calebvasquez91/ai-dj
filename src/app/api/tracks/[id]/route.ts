@@ -29,6 +29,9 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
   if (body.playPreference === "must" || body.playPreference === "do-not" || body.playPreference === null) {
     data.playPreference = body.playPreference;
   }
+  if (body.bpmSource === "metadata" || body.bpmSource === "tap" || body.bpmSource === null) {
+    data.bpmSource = body.bpmSource;
+  }
   if (body.analysis && typeof body.analysis === "object") {
     const a = body.analysis;
     if (typeof a.bpm === "number") data.bpm = a.bpm;
