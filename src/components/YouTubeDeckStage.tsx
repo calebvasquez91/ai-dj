@@ -134,6 +134,17 @@ export function YouTubeDeckStage() {
     }
   }, [currentTrack, queue]);
 
+  // `new YT.Player(...)` returns its instance synchronously, but the
+  // instance has no working methods until its onReady fires (the iframe's
+  // postMessage handshake is async) — calling e.g. pauseVideo() on it before
+  // then throws "is not a function", not just a silent no-op. Every call
+  // site below goes through this instead of playersRef directly so a
+  // not-yet-ready player is treated the same as no player at all.
+  const getPlayer = useCallback(
+    (id: DeckId): YTPlayer | null => (playersReadyRef.current[id] ? playersRef.current[id] : null),
+    []
+  );
+
   const applyLoad = useCallback((id: DeckId, videoId: string, play: boolean) => {
     const player = playersRef.current[id];
     if (!player || !playersReadyRef.current[id]) {
@@ -195,39 +206,39 @@ export function YouTubeDeckStage() {
     if (!currentTrack) return;
     if (currentTrack.source !== "youtube") {
       // Ownership belongs to DualDeckStage now — release both decks.
-      (["A", "B"] as DeckId[]).forEach((id) => playersRef.current[id]?.pauseVideo());
+      (["A", "B"] as DeckId[]).forEach((id) => getPlayer(id)?.pauseVideo());
       return;
     }
     if (fadeRef.current) return; // a crossfade already owns loading the idle deck
     if (loadedVideoId.current[activeDeck] === currentTrack.youtubeVideoId) return;
 
     const idleId: DeckId = activeDeck === "A" ? "B" : "A";
-    playersRef.current[idleId]?.pauseVideo();
+    getPlayer(idleId)?.pauseVideo();
     loadedVideoId.current[idleId] = null;
 
     loadedVideoId.current[activeDeck] = currentTrack.youtubeVideoId;
     applyLoad(activeDeck, currentTrack.youtubeVideoId, useStore.getState().isPlaying);
-    playersRef.current[activeDeck]?.setVolume(Math.round(useStore.getState().volume * 100));
-  }, [currentTrack, activeDeck, applyLoad]);
+    getPlayer(activeDeck)?.setVolume(Math.round(useStore.getState().volume * 100));
+  }, [currentTrack, activeDeck, applyLoad, getPlayer]);
 
   useEffect(() => {
     if (!currentTrack || currentTrack.source !== "youtube") return;
-    const player = playersRef.current[activeDeck];
+    const player = getPlayer(activeDeck);
     if (!player) return;
     if (isPlaying) player.playVideo();
     else player.pauseVideo();
-  }, [isPlaying, activeDeck, currentTrack]);
+  }, [isPlaying, activeDeck, currentTrack, getPlayer]);
 
   useEffect(() => {
     if (!currentTrack || currentTrack.source !== "youtube" || fadeRef.current) return;
-    playersRef.current[activeDeck]?.setVolume(Math.round(volume * 100));
-  }, [volume, activeDeck, currentTrack]);
+    getPlayer(activeDeck)?.setVolume(Math.round(volume * 100));
+  }, [volume, activeDeck, currentTrack, getPlayer]);
 
   useEffect(() => {
     if (seekRequest == null || currentTrack?.source !== "youtube") return;
-    playersRef.current[activeDeck]?.seekTo(seekRequest, true);
+    getPlayer(activeDeck)?.seekTo(seekRequest, true);
     clearSeekRequest();
-  }, [seekRequest, activeDeck, currentTrack, clearSeekRequest]);
+  }, [seekRequest, activeDeck, currentTrack, clearSeekRequest, getPlayer]);
 
   const startFade = useCallback(
     (toDeckId: DeckId | null, durationSec: number, nextTrack: YouTubeTrack | null) => {
@@ -236,11 +247,11 @@ export function YouTubeDeckStage() {
       if (toDeckId && nextTrack) {
         loadedVideoId.current[toDeckId] = nextTrack.youtubeVideoId;
         applyLoad(toDeckId, nextTrack.youtubeVideoId, true);
-        playersRef.current[toDeckId]?.setVolume(0);
+        getPlayer(toDeckId)?.setVolume(0);
       }
       fadeRef.current = { fromDeckId, toDeckId, startTime: performance.now(), durationMs: durationSec * 1000 };
     },
-    [applyLoad]
+    [applyLoad, getPlayer]
   );
 
   // Core tick: position reporting + auto-transition lookahead + fade
@@ -258,10 +269,10 @@ export function YouTubeDeckStage() {
         const progress = Math.min(1, (performance.now() - fade.startTime) / fade.durationMs);
         const { outGain, inGain } = equalPowerGains(progress);
         const masterPct = state.volume * 100;
-        playersRef.current[fade.fromDeckId]?.setVolume(Math.round(outGain * masterPct));
-        if (fade.toDeckId) playersRef.current[fade.toDeckId]?.setVolume(Math.round(inGain * masterPct));
+        getPlayer(fade.fromDeckId)?.setVolume(Math.round(outGain * masterPct));
+        if (fade.toDeckId) getPlayer(fade.toDeckId)?.setVolume(Math.round(inGain * masterPct));
         if (progress >= 1) {
-          playersRef.current[fade.fromDeckId]?.pauseVideo();
+          getPlayer(fade.fromDeckId)?.pauseVideo();
           fadeRef.current = null;
           if (fade.toDeckId) {
             activeDeckRef.current = fade.toDeckId;
@@ -309,7 +320,7 @@ export function YouTubeDeckStage() {
       clearInterval(interval);
       unsubscribe();
     };
-  }, [startFade]);
+  }, [startFade, getPlayer]);
 
   return (
     <div className="hidden">
