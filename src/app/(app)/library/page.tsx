@@ -4,11 +4,13 @@ import { Suspense, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { useStore } from "@/lib/store";
 import { filesToTracks } from "@/lib/localAudio";
-import { TrackList } from "@/components/TrackList";
+import { TrackGrid } from "@/components/TrackGrid";
 import { AddSelectedToPlaylistButton } from "@/components/AddSelectedToPlaylistButton";
 import { ConnectYouTubeButton } from "@/components/ConnectYouTubeButton";
 import { YouTubeImportModal } from "@/components/YouTubeImportModal";
 import { shuffleForPlay } from "@/lib/shuffle";
+
+type SourceFilter = "all" | "local" | "youtube";
 
 function LibraryContent() {
   const inputRef = useRef<HTMLInputElement>(null);
@@ -21,15 +23,18 @@ function LibraryContent() {
   const trackAnalysis = useStore((s) => s.trackAnalysis);
   const trackLyricalFingerprints = useStore((s) => s.trackLyricalFingerprints);
   const query = (useSearchParams().get("q") ?? "").trim().toLowerCase();
+  const [sourceFilter, setSourceFilter] = useState<SourceFilter>("all");
 
-  const filtered = query
+  const searched = query
     ? localLibrary.filter(
         (t) =>
           t.title.toLowerCase().includes(query) ||
           t.artist.toLowerCase().includes(query)
       )
     : localLibrary;
+  const filtered = sourceFilter === "all" ? searched : searched.filter((t) => t.source === sourceFilter);
   const shufflableCount = filtered.filter((t) => t.playPreference !== "do-not").length;
+  const hasYoutubeTracks = localLibrary.some((t) => t.source === "youtube");
 
   const [uploadError, setUploadError] = useState<string | null>(null);
   const [youtubeModalOpen, setYoutubeModalOpen] = useState(false);
@@ -143,6 +148,22 @@ function LibraryContent() {
         </div>
       )}
 
+      {hasYoutubeTracks && (
+        <div className="flex items-center gap-2">
+          {(["all", "local", "youtube"] as const).map((option) => (
+            <button
+              key={option}
+              type="button"
+              onClick={() => setSourceFilter(option)}
+              data-active={sourceFilter === option}
+              className="btn-outline"
+            >
+              {option === "all" ? "All" : option === "local" ? "Local files" : "YouTube"}
+            </button>
+          ))}
+        </div>
+      )}
+
       {uploadError && <p className="text-xs text-accent-pink">{uploadError}</p>}
 
       {!libraryLoaded ? (
@@ -154,9 +175,11 @@ function LibraryContent() {
           device.
         </p>
       ) : filtered.length === 0 ? (
-        <p className="text-sm text-muted">No local files match &quot;{query}&quot;.</p>
+        <p className="text-sm text-muted">
+          {query ? `No tracks match "${query}".` : "No tracks in this filter."}
+        </p>
       ) : (
-        <TrackList
+        <TrackGrid
           tracks={filtered}
           onRemove={handleRemove}
           selectedIds={selectMode ? selectedIds : undefined}

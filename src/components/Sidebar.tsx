@@ -7,10 +7,12 @@ import { useStore } from "@/lib/store";
 
 function NavLink({
   href,
+  icon,
   label,
   onNavigate,
 }: {
   href: string;
+  icon: string;
   label: string;
   onNavigate: () => void;
 }) {
@@ -20,12 +22,15 @@ function NavLink({
     <Link
       href={href}
       onClick={onNavigate}
-      className={`block rounded-full px-3 py-2 text-sm font-semibold transition-colors ${
+      className={`flex items-center gap-3 rounded-full px-3 py-2 text-sm font-semibold transition-colors ${
         active
           ? "bg-gradient-to-r from-accent-teal/20 to-accent-purple/20 text-accent-purple border border-border"
           : "text-muted hover:text-foreground hover:bg-surface-hover"
       }`}
     >
+      <span className="text-base leading-none" aria-hidden="true">
+        {icon}
+      </span>
       {label}
     </Link>
   );
@@ -69,9 +74,9 @@ export function Sidebar() {
         </div>
 
         <nav className="flex flex-col gap-1">
-          <NavLink href="/" label="Home" onNavigate={closeOnMobile} />
-          <NavLink href="/library" label="Music Library" onNavigate={closeOnMobile} />
-          <NavLink href="/inspiration" label="DJ Inspiration" onNavigate={closeOnMobile} />
+          <NavLink href="/" icon="🏠" label="Home" onNavigate={closeOnMobile} />
+          <NavLink href="/library" icon="🎵" label="Music Library" onNavigate={closeOnMobile} />
+          <NavLink href="/inspiration" icon="✨" label="DJ Inspiration" onNavigate={closeOnMobile} />
         </nav>
 
         <div className="flex items-center justify-between px-2 pt-2">
