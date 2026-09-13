@@ -33,7 +33,7 @@ export function AddToPlaylistButton({ track }: { track: Track }) {
       <button
         type="button"
         onClick={() => setOpen((o) => !o)}
-        className="text-accent-purple hover:text-accent-pink text-lg leading-none px-2"
+        className="btn-icon text-accent-purple hover:text-accent-pink text-lg leading-none"
         title="Add to playlist"
       >
         +

@@ -64,7 +64,7 @@ export function YouTubeImportModal({ onClose }: { onClose: () => void }) {
       >
         <div className="flex items-center justify-between">
           <h2 className="text-lg heading">Import from YouTube</h2>
-          <button type="button" onClick={onClose} className="text-muted hover:text-foreground" title="Close">
+          <button type="button" onClick={onClose} className="btn-icon text-muted hover:text-foreground" title="Close">
             ✕
           </button>
         </div>

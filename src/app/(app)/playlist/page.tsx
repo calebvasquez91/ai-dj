@@ -49,7 +49,7 @@ function PlaylistContent() {
             removePlaylist(playlist.id);
             router.push("/");
           }}
-          className="text-xs text-muted hover:text-accent-pink shadow-elevate-sm rounded-full px-3 py-1.5 shrink-0"
+          className="btn-outline !text-xs hover:!text-accent-pink shrink-0"
         >
           Delete playlist
         </button>
@@ -119,7 +119,7 @@ function PlaylistContent() {
                     onClick={() =>
                       setTrackPlayPreference(track.id, track.playPreference === "must" ? undefined : "must")
                     }
-                    className={`px-1 text-sm leading-none ${
+                    className={`btn-icon text-sm leading-none ${
                       track.playPreference === "must" ? "text-accent-yellow" : "text-muted hover:text-foreground"
                     }`}
                     title={
@@ -135,7 +135,7 @@ function PlaylistContent() {
                     onClick={() =>
                       setTrackPlayPreference(track.id, track.playPreference === "do-not" ? undefined : "do-not")
                     }
-                    className={`px-1 text-sm leading-none ${
+                    className={`btn-icon text-sm leading-none ${
                       track.playPreference === "do-not" ? "text-accent-pink" : "text-muted hover:text-foreground"
                     }`}
                     title={
@@ -150,7 +150,7 @@ function PlaylistContent() {
                     type="button"
                     onClick={() => moveTrackInPlaylist(playlist.id, index, "up")}
                     disabled={index === 0}
-                    className="text-muted hover:text-foreground disabled:opacity-30 px-1"
+                    className="btn-icon text-muted hover:text-foreground"
                     title="Move up"
                   >
                     ↑
@@ -159,7 +159,7 @@ function PlaylistContent() {
                     type="button"
                     onClick={() => moveTrackInPlaylist(playlist.id, index, "down")}
                     disabled={index === playlist.tracks.length - 1}
-                    className="text-muted hover:text-foreground disabled:opacity-30 px-1"
+                    className="btn-icon text-muted hover:text-foreground"
                     title="Move down"
                   >
                     ↓
@@ -167,7 +167,7 @@ function PlaylistContent() {
                   <button
                     type="button"
                     onClick={() => removeTrackFromPlaylist(playlist.id, track.id)}
-                    className="text-muted hover:text-accent-pink px-1"
+                    className="btn-icon text-muted hover:text-accent-pink"
                     title="Remove from playlist"
                   >
                     ✕

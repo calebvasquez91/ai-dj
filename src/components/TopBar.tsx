@@ -42,7 +42,7 @@ export function TopBar() {
       <button
         type="button"
         onClick={() => setSidebarOpen(!sidebarOpen)}
-        className="md:hidden text-accent-purple hover:text-accent-pink text-xl leading-none px-1"
+        className="btn-icon md:hidden text-accent-purple hover:text-accent-pink text-xl leading-none"
         title="Toggle menu"
       >
         ☰

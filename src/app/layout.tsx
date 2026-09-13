@@ -2,6 +2,15 @@ import type { Metadata, Viewport } from "next";
 import { Geist, Geist_Mono, Bungee } from "next/font/google";
 import "./globals.css";
 import { ServiceWorkerRegister } from "@/components/ServiceWorkerRegister";
+import { ThemeInit } from "@/components/ThemeInit";
+import { THEME_STORAGE_KEY } from "@/lib/theme";
+
+// Runs before first paint so dark mode never flashes light on load — reads
+// the same zustand-persist localStorage key lib/theme.ts writes to,
+// directly (not through the store, which hasn't hydrated yet this early).
+const THEME_INIT_SCRIPT = `(function(){try{var r=localStorage.getItem(${JSON.stringify(
+  THEME_STORAGE_KEY
+)});var t=r?JSON.parse(r).state.theme:null;if(t==="dark")document.documentElement.setAttribute("data-theme","dark");}catch(e){}})();`;
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -46,9 +55,19 @@ export default function RootLayout({
     <html
       lang="en"
       className={`${geistSans.variable} ${geistMono.variable} ${retroDisplay.variable} h-full antialiased`}
+      // The inline theme script below intentionally sets data-theme on this
+      // element before React hydrates (to avoid a flash of the wrong
+      // theme) — that deliberate mismatch is exactly what
+      // suppressHydrationWarning exists for; it only suppresses the
+      // warning for this element's own attributes, not recursively.
+      suppressHydrationWarning
     >
+      <head>
+        <script dangerouslySetInnerHTML={{ __html: THEME_INIT_SCRIPT }} />
+      </head>
       <body className="h-full flex flex-col overflow-hidden">
         <ServiceWorkerRegister />
+        <ThemeInit />
         {children}
       </body>
     </html>

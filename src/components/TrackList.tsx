@@ -83,7 +83,7 @@ export function TrackList({
                   e.stopPropagation();
                   setTrackPlayPreference(track.id, track.playPreference === "must" ? undefined : "must");
                 }}
-                className={`px-1 text-sm leading-none transition-opacity ${
+                className={`btn-icon text-sm leading-none transition-opacity ${
                   track.playPreference === "must"
                     ? "text-accent-yellow"
                     : "text-muted opacity-100 md:opacity-0 md:group-hover:opacity-100 focus:opacity-100"
@@ -102,7 +102,7 @@ export function TrackList({
                   e.stopPropagation();
                   setTrackPlayPreference(track.id, track.playPreference === "do-not" ? undefined : "do-not");
                 }}
-                className={`px-1 text-sm leading-none transition-opacity ${
+                className={`btn-icon text-sm leading-none transition-opacity ${
                   track.playPreference === "do-not"
                     ? "text-accent-pink"
                     : "text-muted opacity-100 md:opacity-0 md:group-hover:opacity-100 focus:opacity-100"
@@ -123,7 +123,7 @@ export function TrackList({
                     e.stopPropagation();
                     onRemove(track.id);
                   }}
-                  className="text-muted hover:text-accent-pink px-1 opacity-100 md:opacity-0 md:group-hover:opacity-100 focus:opacity-100 transition-opacity"
+                  className="btn-icon text-muted hover:text-accent-pink opacity-100 md:opacity-0 md:group-hover:opacity-100 focus:opacity-100 transition-opacity"
                   title="Remove from library"
                 >
                   ✕

@@ -4,6 +4,7 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useSession, signOut } from "next-auth/react";
 import { useStore } from "@/lib/store";
+import { ThemeToggle } from "@/components/ThemeToggle";
 
 function NavLink({
   href,
@@ -84,7 +85,7 @@ export function Sidebar() {
           <button
             type="button"
             onClick={handleCreatePlaylist}
-            className="text-accent-purple hover:text-accent-pink text-lg leading-none px-1"
+            className="btn-icon text-accent-purple hover:text-accent-pink text-lg leading-none"
             title="Create playlist"
           >
             +
@@ -110,17 +111,23 @@ export function Sidebar() {
           )}
         </div>
 
-        <div className="mt-auto flex items-center justify-between gap-2 px-2 pt-2 border-t border-border/10">
-          <span className="text-xs text-muted truncate" title={session?.user?.email ?? undefined}>
-            {session?.user?.name || session?.user?.email}
-          </span>
-          <button
-            type="button"
-            onClick={() => signOut({ callbackUrl: "/login" })}
-            className="text-xs font-semibold text-accent-purple hover:text-accent-pink shrink-0"
-          >
-            Log out
-          </button>
+        <div className="mt-auto flex flex-col gap-2 pt-2 border-t border-border/10">
+          <div className="flex items-center justify-between px-2">
+            <span className="text-xs text-muted">Dark mode</span>
+            <ThemeToggle />
+          </div>
+          <div className="flex items-center justify-between gap-2 px-2">
+            <span className="text-xs text-muted truncate" title={session?.user?.email ?? undefined}>
+              {session?.user?.name || session?.user?.email}
+            </span>
+            <button
+              type="button"
+              onClick={() => signOut({ callbackUrl: "/login" })}
+              className="btn-outline !px-2.5 !py-1 text-xs shrink-0"
+            >
+              Log out
+            </button>
+          </div>
         </div>
       </aside>
     </>

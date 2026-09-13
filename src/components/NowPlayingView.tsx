@@ -56,7 +56,7 @@ export function NowPlayingView() {
         <button
           type="button"
           onClick={() => setExpanded(false)}
-          className="absolute left-4 text-2xl text-accent-purple hover:text-accent-pink"
+          className="btn-icon absolute left-4 text-2xl text-accent-purple hover:text-accent-pink"
           title="Back to browsing"
         >
           ⌄
@@ -101,7 +101,7 @@ export function NowPlayingView() {
             <button
               type="button"
               onClick={previous}
-              className="text-3xl text-accent-purple hover:text-accent-pink"
+              className="btn-icon text-3xl text-accent-purple hover:text-accent-pink"
               title="Previous (←)"
             >
               ⏮
@@ -117,7 +117,7 @@ export function NowPlayingView() {
             <button
               type="button"
               onClick={next}
-              className="text-3xl text-accent-purple hover:text-accent-pink"
+              className="btn-icon text-3xl text-accent-purple hover:text-accent-pink"
               title="Next (→)"
             >
               ⏭

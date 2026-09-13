@@ -322,7 +322,7 @@ export function DeckView() {
             <button
               type="button"
               onClick={toggle}
-              className="text-accent-purple hover:text-accent-pink text-lg leading-none px-1"
+              className="btn-icon text-accent-purple hover:text-accent-pink text-lg leading-none"
               title="Close"
             >
               ✕

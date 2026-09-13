@@ -83,7 +83,7 @@ export function TrackGrid({
                     e.stopPropagation();
                     setTrackPlayPreference(track.id, track.playPreference === "must" ? undefined : "must");
                   }}
-                  className={`px-1 text-sm leading-none ${
+                  className={`btn-icon text-sm leading-none ${
                     track.playPreference === "must" ? "text-accent-yellow" : "text-muted"
                   }`}
                   title={
@@ -100,7 +100,7 @@ export function TrackGrid({
                     e.stopPropagation();
                     setTrackPlayPreference(track.id, track.playPreference === "do-not" ? undefined : "do-not");
                   }}
-                  className={`px-1 text-sm leading-none ${
+                  className={`btn-icon text-sm leading-none ${
                     track.playPreference === "do-not" ? "text-accent-pink" : "text-muted"
                   }`}
                   title={
@@ -119,7 +119,7 @@ export function TrackGrid({
                       e.stopPropagation();
                       onRemove(track.id);
                     }}
-                    className="text-muted hover:text-accent-pink px-1 text-sm leading-none ml-auto"
+                    className="btn-icon text-muted hover:text-accent-pink text-sm leading-none ml-auto"
                     title="Remove from library"
                   >
                     ✕

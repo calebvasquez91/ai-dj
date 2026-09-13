@@ -107,7 +107,7 @@ export function PlayerBar() {
             type="button"
             onClick={previous}
             disabled={!currentTrack}
-            className="text-accent-purple hover:text-accent-pink disabled:opacity-40 disabled:text-muted"
+            className="btn-icon text-accent-purple hover:text-accent-pink disabled:text-muted"
             title="Previous (←)"
           >
             ⏮
@@ -125,7 +125,7 @@ export function PlayerBar() {
             type="button"
             onClick={next}
             disabled={!currentTrack}
-            className="text-accent-purple hover:text-accent-pink disabled:opacity-40 disabled:text-muted"
+            className="btn-icon text-accent-purple hover:text-accent-pink disabled:text-muted"
             title="Next (→)"
           >
             ⏭
@@ -158,7 +158,7 @@ export function PlayerBar() {
         <button
           type="button"
           onClick={() => speakHypePhrase()}
-          className="text-accent-purple hover:text-accent-pink px-1"
+          className="btn-icon text-accent-purple hover:text-accent-pink"
           title="Word Play — speak a hype phrase now, DJ's call (uses your browser's text-to-speech; it plays independently of the music, not mixed through it)"
         >
           🎤
@@ -167,7 +167,7 @@ export function PlayerBar() {
           type="button"
           onClick={toggleDeckView}
           disabled={!currentTrack}
-          className="text-accent-purple hover:text-accent-pink disabled:opacity-40 disabled:text-muted px-1"
+          className="btn-icon text-accent-purple hover:text-accent-pink disabled:text-muted"
           title="Show the DJ decks — tempo, key, and what's lined up next"
         >
           🎛
@@ -175,7 +175,7 @@ export function PlayerBar() {
         <button
           type="button"
           onClick={toggleQueuePanel}
-          className="relative text-accent-purple hover:text-accent-pink px-1"
+          className="btn-icon relative text-accent-purple hover:text-accent-pink"
           title="Queue (Q)"
         >
           ☰

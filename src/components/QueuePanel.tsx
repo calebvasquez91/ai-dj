@@ -27,7 +27,7 @@ export function QueuePanel() {
           <button
             type="button"
             onClick={toggle}
-            className="text-accent-purple hover:text-accent-pink text-lg leading-none px-1"
+            className="btn-icon text-accent-purple hover:text-accent-pink text-lg leading-none"
             title="Close queue"
           >
             ✕
@@ -88,7 +88,7 @@ export function QueuePanel() {
                           ? "Can't remove while mixing into this track"
                           : "Remove from queue"
                       }
-                      className="text-muted hover:text-red-400 disabled:opacity-30 px-1"
+                      className="btn-icon text-muted hover:text-accent-pink"
                     >
                       ✕
                     </button>
