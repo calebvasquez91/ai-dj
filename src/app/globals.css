@@ -324,12 +324,14 @@ body {
 }
 
 .que-body {
-  transform-origin: 42px 48px;
+  transform-origin: 42px 46px;
   animation: que-idle-bob 2.8s ease-in-out infinite;
 }
 
+/* Repurposed for the helmet's ear-cup pair — same idle wobble/react rotate
+   as the old headphone band, just applied to a different pair of shapes. */
 .que-band {
-  transform-origin: 42px 33px;
+  transform-origin: 42px 45px;
   animation: que-idle-band 2.8s ease-in-out infinite;
 }
 
@@ -338,9 +340,20 @@ body {
   transform-origin: center;
 }
 
+/* The face reads as a small backlit LED matrix behind the visor glass. */
+.que-led {
+  filter: drop-shadow(0 0 1.5px rgba(127, 240, 221, 0.9));
+}
+
+/* Blinking is suppressed while Que is mid-sentence — see the .talking
+   class Que.tsx adds to .que-stage for as long as the why-pill is up. */
+.que-stage.talking .que-eye {
+  animation: none;
+}
+
 .que-ring {
   opacity: 0;
-  transform-origin: 42px 48px;
+  transform-origin: 42px 46px;
 }
 
 @keyframes que-idle-bob {
@@ -400,17 +413,25 @@ body {
   }
 }
 
+/* A real speech bubble, not a one-line pill: wraps instead of overflowing,
+   and its max-width (set inline by Que.tsx, scaled off the `size` prop) is
+   never much larger than Que's own footprint — so a long transition
+   rationale breaks across a few short lines next to Que instead of
+   stretching into a wide banner. The sharp bottom-left corner reads as a
+   tail pointing back at Que, who always sits to the bubble's left. */
 .que-why-pill {
   display: inline-flex;
-  align-items: center;
+  align-items: flex-start;
   gap: 6px;
   font-size: 0.75rem;
+  line-height: 1.35;
   color: var(--foreground);
   background: var(--surface);
-  border-radius: 9999px;
-  padding: 6px 10px;
+  border-radius: 16px 16px 16px 4px;
+  padding: 8px 11px;
   box-shadow: 0 2px 8px color-mix(in srgb, var(--foreground) calc(10% * var(--shadow-boost)), transparent);
-  white-space: nowrap;
+  overflow-wrap: break-word;
+  text-align: left;
   cursor: pointer;
 }
 
