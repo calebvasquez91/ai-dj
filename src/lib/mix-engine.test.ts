@@ -257,9 +257,104 @@ describe("planTransition — Double Drop", () => {
       genreHint: "dubstep",
     });
     expect(plan.category).toBe("drop");
+    // Neither track has a Hot Cue drop (no buildDropPairs) — this should
+    // fall back to "double-drop" using the raw dropAtSec, not "drop-swap".
+    expect(plan.transitionId).toBe("double-drop");
     const expectedEntry = 45 - plan.windowSec;
     expect(plan.incomingEntryOffsetSec).toBeGreaterThan(expectedEntry - 1);
     expect(plan.incomingEntryOffsetSec).toBeLessThanOrEqual(expectedEntry + 1);
+  });
+});
+
+describe("planTransition — Drop Swap (Hot Cue-aware Double Drop)", () => {
+  it("picks Drop Swap over Double Drop when both decks have a confirmed Hot Cue drop placed", () => {
+    const plan = planTransition({
+      current: {
+        track: makeTrack("a", 240),
+        analysis: makeAnalysis({ bpm: 140, beatGridOffsetSec: 0, buildDropPairs: [{ buildAtSec: 30, dropAtSec: 40 }] }),
+      },
+      next: {
+        track: makeTrack("b", 240),
+        analysis: makeAnalysis({ bpm: 140, beatGridOffsetSec: 0, buildDropPairs: [{ buildAtSec: 20, dropAtSec: 30 }] }),
+      },
+      genreHint: "dubstep",
+    });
+    expect(plan.category).toBe("drop");
+    expect(plan.transitionId).toBe("drop-swap");
+  });
+
+  it("targets the incoming track's Hot Cue drop (Cue 4), not the raw dropAtSec, when they differ", () => {
+    const plan = planTransition({
+      current: {
+        track: makeTrack("a", 240),
+        analysis: makeAnalysis({ bpm: 140, beatGridOffsetSec: 0, buildDropPairs: [{ buildAtSec: 30, dropAtSec: 40 }] }),
+      },
+      next: {
+        track: makeTrack("b", 240),
+        analysis: makeAnalysis({
+          bpm: 140,
+          beatGridOffsetSec: 0,
+          dropAtSec: 90, // deliberately stale/different from the Hot Cue drop below
+          buildDropPairs: [{ buildAtSec: 20, dropAtSec: 30 }],
+        }),
+      },
+      genreHint: "dubstep",
+    });
+    expect(plan.transitionId).toBe("drop-swap");
+    const expectedEntry = 30 - plan.windowSec; // the Hot Cue drop (Cue 4 = 30), not dropAtSec (90)
+    expect(plan.incomingEntryOffsetSec).toBeGreaterThan(expectedEntry - 1);
+    expect(plan.incomingEntryOffsetSec).toBeLessThanOrEqual(expectedEntry + 1);
+  });
+
+  it("falls back to Double Drop when only one deck has a confirmed Hot Cue drop", () => {
+    const plan = planTransition({
+      current: {
+        track: makeTrack("a", 240),
+        analysis: makeAnalysis({ bpm: 140, beatGridOffsetSec: 0, dropAtSec: 45 }), // no buildDropPairs
+      },
+      next: {
+        track: makeTrack("b", 240),
+        analysis: makeAnalysis({ bpm: 140, beatGridOffsetSec: 0, buildDropPairs: [{ buildAtSec: 20, dropAtSec: 30 }] }),
+      },
+      genreHint: "dubstep",
+    });
+    expect(plan.transitionId).toBe("double-drop");
+  });
+
+  it("a manual Hot Cue override on both decks is enough to make Drop Swap eligible on its own", () => {
+    const currentTrack = { ...makeTrack("a", 240), hotCueOverrides: { 4: 41 } };
+    const nextTrack = { ...makeTrack("b", 240), hotCueOverrides: { 4: 31 } };
+    const plan = planTransition({
+      current: { track: currentTrack, analysis: makeAnalysis({ bpm: 140, beatGridOffsetSec: 0 }) },
+      next: { track: nextTrack, analysis: makeAnalysis({ bpm: 140, beatGridOffsetSec: 0 }) },
+      genreHint: "dubstep",
+    });
+    expect(plan.transitionId).toBe("drop-swap");
+  });
+});
+
+describe("chooseTransition — Drop Swap eligibility gate", () => {
+  it("never returns drop-swap when cueDropSwapEligible isn't set", () => {
+    const t = chooseTransition({
+      bpmDelta: 0,
+      tempoSync: true,
+      genreHint: "dubstep",
+      personaDjNames: ["Skrillex", "Excision"],
+      camelotScore: 2,
+    });
+    expect(t.id).not.toBe("drop-swap");
+  });
+
+  it("can return drop-swap once cueDropSwapEligible is true and it scores best", () => {
+    const t = chooseTransition({
+      bpmDelta: 0,
+      tempoSync: true,
+      genreHint: "dubstep",
+      personaDjNames: ["Skrillex", "Excision"],
+      camelotScore: 2,
+      cueDropSwapEligible: true,
+    });
+    expect(t.id).toBe("drop-swap");
   });
 });
 

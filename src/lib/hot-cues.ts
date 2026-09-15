@@ -14,8 +14,9 @@
  * computeAutoHotCues() naturally returns all-null whenever bpm isn't
  * usable, and the caller shouldn't invoke it for a YouTube track anyway.
  */
-import { snapToBeatGrid } from "@/lib/mix-engine";
+import { snapToBeatGrid } from "@/lib/beat-grid";
 import type { TrackAnalysis } from "@/lib/audio-analysis";
+import type { Track } from "@/types/music";
 
 export const HOT_CUE_LABELS = [
   "Intro",
@@ -83,4 +84,39 @@ export function mergeHotCues(
     if (auto != null) return { atSec: auto, source: "auto" };
     return { atSec: null, source: null };
   });
+}
+
+/**
+ * One-call version of computeAutoHotCues + mergeHotCues for a real Track —
+ * the thing every caller actually wants (DeckView.tsx, mix-engine.ts). Never
+ * attempts auto-placement for a YouTube track (no waveform to run the
+ * detector on), matching the rule everywhere else in this app.
+ */
+export function resolveHotCues(track: Track, analysis: TrackAnalysis | undefined): HotCueSlot[] {
+  const auto =
+    track.source === "local" && analysis ? computeAutoHotCues(analysis, track.durationSec) : new Array(8).fill(null);
+  return mergeHotCues(auto, track.hotCueOverrides);
+}
+
+/** Cue 4 (Drop 1) and Cue 6 (Drop 2) — the two drop-family cues, 0-indexed. */
+const DROP_CUE_INDICES = [3, 5];
+
+/**
+ * The earliest placed drop-family cue (Cue 4 or Cue 6) at or after
+ * `afterSec`, or null if neither is placed or both have already passed.
+ * Two different uses read this the same way: `afterSec = 0` finds a fresh
+ * (not-yet-playing) track's own first available drop — always Cue 4 if
+ * it's set, since starting a new track by jumping straight to its *second*
+ * drop would skip its intro/first build entirely; `afterSec = <current
+ * playback position>` finds the *next* upcoming drop on a track that's
+ * already playing, which is Cue 6 once Cue 4 has already gone by.
+ */
+export function upcomingDropCueAtSec(slots: HotCueSlot[], afterSec = 0): number | null {
+  let best: number | null = null;
+  for (const i of DROP_CUE_INDICES) {
+    const atSec = slots[i]?.atSec;
+    if (atSec == null || atSec < afterSec) continue;
+    if (best == null || atSec < best) best = atSec;
+  }
+  return best;
 }

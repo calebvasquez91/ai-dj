@@ -1,6 +1,33 @@
 import { describe, expect, it } from "vitest";
-import { computeAutoHotCues, mergeHotCues } from "./hot-cues";
+import { computeAutoHotCues, mergeHotCues, resolveHotCues, upcomingDropCueAtSec } from "./hot-cues";
 import type { TrackAnalysis } from "./audio-analysis";
+import type { Track } from "@/types/music";
+
+function makeLocalTrack(overrides: Partial<Track> = {}): Track {
+  return {
+    id: "t1",
+    title: "Song",
+    artist: "Artist",
+    durationSec: 300,
+    addedAt: 0,
+    source: "local",
+    sourceUrl: "blob:t1",
+    ...overrides,
+  } as Track;
+}
+
+function makeYoutubeTrack(overrides: Partial<Track> = {}): Track {
+  return {
+    id: "y1",
+    title: "Video",
+    artist: "Channel",
+    durationSec: 300,
+    addedAt: 0,
+    source: "youtube",
+    youtubeVideoId: "abc123",
+    ...overrides,
+  } as Track;
+}
 
 function makeAnalysis(overrides: Partial<TrackAnalysis> = {}): TrackAnalysis {
   return {
@@ -94,5 +121,46 @@ describe("mergeHotCues", () => {
     const merged = mergeHotCues(auto, { 4: 55.5 });
     expect(merged[3]).toEqual({ atSec: 55.5, source: "manual" });
     expect(merged[0]).toEqual({ atSec: null, source: null });
+  });
+});
+
+describe("resolveHotCues", () => {
+  it("auto-places cues for a local track from its analysis, with a manual override winning", () => {
+    const track = makeLocalTrack({ hotCueOverrides: { 1: 5 } });
+    const slots = resolveHotCues(track, makeAnalysis());
+    expect(slots[0]).toEqual({ atSec: 5, source: "manual" });
+    expect(slots[1].source).toBe("auto");
+  });
+
+  it("never auto-places cues for a YouTube track, even given a usable-looking analysis", () => {
+    const track = makeYoutubeTrack({ hotCueOverrides: { 1: 3 } });
+    const slots = resolveHotCues(track, makeAnalysis());
+    expect(slots[0]).toEqual({ atSec: 3, source: "manual" });
+    expect(slots.slice(1).every((s) => s.atSec === null)).toBe(true);
+  });
+
+  it("returns all-null for a local track with no analysis yet and no overrides", () => {
+    const slots = resolveHotCues(makeLocalTrack(), undefined);
+    expect(slots.every((s) => s.atSec === null)).toBe(true);
+  });
+});
+
+describe("upcomingDropCueAtSec", () => {
+  const slots = mergeHotCues([null, null, null, 40, null, 158, null, null], undefined);
+
+  it("returns Cue 4 (Drop 1) when it's still ahead of the given time", () => {
+    expect(upcomingDropCueAtSec(slots, 10)).toBe(40);
+  });
+
+  it("returns Cue 6 (Drop 2) once Cue 4 has already passed", () => {
+    expect(upcomingDropCueAtSec(slots, 50)).toBe(158);
+  });
+
+  it("returns null once both drop cues have passed", () => {
+    expect(upcomingDropCueAtSec(slots, 200)).toBeNull();
+  });
+
+  it("returns null when neither drop cue is placed", () => {
+    expect(upcomingDropCueAtSec(mergeHotCues(new Array(8).fill(null), undefined), 0)).toBeNull();
   });
 });

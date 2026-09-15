@@ -2,6 +2,10 @@ import type { Track } from "@/types/music";
 import { genreFamilies } from "@/data/styles";
 import { transitions, type TransitionCategory, type TransitionEntry } from "@/data/transitions";
 import type { TrackAnalysis } from "@/lib/audio-analysis";
+import { resolveHotCues, upcomingDropCueAtSec } from "@/lib/hot-cues";
+import { snapToBeatGrid } from "@/lib/beat-grid";
+
+export { snapToBeatGrid } from "@/lib/beat-grid";
 
 export const MIN_CROSSFADE_SEC = 3;
 export const MAX_CROSSFADE_SEC = 30;
@@ -88,14 +92,6 @@ export function isTempoRampEligible(currentAnalysis: TrackAnalysis, nextAnalysis
   }
   const bpmDelta = Math.abs(bestTempoRatio(currentAnalysis.bpm, nextAnalysis.bpm) - 1);
   return bpmDelta <= TEMPO_RAMP_MAX_BPM_DELTA;
-}
-
-export function snapToBeatGrid(timeSec: number, beatGridOffsetSec: number, bpm: number): number {
-  if (bpm <= 0) return Math.max(0, timeSec);
-  const beatLenSec = 60 / bpm;
-  const beatsSinceOffset = (timeSec - beatGridOffsetSec) / beatLenSec;
-  const snappedBeats = Math.round(beatsSinceOffset);
-  return Math.max(0, beatGridOffsetSec + snappedBeats * beatLenSec);
 }
 
 function windowBeatsForTransition(t: TransitionEntry, tempoSync: boolean, bpmDelta: number): number {
@@ -456,6 +452,8 @@ export interface TransitionContext {
   varietyBias?: boolean;
   /** Per-category score adjustment learned from the user's own manual picks/rerolls over time (see lib/dj-weights.ts) — same shape and role as MODE_CATEGORY_BIAS, just tuned by behavior instead of a fixed preset. */
   categoryWeights?: Partial<Record<TransitionCategory, number>>;
+  /** Whether both decks have a real Hot Cue drop placed (auto or manual) — the only thing that makes "drop-swap" a selectable candidate at all. Computed by planTransition from the actual tracks; never set by hand. */
+  cueDropSwapEligible?: boolean;
 }
 
 /**
@@ -487,6 +485,8 @@ export interface ScoreBreakdown {
   modeBias: number;
   learnedWeight: number;
   repetitionPenalty: number;
+  /** Bonus for "drop-swap" specifically, only when both decks actually have a real Hot Cue drop placed — see cueDropSwapEligible. Zero for every other transition. */
+  cueBonus: number;
   total: number;
 }
 
@@ -498,13 +498,22 @@ const EXCLUDED_BREAKDOWN: ScoreBreakdown = {
   modeBias: 0,
   learnedWeight: 0,
   repetitionPenalty: 0,
+  cueBonus: 0,
   total: -Infinity,
 };
+
+/** How much "drop-swap" outscores its unconfirmed twin "double-drop" when both decks have a real Hot Cue drop placed — comparable to personaMatch's flat bonus, enough to reliably win the tie without overriding a strong genre/mode/learned preference for something else entirely. */
+const CUE_DROP_SWAP_BONUS = 8;
 
 function scoreTransition(t: TransitionEntry, ctx: TransitionContext): ScoreBreakdown {
   if (!t.executable) return EXCLUDED_BREAKDOWN;
   if (ctx.excludeTransitionIds?.includes(t.id)) return EXCLUDED_BREAKDOWN;
   if (t.category === "tempo-ramp" && ctx.bpmDelta > TEMPO_RAMP_MAX_BPM_DELTA) return EXCLUDED_BREAKDOWN;
+  // Drop Swap is never a blind guess — it only exists as a candidate at all
+  // once both decks actually have a confirmed Hot Cue drop (auto-detected
+  // or hand-placed). Never fabricated, never forced: this is a scoring
+  // eligibility gate, not a hard override of genre/mode/learned preference.
+  if (t.id === "drop-swap" && !ctx.cueDropSwapEligible) return EXCLUDED_BREAKDOWN;
 
   const bpmFit = bpmFitScore(ctx.bpmDelta, t.idealBpmDeltaMax, ctx.varietyBias);
   let genreMatch = 0;
@@ -517,13 +526,15 @@ function scoreTransition(t: TransitionEntry, ctx: TransitionContext): ScoreBreak
   const harmonicMatch = (ctx.camelotScore ?? 0) * 3;
   const modeBias = MODE_CATEGORY_BIAS[ctx.djMode ?? "auto"][t.category] ?? 0;
   const learnedWeight = ctx.categoryWeights?.[t.category] ?? 0;
+  const cueBonus = t.id === "drop-swap" && ctx.cueDropSwapEligible ? CUE_DROP_SWAP_BONUS : 0;
   let repetitionPenalty = 0;
   if (ctx.varietyBias && t.category === "cut") repetitionPenalty -= VARIETY_CUT_PENALTY;
   if (ctx.recentTransitionIds?.includes(t.id)) {
     repetitionPenalty -= ctx.varietyBias ? REPETITION_PENALTY_VARIETY : REPETITION_PENALTY;
   }
-  const total = bpmFit + genreMatch + personaMatch + harmonicMatch + modeBias + learnedWeight + repetitionPenalty;
-  return { bpmFit, genreMatch, personaMatch, harmonicMatch, modeBias, learnedWeight, repetitionPenalty, total };
+  const total =
+    bpmFit + genreMatch + personaMatch + harmonicMatch + modeBias + learnedWeight + cueBonus + repetitionPenalty;
+  return { bpmFit, genreMatch, personaMatch, harmonicMatch, modeBias, learnedWeight, cueBonus, repetitionPenalty, total };
 }
 
 function bestScoringTransition(ctx: TransitionContext): { entry: TransitionEntry; breakdown: ScoreBreakdown } {
@@ -670,6 +681,7 @@ function buildShortWhy(
   if (breakdown.learnedWeight >= LEARNED_WEIGHT_CALLOUT_THRESHOLD && isTopFactor) {
     return `Leaning into your usual pick for ${MODE_WHY_CONTEXT[djMode]}`;
   }
+  if (breakdown.cueBonus > 0) return "Landing both drops on confirmed Hot Cues";
   if (tempoSync && camelotScore >= 1) return "Blending on tempo + key match";
   if (tempoSync) return "Blending on a tempo match";
   if (camelotScore >= 1) return "Matched on key compatibility";
@@ -686,7 +698,10 @@ function buildShortWhy(
  * genre, persona, and Camelot-wheel key compatibility), sizes the overlap
  * window in beats (not an arbitrary second count), and snaps the incoming
  * track's entry point to its own beat grid near its energy-onset — never a
- * bare 0 — or, for a Double Drop, to land its own drop at the window's end.
+ * bare 0 — or, for Double Drop / Drop Swap, to land its own drop at the
+ * window's end (a confirmed Hot Cue drop when one's placed, the single
+ * best-effort dropAtSec otherwise). Drop Swap itself only becomes a
+ * selectable candidate when both decks have a real Hot Cue drop placed.
  */
 export function planTransition({
   current,
@@ -722,6 +737,19 @@ export function planTransition({
       ? camelotCompatibility(current.analysis.camelotKey, next.analysis.camelotKey)
       : 0;
 
+  // Hot Cue drops (src/lib/hot-cues.ts) — Cue 4/Cue 6, auto-detected or
+  // hand-placed — are a real, confirmable version of the single best-effort
+  // dropAtSec below. "drop-swap" only becomes a selectable candidate when
+  // both decks actually have one; the incoming track's own first available
+  // drop cue (afterSec 0 always prefers Cue 4 over Cue 6 — starting a new
+  // track at its *second* drop would skip its intro/first build entirely)
+  // also replaces the plain dropAtSec target for whichever "drop"-category
+  // transition ends up chosen, cue-aware or not.
+  const currentHotCues = resolveHotCues(current.track, current.analysis);
+  const nextHotCues = resolveHotCues(next.track, next.analysis);
+  const nextCueDropAtSec = upcomingDropCueAtSec(nextHotCues, 0);
+  const cueDropSwapEligible = upcomingDropCueAtSec(currentHotCues, 0) != null && nextCueDropAtSec != null;
+
   const { entry: transition, breakdown } = chooseTransitionWithBreakdown({
     bpmDelta: scoringBpmDelta,
     tempoSync,
@@ -734,6 +762,7 @@ export function planTransition({
     excludeTransitionIds,
     varietyBias,
     categoryWeights,
+    cueDropSwapEligible,
   });
   const wasForced = Boolean(forceTransitionId) && transition.id === forceTransitionId;
 
@@ -756,16 +785,17 @@ export function planTransition({
     ? bestTempoRatio(current.analysis.bpm, next.analysis.bpm)
     : 1;
 
-  // Double Drop: target the incoming track's own drop to land right at the
-  // end of the window, instead of just its post-intro energy onset — the
-  // whole point of this technique is the two drops coinciding.
+  // Double Drop / Drop Swap: target the incoming track's own drop to land
+  // right at the end of the window, instead of just its post-intro energy
+  // onset — the whole point of either technique is the two drops
+  // coinciding. Prefers the confirmed Hot Cue drop (nextCueDropAtSec,
+  // computed above) over the single best-effort dropAtSec whenever one's
+  // actually placed — same target either way whichever "drop"-category
+  // entry scoring picked, cue-aware or not.
+  const dropTargetSec = nextCueDropAtSec ?? next.analysis.dropAtSec;
   const baseEntryOffsetSec =
-    transition.category === "drop" && next.analysis.dropAtSec != null
-      ? snapToBeatGrid(
-          Math.max(0, next.analysis.dropAtSec - windowSec),
-          next.analysis.beatGridOffsetSec,
-          next.analysis.bpm
-        )
+    transition.category === "drop" && dropTargetSec != null
+      ? snapToBeatGrid(Math.max(0, dropTargetSec - windowSec), next.analysis.beatGridOffsetSec, next.analysis.bpm)
       : snapToBeatGrid(next.analysis.energyOnsetSec, next.analysis.beatGridOffsetSec, next.analysis.bpm);
   const latestSensibleEntrySec = Math.max(0, next.track.durationSec - MIN_CROSSFADE_SEC);
 

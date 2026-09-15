@@ -26,6 +26,7 @@ import { cancelHypePhrase, speakHypePhrase } from "@/lib/wordPlay";
 import { shouldTriggerAmbience } from "@/lib/ambience";
 import { useDjWeights, LEARNING_NUDGE_UP, LEARNING_NUDGE_DOWN } from "@/lib/dj-weights";
 import { planMashup, MASHUP_COOLDOWN_SEC, type MashupPlan } from "@/lib/mashup-engine";
+import { resolveHotCues, upcomingDropCueAtSec } from "@/lib/hot-cues";
 import { createTimeStretchVoice, type TimeStretchVoice } from "@/lib/time-stretch";
 import type { LocalTrack, Track } from "@/types/music";
 
@@ -1636,12 +1637,18 @@ export function DualDeckStage() {
       const nearNaturalEnd = duration - currentTime <= clampedWindow;
       const pastActiveCap = currentTime >= MAX_ACTIVE_PLAY_SEC - clampedWindow;
       const pastMinFloor = currentTime >= MIN_ACTIVE_PLAY_SEC;
+      // Prefers the outgoing track's own *next upcoming* Hot Cue drop (Cue 4
+      // if it hasn't happened yet, else Cue 6) over the single best-effort
+      // dropAtSec — same "confirmed cue beats a guess" preference as the
+      // incoming-track entry offset in mix-engine.ts's planTransition.
+      const currentDropTargetSec =
+        upcomingDropCueAtSec(resolveHotCues(track, currentAnalysis), currentTime) ?? currentAnalysis.dropAtSec;
       const dropAligned =
         pastMinFloor &&
         plan.category === "drop" &&
-        currentAnalysis.dropAtSec != null &&
-        currentTime >= currentAnalysis.dropAtSec - clampedWindow &&
-        currentTime < currentAnalysis.dropAtSec + clampedWindow;
+        currentDropTargetSec != null &&
+        currentTime >= currentDropTargetSec - clampedWindow &&
+        currentTime < currentDropTargetSec + clampedWindow;
       const breakdownOpportunity =
         pastMinFloor &&
         plan.category !== "drop" &&
