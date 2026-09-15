@@ -24,8 +24,10 @@ function makePrismaTrack(overrides: Partial<PrismaTrack> = {}): PrismaTrack {
     camelotKey: null,
     breakdownAtSec: null,
     dropAtSec: null,
+    buildDropPairsJson: null,
     waveformPeaksJson: null,
     lyricalFingerprintJson: null,
+    hotCueOverridesJson: null,
     ...overrides,
   } as PrismaTrack;
 }

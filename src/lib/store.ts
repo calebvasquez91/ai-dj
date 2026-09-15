@@ -113,6 +113,7 @@ interface PlayerState {
   setAmbienceFrequency: (frequency: AmbienceFrequency) => void;
   setMashupEnabled: (enabled: boolean) => void;
   setTrackPlayPreference: (trackId: string, preference: Track["playPreference"]) => void;
+  setHotCueOverride: (trackId: string, cueNumber: number, atSec: number) => void;
 
   loadPlaylists: () => Promise<void>;
   createPlaylist: () => Promise<string>;
@@ -295,6 +296,29 @@ export const useStore = create<PlayerState>()(
           method: "PATCH",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ playPreference: preference ?? null }),
+        });
+      },
+      // Same shape as setTrackPlayPreference: patch every place the track
+      // object lives, then persist the whole (merged) override map — not
+      // just the one changed cue — since the PATCH route replaces
+      // hotCueOverridesJson wholesale rather than deep-merging it.
+      setHotCueOverride: (trackId, cueNumber, atSec) => {
+        set((s) => {
+          const patch = (t: Track) =>
+            t.id === trackId ? { ...t, hotCueOverrides: { ...t.hotCueOverrides, [cueNumber]: atSec } } : t;
+          return {
+            localLibrary: s.localLibrary.map(patch),
+            playlists: s.playlists.map((p) => ({ ...p, tracks: p.tracks.map(patch) })),
+            queue: s.queue.map(patch),
+            currentTrack: s.currentTrack ? patch(s.currentTrack) : s.currentTrack,
+          };
+        });
+        const { currentTrack, localLibrary } = get();
+        const updated = currentTrack?.id === trackId ? currentTrack : localLibrary.find((t) => t.id === trackId);
+        void fetch(`/api/tracks/${trackId}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ hotCueOverrides: updated?.hotCueOverrides ?? { [cueNumber]: atSec } }),
         });
       },
       setYoutubeBpm: (trackId, analysis, bpmSource, persist) => {

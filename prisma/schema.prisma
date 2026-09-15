@@ -56,6 +56,11 @@ model Track {
   camelotKey        String?
   breakdownAtSec    Float?
   dropAtSec         Float?
+  // Up to two ordered {buildAtSec, dropAtSec} pairs (src/lib/audio-analysis-core.ts's
+  // findBuildDropPairs) — JSON.stringify'd, feeds Hot Cues 3-6. Separate
+  // from dropAtSec above (a single global peak); empty/absent when the
+  // detector can't confidently place a pair, never fabricated.
+  buildDropPairsJson String?
   waveformPeaksJson String? // JSON.stringify(number[]) — plain String, not Prisma Json (SQLite portability)
 
   // Cached lyrical/thematic fingerprint (src/lib/lyrics.ts's LyricalFingerprint,
@@ -65,6 +70,15 @@ model Track {
   // lyrics found" — both are distinct from never having tried, so a track
   // with no findable lyrics doesn't get re-queried forever.
   lyricalFingerprintJson String?
+
+  // Manually-set Hot Cue positions (src/lib/hot-cues.ts) — sparse,
+  // JSON.stringify'd as {"<cueNumber 1-8>": seconds}. Cues not present here
+  // fall back to the best-effort auto placement derived live from the
+  // analysis fields above (or stay unset if that can't place one either);
+  // a manual tap always wins over an auto placement, never the reverse.
+  // The only source of hot cues for a YouTube track, which has no
+  // waveform to auto-analyze at all.
+  hotCueOverridesJson String?
 
   playlistTracks PlaylistTrack[]
 

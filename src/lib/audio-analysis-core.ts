@@ -32,6 +32,8 @@ export interface TrackAnalysis {
   camelotKey: string | null; // Camelot wheel notation (e.g. "8A") for harmonic-mixing compatibility, derived from `key`
   breakdownAtSec: number | null; // best-effort low-energy breakdown section, for Breakdown Mixing
   dropAtSec: number | null; // best-effort high-energy "drop" moment, for Double Drop alignment
+  /** Up to two ordered best-effort build→drop pairs, for Hot Cues 3-6 (src/lib/hot-cues.ts) — separate from dropAtSec above (a single global peak, used for Double Drop alignment), since a track can have two distinct build/drop cycles. Empty when no confident pair is found; never fabricated to fill both slots. */
+  buildDropPairs: { buildAtSec: number; dropAtSec: number }[];
   waveformPeaks: number[]; // compact 0-1 normalized peak array for waveform display
   fallback: boolean; // true if this used the neutral-BPM fallback path
 }
@@ -53,6 +55,7 @@ export function fallbackAnalysis(): TrackAnalysis {
     camelotKey: null,
     breakdownAtSec: null,
     dropAtSec: null,
+    buildDropPairs: [],
     waveformPeaks: [],
     fallback: true,
   };
@@ -246,6 +249,93 @@ function findBreakdown(envelope: Float32Array, envelopeRateHz: number, afterSec:
     }
   }
   return null;
+}
+
+/**
+ * Best-effort ordered build→drop pairs (up to two), for Hot Cues 3-6
+ * (src/lib/hot-cues.ts). Distinct from findEnergyPeak/findBreakdown above —
+ * those report a single global peak / single first dip; this looks for up
+ * to two genuine "energy rises, then holds high" sequences in
+ * chronological order, matching a classic house/EDM build→drop→
+ * (breakdown)→build→drop arrangement. Not real structural/arrangement
+ * analysis — a proxy, same spirit as the two functions above, sharing
+ * their smoothing/threshold approach so all three heuristics agree on
+ * what "loud"/"quiet" mean. Returns fewer than two pairs (including none)
+ * rather than ever fabricating a placement.
+ *
+ * Deliberately searches from the very start of the track, not from
+ * findEnergyOnset()'s "past the cold intro" point the way findBreakdown
+ * does above: energyOnset requires the energy to already be *sustained*
+ * loud, which a slowly-rising build hasn't reached yet by definition —
+ * gating on it can skip past the exact rise this is looking for.
+ */
+function findBuildDropPairs(
+  envelope: Float32Array,
+  envelopeRateHz: number
+): { buildAtSec: number; dropAtSec: number }[] {
+  if (envelope.length === 0) return [];
+  const smoothWindow = Math.max(1, Math.round(envelopeRateHz * 1));
+  const smoothed = smoothEnvelope(envelope, smoothWindow);
+  const sorted = Float32Array.from(smoothed).sort();
+  const loudLevel = sorted[Math.floor(sorted.length * 0.75)] || 0;
+  if (loudLevel <= 0) return [];
+
+  const dropThreshold = loudLevel * 0.9; // sustained plateau this high counts as a drop
+  const quietThreshold = loudLevel * 0.55; // a genuine dip a build must rise up from
+  const sustainWindow = Math.max(1, Math.round(envelopeRateHz * 4)); // ~4s plateau, not a transient hit
+  const buildLookbackMax = Math.round(envelopeRateHz * 45); // don't credit a "build" more than ~45s before its drop
+  // Small settling buffer only — the plateau-end scan below already
+  // advances past the drop's *entire* sustained-loud duration (down to
+  // quietThreshold, not just off the higher dropThreshold), so this just
+  // avoids re-triggering on a trailing edge artifact right at that
+  // boundary, not a real minimum breakdown length.
+  const minGapAfterDrop = Math.round(envelopeRateHz * 2);
+
+  const pairs: { buildAtSec: number; dropAtSec: number }[] = [];
+  let searchFrom = 0;
+
+  while (pairs.length < 2 && searchFrom < smoothed.length) {
+    // 1) Find the next index where a sustained high plateau begins.
+    let dropIdx = -1;
+    for (let i = searchFrom; i < smoothed.length; i++) {
+      if (smoothed[i] < dropThreshold) continue;
+      const end = Math.min(smoothed.length, i + sustainWindow);
+      let sum = 0;
+      for (let j = i; j < end; j++) sum += smoothed[j];
+      const avg = sum / Math.max(1, end - i);
+      if (avg >= dropThreshold) {
+        dropIdx = i;
+        break;
+      }
+    }
+    if (dropIdx < 0) break; // no more qualifying plateaus anywhere later in the track
+
+    // 2) Walk backward from the plateau's start looking for a genuinely
+    //    quiet point — that's the build's start. No qualifying point
+    //    within the lookback window means this plateau doesn't get a
+    //    build/drop pair at all (it might just be a loud section with no
+    //    real lead-in, e.g. the track fading in already-loud).
+    let buildIdx = -1;
+    const earliestAllowed = Math.max(0, dropIdx - buildLookbackMax);
+    for (let i = dropIdx - 1; i >= earliestAllowed; i--) {
+      if (smoothed[i] <= quietThreshold) {
+        buildIdx = i;
+        break;
+      }
+    }
+    if (buildIdx >= 0) {
+      pairs.push({ buildAtSec: buildIdx / envelopeRateHz, dropAtSec: dropIdx / envelopeRateHz });
+    }
+
+    // Advance past this whole plateau (plus a gap) before looking for the
+    // next one, so the drop's own sustained duration is never mistaken for
+    // a second rise.
+    let plateauEnd = dropIdx;
+    while (plateauEnd < smoothed.length && smoothed[plateauEnd] >= quietThreshold) plateauEnd++;
+    searchFrom = plateauEnd + minGapAfterDrop;
+  }
+
+  return pairs;
 }
 
 /** Downsamples the energy envelope into a small, 0-1 normalized peak array for waveform rendering — cheap to compute since it reuses the envelope already built for tempo/onset analysis, no extra decoding needed. */
@@ -461,6 +551,7 @@ export function analyzeSamples(
   const energyOnsetSec = findEnergyOnset(envelope, envelopeRateHz);
   const breakdownAtSec = findBreakdown(envelope, envelopeRateHz, energyOnsetSec);
   const dropAtSec = findEnergyPeak(envelope, envelopeRateHz);
+  const buildDropPairs = findBuildDropPairs(envelope, envelopeRateHz);
   const waveformPeaks = downsampleForWaveform(envelope);
   const { key, confidence: keyConfidence } = estimateKey(samples, sampleRate, durationSec);
 
@@ -474,6 +565,7 @@ export function analyzeSamples(
     camelotKey: camelotForKey(key),
     breakdownAtSec,
     dropAtSec,
+    buildDropPairs,
     waveformPeaks,
     fallback: bpmConfidence < MIN_TEMPO_CONFIDENCE,
   };

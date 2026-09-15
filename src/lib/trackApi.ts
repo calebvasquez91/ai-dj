@@ -35,6 +35,7 @@ export function toTrackApiResponse(track: PrismaTrack): TrackApiResponse {
           camelotKey: track.camelotKey,
           breakdownAtSec: track.breakdownAtSec,
           dropAtSec: track.dropAtSec,
+          buildDropPairs: track.buildDropPairsJson ? JSON.parse(track.buildDropPairsJson) : [],
           waveformPeaks: track.waveformPeaksJson ? JSON.parse(track.waveformPeaksJson) : [],
           fallback: false,
         };
@@ -51,6 +52,7 @@ export function toTrackApiResponse(track: PrismaTrack): TrackApiResponse {
     addedAt: track.createdAt.getTime(),
     thumbnailUrl: track.thumbnailUrl ?? undefined,
     playPreference: isPlayPreference(track.playPreference) ? track.playPreference : undefined,
+    hotCueOverrides: track.hotCueOverridesJson ? JSON.parse(track.hotCueOverridesJson) : undefined,
     analysis,
     lyricalFingerprint,
   };

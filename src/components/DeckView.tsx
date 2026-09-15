@@ -7,6 +7,8 @@ import { fallbackAnalysis, type TrackAnalysis } from "@/lib/audio-analysis";
 import { useDjWeights } from "@/lib/dj-weights";
 import { useTapTempo } from "@/lib/tapTempo";
 import { submitYoutubeTapTempo } from "@/lib/youtubeBpm";
+import { computeAutoHotCues, mergeHotCues, HOT_CUE_LABELS, type HotCueSlot } from "@/lib/hot-cues";
+import { formatTime } from "@/lib/format";
 import { TrackThumbnail } from "@/components/TrackThumbnail";
 import { transitions } from "@/data/transitions";
 import { genreFamilies } from "@/data/styles";
@@ -80,12 +82,17 @@ function DeckCard({
   analysis,
   progressRatio,
   markerRatio,
+  hotCues,
+  currentTimeSec,
 }: {
   label: string;
   track: Track | null;
   analysis: TrackAnalysis | undefined;
   progressRatio?: number;
   markerRatio?: number;
+  /** Only supplied for the Now Playing card — jumping playback to a cue only makes sense for the track that's actually live. */
+  hotCues?: HotCueSlot[];
+  currentTimeSec?: number;
 }) {
   if (!track) {
     return (
@@ -126,6 +133,74 @@ function DeckCard({
       </div>
       {track.source === "youtube" && <TapTempoControl key={track.id} trackId={track.id} />}
       <Waveform peaks={analysis?.waveformPeaks ?? []} progressRatio={progressRatio} markerRatio={markerRatio} />
+      {hotCues && currentTimeSec != null && (
+        <HotCuePads trackId={track.id} slots={hotCues} currentTimeSec={currentTimeSec} />
+      )}
+    </div>
+  );
+}
+
+/**
+ * 8 fixed-role Hot Cue pads — same structural meaning on every track (see
+ * lib/hot-cues.ts), so they compose across decks: cue-in on Cue 1, line up
+ * an outro on Cue 7, a drop-swap at Cue 3/4, jump straight to Cue 5 to
+ * shorten a track, etc. A placed pad jumps playback there; an unset one
+ * (or the small re-set corner button on a placed one) captures the
+ * current position instead — auto placement is always just a starting
+ * point, never the only option.
+ */
+function HotCuePads({
+  trackId,
+  slots,
+  currentTimeSec,
+}: {
+  trackId: string;
+  slots: HotCueSlot[];
+  currentTimeSec: number;
+}) {
+  const requestSeek = useStore((s) => s.requestSeek);
+  const setHotCueOverride = useStore((s) => s.setHotCueOverride);
+
+  return (
+    <div className="flex flex-col gap-1">
+      <p className="text-[10px] font-semibold text-muted uppercase tracking-wide">Hot Cues</p>
+      <div className="grid grid-cols-4 gap-1.5">
+        {slots.map((slot, i) => (
+          <div key={i} className="relative group">
+            <button
+              type="button"
+              onClick={() => (slot.atSec != null ? requestSeek(slot.atSec) : setHotCueOverride(trackId, i + 1, currentTimeSec))}
+              data-active={slot.atSec != null}
+              className="btn-outline w-full !flex-col !gap-0.5 !px-1 !py-1.5"
+              title={
+                slot.atSec != null
+                  ? `Jump to ${HOT_CUE_LABELS[i]} (${formatTime(slot.atSec)})${
+                      slot.source === "auto" ? " — auto-detected, best effort" : ""
+                    }`
+                  : `Tap to set ${HOT_CUE_LABELS[i]} at the current playback position`
+              }
+            >
+              <span className="text-[9px] font-semibold uppercase tracking-wide">{HOT_CUE_LABELS[i]}</span>
+              <span className="text-[10px] font-mono">{slot.atSec != null ? formatTime(slot.atSec) : "Tap to set"}</span>
+            </button>
+            {slot.atSec != null && (
+              <button
+                type="button"
+                onClick={() => setHotCueOverride(trackId, i + 1, currentTimeSec)}
+                className="btn-icon absolute -top-2 -right-2 !p-0.5 text-[9px] leading-none bg-surface shadow-elevate-sm opacity-0 group-hover:opacity-100 focus:opacity-100 transition-opacity"
+                title="Re-set to the current playback position"
+              >
+                ↺
+              </button>
+            )}
+          </div>
+        ))}
+      </div>
+      <p className="text-[10px] text-muted">
+        Cues 1/2/7/8 are beat-grid math and should always land somewhere reasonable. Cues 3-6 are best-effort
+        build/drop detection — it works best on house/EDM-shaped tracks and won&apos;t always find a second (or
+        even first) build/drop. Tap any pad to set or move it by hand.
+      </p>
     </div>
   );
 }
@@ -211,6 +286,17 @@ export function DeckView() {
   const nextTrack = queue[0] ?? null;
   const currentAnalysis = currentTrack ? trackAnalysis[currentTrack.id] : undefined;
   const nextAnalysis = nextTrack ? trackAnalysis[nextTrack.id] : undefined;
+
+  // Hot Cues: never auto-detected for a YouTube track (no waveform to run
+  // the detector on — every cue there comes from hotCueOverrides alone).
+  const autoHotCues = useMemo(() => {
+    if (!currentTrack || currentTrack.source !== "local" || !currentAnalysis) return new Array(8).fill(null);
+    return computeAutoHotCues(currentAnalysis, currentTrack.durationSec);
+  }, [currentTrack, currentAnalysis]);
+  const hotCueSlots = useMemo(
+    () => mergeHotCues(autoHotCues, currentTrack?.hotCueOverrides),
+    [autoHotCues, currentTrack?.hotCueOverrides]
+  );
 
   const preview = useMemo(() => {
     if (!currentTrack || !nextTrack) return null;
@@ -377,6 +463,8 @@ export function DeckView() {
             track={currentTrack}
             analysis={currentAnalysis}
             progressRatio={progressRatio}
+            hotCues={hotCueSlots}
+            currentTimeSec={currentTimeSec}
           />
           <DeckCard label="Cued Next" track={nextTrack} analysis={nextAnalysis} markerRatio={markerRatio} />
         </div>

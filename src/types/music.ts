@@ -8,6 +8,8 @@ interface TrackBase {
   addedAt: number;
   /** Library curation flag for Shuffle Play — "must" is guaranteed inclusion (moved to the front), "do-not" is excluded. Never blocks a direct manual play; only affects automatic shuffle selection. */
   playPreference?: "must" | "do-not";
+  /** Manually-set Hot Cue positions, keyed 1-8 (src/lib/hot-cues.ts) — sparse; a cue not present here falls back to the best-effort auto placement (or stays unset). The only source of hot cues for a YouTube track. */
+  hotCueOverrides?: Record<number, number>;
 }
 
 /** A locally-uploaded file, played through the full Web Audio engine (real BPM/key/energy analysis, EQ, mashups, tempo ramps). */

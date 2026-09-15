@@ -43,7 +43,27 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
     if (typeof a.camelotKey === "string" || a.camelotKey === null) data.camelotKey = a.camelotKey;
     if (typeof a.breakdownAtSec === "number" || a.breakdownAtSec === null) data.breakdownAtSec = a.breakdownAtSec;
     if (typeof a.dropAtSec === "number" || a.dropAtSec === null) data.dropAtSec = a.dropAtSec;
+    if (Array.isArray(a.buildDropPairs)) {
+      const pairs = a.buildDropPairs.filter(
+        (p: unknown): p is { buildAtSec: number; dropAtSec: number } =>
+          typeof p === "object" &&
+          p !== null &&
+          typeof (p as { buildAtSec?: unknown }).buildAtSec === "number" &&
+          typeof (p as { dropAtSec?: unknown }).dropAtSec === "number"
+      );
+      data.buildDropPairsJson = JSON.stringify(pairs);
+    }
     if (Array.isArray(a.waveformPeaks)) data.waveformPeaksJson = JSON.stringify(a.waveformPeaks);
+  }
+  if (body.hotCueOverrides && typeof body.hotCueOverrides === "object") {
+    const sanitized: Record<string, number> = {};
+    for (const [cueNumber, atSec] of Object.entries(body.hotCueOverrides)) {
+      const n = Number(cueNumber);
+      if (Number.isInteger(n) && n >= 1 && n <= 8 && typeof atSec === "number" && atSec >= 0) {
+        sanitized[cueNumber] = atSec;
+      }
+    }
+    data.hotCueOverridesJson = JSON.stringify(sanitized);
   }
   if (body.lyricalFingerprint === null) {
     data.lyricalFingerprintJson = null;

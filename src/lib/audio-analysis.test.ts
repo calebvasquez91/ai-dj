@@ -114,6 +114,82 @@ describe("analyzeSamples", () => {
     expect(analysis.breakdownAtSec as number).toBeGreaterThanOrEqual(breakdownSectionStart);
     expect(analysis.breakdownAtSec as number).toBeLessThan(breakdownSectionEnd);
   });
+
+  it("finds two ordered build/drop pairs in a track with two build-drop cycles", () => {
+    const bpm = 128;
+    const rampUp = (samples: Float32Array) =>
+      samples.map((v, i) => v * (0.15 + 0.85 * (i / samples.length)));
+
+    const intro = new Float32Array(Math.floor(3 * SAMPLE_RATE)).map(() => (Math.random() - 0.5) * 0.005);
+    const build1 = rampUp(buildClickTrack(bpm, 8));
+    const drop1 = buildClickTrack(bpm, 6).map((v) => v * 2.2);
+    const breakdown = new Float32Array(Math.floor(4 * SAMPLE_RATE)).map(() => (Math.random() - 0.5) * 0.004);
+    const build2 = rampUp(buildClickTrack(bpm, 8));
+    const drop2 = buildClickTrack(bpm, 6).map((v) => v * 2.2);
+    const outro = new Float32Array(Math.floor(3 * SAMPLE_RATE)).map(() => (Math.random() - 0.5) * 0.005);
+
+    const parts = [intro, build1, drop1, breakdown, build2, drop2, outro];
+    const total = parts.reduce((sum, p) => sum + p.length, 0);
+    const samples = new Float32Array(total);
+    let offset = 0;
+    for (const p of parts) {
+      samples.set(p, offset);
+      offset += p.length;
+    }
+    const durationSec = total / SAMPLE_RATE;
+    const analysis = analyzeSamples(samples, SAMPLE_RATE, durationSec);
+
+    // Generous ±1.5s slack around each section boundary: the detector runs
+    // on a 1s-smoothed envelope, so a transition can blur across it by
+    // design — these boundaries were never meant to be frame-exact, only
+    // "clearly in the right section."
+    const slack = 1.5;
+    const build1Start = 3;
+    const build1End = build1Start + 8;
+    const drop1Start = build1End;
+    const drop1End = drop1Start + 6;
+    const build2Start = drop1End + 4;
+    const build2End = build2Start + 8;
+    const drop2Start = build2End;
+    const drop2End = drop2Start + 6;
+
+    expect(analysis.buildDropPairs).toHaveLength(2);
+    const [pair1, pair2] = analysis.buildDropPairs;
+    expect(pair1.buildAtSec).toBeGreaterThanOrEqual(build1Start - slack);
+    expect(pair1.buildAtSec).toBeLessThan(build1End + slack);
+    expect(pair1.dropAtSec).toBeGreaterThanOrEqual(drop1Start - slack);
+    expect(pair1.dropAtSec).toBeLessThan(drop1End + slack);
+    expect(pair2.buildAtSec).toBeGreaterThanOrEqual(build2Start - slack);
+    expect(pair2.buildAtSec).toBeLessThan(build2End + slack);
+    expect(pair2.dropAtSec).toBeGreaterThanOrEqual(drop2Start - slack);
+    expect(pair2.dropAtSec).toBeLessThan(drop2End + slack);
+    expect(pair1.dropAtSec).toBeLessThan(pair2.buildAtSec);
+  });
+
+  it("finds only one build/drop pair in a track with a single build-drop cycle", () => {
+    const bpm = 128;
+    const rampUp = (samples: Float32Array) =>
+      samples.map((v, i) => v * (0.15 + 0.85 * (i / samples.length)));
+    const intro = new Float32Array(Math.floor(3 * SAMPLE_RATE)).map(() => (Math.random() - 0.5) * 0.005);
+    const build = rampUp(buildClickTrack(bpm, 8));
+    const drop = buildClickTrack(bpm, 10).map((v) => v * 2.2);
+    const parts = [intro, build, drop];
+    const total = parts.reduce((sum, p) => sum + p.length, 0);
+    const samples = new Float32Array(total);
+    let offset = 0;
+    for (const p of parts) {
+      samples.set(p, offset);
+      offset += p.length;
+    }
+    const analysis = analyzeSamples(samples, SAMPLE_RATE, total / SAMPLE_RATE);
+    expect(analysis.buildDropPairs).toHaveLength(1);
+  });
+
+  it("finds no build/drop pairs in a flat, structureless track", () => {
+    const samples = buildClickTrack(128, 20);
+    const analysis = analyzeSamples(samples, SAMPLE_RATE, 20);
+    expect(analysis.buildDropPairs).toEqual([]);
+  });
 });
 
 describe("camelotForKey", () => {

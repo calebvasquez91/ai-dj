@@ -88,6 +88,12 @@ function wasmResultToTrackAnalysis(raw: WasmTrackAnalysisResult): TrackAnalysis 
     camelotKey: raw.camelotKey.length > 0 ? raw.camelotKey : null,
     breakdownAtSec: Number.isNaN(raw.breakdownAtSec) ? null : raw.breakdownAtSec,
     dropAtSec: Number.isNaN(raw.dropAtSec) ? null : raw.dropAtSec,
+    // The WASM/C++ port (native/analysis.cpp) doesn't compute build/drop
+    // pairs yet, so a track analyzed via this path always gets an empty
+    // array here — Hot Cues 3-6 simply come back unset for it until the
+    // port catches up, same as a track where the JS detector itself
+    // couldn't find a confident pair.
+    buildDropPairs: [],
     waveformPeaks: raw.waveformPeaks,
     fallback: raw.fallback,
   };

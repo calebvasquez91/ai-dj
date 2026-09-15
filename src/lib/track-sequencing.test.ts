@@ -19,6 +19,7 @@ function makeAnalysis(overrides: Partial<TrackAnalysis> = {}): TrackAnalysis {
     camelotKey: "8A",
     breakdownAtSec: null,
     dropAtSec: null,
+    buildDropPairs: [],
     waveformPeaks: [0.5, 0.5, 0.5],
     fallback: false,
     ...overrides,
