@@ -12,6 +12,7 @@ import {
   brakeGainCurves,
   equalPowerCurves,
   isTempoRampEligible,
+  MIN_TEMPO_CONFIDENCE_FOR_TRUST,
   mashupGainCurves,
   planSimpleFade,
   planTransition,
@@ -156,6 +157,9 @@ interface ActiveBackspin {
 const BRAKE_MIN_RATE = 0.15;
 /** How slow a "spin up" starts before ramping to full speed — the mirror of BRAKE_MIN_RATE. */
 const SPIN_UP_MIN_RATE = 0.2;
+/** Beat Repeat's loop-roll: how much of the outgoing track's tail gets re-triggered (a quarter-bar = one beat) and how many times — sized so BEAT_REPEAT_BARS * 4 * BEAT_REPEAT_REPEATS (8 beats) exactly matches "beat-repeat"'s windowBeats in mix-engine.ts, regardless of tempo. */
+const BEAT_REPEAT_BARS = 0.25;
+const BEAT_REPEAT_REPEATS = 8;
 
 interface DeckNodes {
   source: MediaElementAudioSourceNode;
@@ -298,6 +302,14 @@ export function DualDeckStage() {
     }
   }, []);
 
+  /** Stops an in-progress freeform beat-loop from rewinding again — the deck's own playback just continues forward untouched, since the loop never altered gain or node state, only currentTime. */
+  const cancelLoop = useCallback(() => {
+    const l = loopRef.current;
+    if (!l) return;
+    if (l.tickIntervalId != null) clearInterval(l.tickIntervalId);
+    loopRef.current = null;
+  }, []);
+
   const cancelTransition = useCallback(() => {
     const t = transitionRef.current;
     if (!t) return;
@@ -311,6 +323,7 @@ export function DualDeckStage() {
     if (fromEl) fromEl.playbackRate = 1;
     stopOverlayNodes(t.overlayNodes);
     if (t.effect === "word-play") cancelHypePhrase();
+    if (t.effect === "loop-roll") cancelLoop();
     resetDeckNodes(t.toDeckId, 0);
     resetDeckNodes(t.fromDeckId, 1);
     loadedTrackId.current[t.toDeckId] = null;
@@ -318,7 +331,7 @@ export function DualDeckStage() {
     useStore.getState().setIsTransitioning(false);
     useStore.getState().setActiveTransitionRationale(null);
     useStore.getState().setActiveTransitionShortWhy(null);
-  }, [deckEl, resetDeckNodes, stopOverlayNodes]);
+  }, [deckEl, resetDeckNodes, stopOverlayNodes, cancelLoop]);
 
   /** Tears down an in-progress mashup cleanly (user seeked or picked a different track mid-mashup) — the idle toDeck was never touched yet, so only the buffer-voice and the still-playing fromDeck need resetting. */
   const cancelMashup = useCallback(() => {
@@ -337,14 +350,6 @@ export function DualDeckStage() {
     useStore.getState().setActiveTransitionRationale(null);
     useStore.getState().setActiveTransitionShortWhy(null);
   }, [resetDeckNodes]);
-
-  /** Stops an in-progress freeform beat-loop from rewinding again — the deck's own playback just continues forward untouched, since the loop never altered gain or node state, only currentTime. */
-  const cancelLoop = useCallback(() => {
-    const l = loopRef.current;
-    if (!l) return;
-    if (l.tickIntervalId != null) clearInterval(l.tickIntervalId);
-    loopRef.current = null;
-  }, []);
 
   /** Stops an in-progress backspin from continuing to drive playbackRate — restores it to 1 immediately rather than leaving the deck at whatever intermediate rate the ramp was at. */
   const cancelBackspin = useCallback(() => {
@@ -778,6 +783,18 @@ export function DualDeckStage() {
         // ducked under the music — it just speaks over whatever's playing.
         speakHypePhrase();
       }
+      if (plan.effect === "loop-roll") {
+        // Only ever attempted on a genuinely trustworthy beat grid — a
+        // stutter on a guessed/fabricated tempo would land off-beat and
+        // sound broken rather than intentional. Untrustworthy data just
+        // skips the loop; the transition still plays out as a plain
+        // equal-power blend (the curve already chosen above).
+        const fromTrackId = useStore.getState().currentTrack?.id;
+        const fromAnalysis = fromTrackId ? getAnalysis(fromTrackId) : null;
+        if (fromAnalysis && fromAnalysis.bpm > 0 && fromAnalysis.bpmConfidence >= MIN_TEMPO_CONFIDENCE_FOR_TRUST) {
+          startBeatLoop(fromDeckId, fromAnalysis, fromEl.currentTime, BEAT_REPEAT_BARS, BEAT_REPEAT_REPEATS);
+        }
+      }
 
       const transition: ActiveTransition = {
         fromDeckId,
@@ -836,6 +853,10 @@ export function DualDeckStage() {
     }
 
     function completeTransition(t: ActiveTransition) {
+      // Safety net: a loop-roll is sized to finish within the transition
+      // window on its own, but this guarantees it never outlives it (e.g.
+      // rounding, or the window ending slightly early).
+      if (t.effect === "loop-roll") cancelLoop();
       const fromEl = deckEl(t.fromDeckId);
       if (fromEl) {
         fromEl.pause();
@@ -1824,7 +1845,7 @@ export function DualDeckStage() {
       elA?.removeEventListener("ended", onEndedA);
       elB?.removeEventListener("ended", onEndedB);
     };
-  }, [cancelTempoRamp, deckEl, resetDeckNodes, stopOverlayNodes]);
+  }, [cancelLoop, cancelTempoRamp, deckEl, resetDeckNodes, stopOverlayNodes]);
 
   // External track changes (library/queue click, next/previous, playlist
   // play) land here. Transitions we drive ourselves already have the new

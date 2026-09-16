@@ -130,6 +130,11 @@ function windowBeatsForTransition(t: TransitionEntry, tempoSync: boolean, bpmDel
       return 8;
     case "digital":
       return 16;
+    case "beat-repeat":
+      // 8 beats, chosen to exactly match BEAT_REPEAT_BARS * 4 *
+      // BEAT_REPEAT_REPEATS in DualDeckStage.tsx (0.25 * 4 * 8), so the
+      // stutter always fills its window regardless of tempo.
+      return 8;
     default:
       return 8;
   }
@@ -158,6 +163,7 @@ const MIN_WINDOW_SEC_BY_CATEGORY: Record<TransitionCategory, number> = {
   effects: MIN_CROSSFADE_SEC,
   digital: MIN_CROSSFADE_SEC,
   vocal: MIN_CROSSFADE_SEC,
+  "beat-repeat": 2,
 };
 
 export type TransitionEffect =
@@ -173,7 +179,8 @@ export type TransitionEffect =
   | "eq-kill"
   | "reverb-wash"
   | "tag-sample"
-  | "word-play";
+  | "word-play"
+  | "loop-roll";
 
 const TRANSITION_EFFECT_BY_ID: Record<string, TransitionEffect> = {
   "bass-swap": "highpass-sweep",
@@ -189,6 +196,7 @@ const TRANSITION_EFFECT_BY_ID: Record<string, TransitionEffect> = {
   "reverb-wash": "reverb-wash",
   "tag-drop": "tag-sample",
   "word-play-drop": "word-play",
+  "beat-repeat-transition": "loop-roll",
 };
 
 /**
@@ -353,6 +361,7 @@ const MODE_CATEGORY_BIAS: Record<DjSetMode, Partial<Record<TransitionCategory, n
     "eq-filter": 4,
     "eq-kill": 3,
     digital: 3,
+    "beat-repeat": 2,
     scratch: -4,
     brake: -3,
     "spin-up": -3,
@@ -366,6 +375,7 @@ const MODE_CATEGORY_BIAS: Record<DjSetMode, Partial<Record<TransitionCategory, n
     scratch: -10,
     "tag-sample": -10,
     "word-play": -10,
+    "beat-repeat": -10,
     riser: -8,
     brake: -8,
     "spin-up": -8,
@@ -376,6 +386,7 @@ const MODE_CATEGORY_BIAS: Record<DjSetMode, Partial<Record<TransitionCategory, n
     "tag-sample": 6,
     "word-play": 6,
     riser: 5,
+    "beat-repeat": 5,
     drop: 4,
     "spin-up": 3,
     effects: 3,
@@ -391,6 +402,7 @@ const MODE_CATEGORY_BIAS: Record<DjSetMode, Partial<Record<TransitionCategory, n
     scratch: -10,
     "tag-sample": -10,
     "word-play": -10,
+    "beat-repeat": -10,
     riser: -8,
     drop: -6,
   },

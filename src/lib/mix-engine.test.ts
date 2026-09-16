@@ -455,6 +455,40 @@ describe("planTransition — DJ Set Modes", () => {
   });
 });
 
+describe("planTransition — Beat Repeat", () => {
+  it("resolves to the loop-roll effect when forced", () => {
+    const plan = planTransition({
+      current: { track: makeTrack("a", 240), analysis: makeAnalysis({ bpm: 128 }) },
+      next: { track: makeTrack("b", 240), analysis: makeAnalysis({ bpm: 128 }) },
+      forceTransitionId: "beat-repeat-transition",
+    });
+    expect(plan.transitionId).toBe("beat-repeat-transition");
+    expect(plan.category).toBe("beat-repeat");
+    expect(plan.effect).toBe("loop-roll");
+  });
+
+  it("Party mode favors it over a plain blend", () => {
+    const plan = planTransition({
+      current: { track: makeTrack("a", 240), analysis: makeAnalysis({ bpm: 128, keyConfidence: 0 }) },
+      next: { track: makeTrack("b", 240), analysis: makeAnalysis({ bpm: 128, keyConfidence: 0 }) },
+      djMode: "party",
+      excludeTransitionIds: ["tag-drop", "word-play-drop"], // isolate beat-repeat's own bias from party's other favorites
+    });
+    expect(plan.category).toBe("beat-repeat");
+  });
+
+  it("Wedding and Chill modes avoid it, same as scratch/tag-sample", () => {
+    for (const djMode of ["wedding", "chill"] as const) {
+      const plan = planTransition({
+        current: { track: makeTrack("a", 240), analysis: makeAnalysis({ bpm: 128, keyConfidence: 0 }) },
+        next: { track: makeTrack("b", 240), analysis: makeAnalysis({ bpm: 128, keyConfidence: 0 }) },
+        djMode,
+      });
+      expect(plan.category).not.toBe("beat-repeat");
+    }
+  });
+});
+
 describe("stutterGateCurves", () => {
   it("only ever has one deck audible at a time", () => {
     const { outCurve, inCurve } = stutterGateCurves(32, 8);

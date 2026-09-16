@@ -25,7 +25,8 @@ export type TransitionCategory =
   | "tempo-ramp"
   | "tag-sample"
   | "spin-up"
-  | "word-play";
+  | "word-play"
+  | "beat-repeat";
 
 export interface TransitionEntry {
   id: string;
@@ -142,6 +143,20 @@ export const transitions: TransitionEntry[] = [
     idealGenres: ["hip-hop"],
     executable: true,
     exampleDjs: ["DJ Jazzy Jeff", "Q-Bert"],
+  },
+
+  // Beat Repeat — unlike the stutter-gate simulations above, this one
+  // actually re-triggers real audio (rewinding the outgoing deck's own
+  // playback across a beat-aligned window), not just a gain toggle.
+  {
+    id: "beat-repeat-transition",
+    name: "Beat Repeat",
+    category: "beat-repeat",
+    description: "Rapidly re-triggers a single beat of the outgoing track's tail — a real audio stutter, not a gain trick — building tension into the mix, classic techno/DnB/dubstep glitch technique.",
+    idealBpmDeltaMax: Infinity,
+    idealGenres: ["techno"],
+    executable: true,
+    exampleDjs: ["Skrillex", "Noisia", "Excision"],
   },
 
   // Brake-based
