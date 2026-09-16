@@ -1925,7 +1925,14 @@ export function DualDeckStage() {
   // here ever writes to a node. The user's only input stays Mix Now / the
   // Auto-DJ toggle; this panel just shows what those already do.
   useEffect(() => {
+    const POLL_MS = 50;
     const meterBuffer = new Float32Array(256);
+    // Degrees/tick at playbackRate 1, referenced to a real turntable's
+    // 33 1/3 RPM (200 deg/sec) — jogAngle accumulates here, in this
+    // effect's own closure, since it's purely a rendering concern with
+    // no real audio-graph counterpart to read back from.
+    const DEG_PER_TICK_AT_RATE_1 = 200 * (POLL_MS / 1000);
+    const jogAngle: Record<DeckId, number> = { A: 0, B: 0 };
     const intervalId = setInterval(() => {
       const store = useStore.getState();
       (["A", "B"] as const).forEach((id) => {
@@ -1939,6 +1946,12 @@ export function DualDeckStage() {
 
         store.setDeckEqLowDb(id, nodes.lowShelf.gain.value);
         store.setDeckFilterPos(id, filterStateToKnobPos(nodes.filter.type, nodes.filter.frequency.value));
+
+        const el = deckEl(id);
+        if (el && !el.paused) {
+          jogAngle[id] = (jogAngle[id] + DEG_PER_TICK_AT_RATE_1 * el.playbackRate) % 360;
+        }
+        store.setDeckJogAngle(id, jogAngle[id]);
       });
 
       // Crossfader position: only meaningful while both decks are actually
@@ -1956,9 +1969,9 @@ export function DualDeckStage() {
       } else {
         store.setCrossfaderPosition(activeDeckRef.current === "A" ? 0 : 1);
       }
-    }, 50);
+    }, POLL_MS);
     return () => clearInterval(intervalId);
-  }, []);
+  }, [deckEl]);
 
   useEffect(() => {
     if (seekRequest == null || currentTrack?.source !== "local") return; // owned by YouTubeDeckStage

@@ -68,6 +68,8 @@ interface PlayerState {
   crossfaderPosition: number;
   /** Live 0-1 level per deck, written ~20x/sec by DualDeckStage from a real AnalyserNode tap — read-only from the UI's side, for the channel-strip meters. */
   deckMeterLevel: Record<DeckId, number>;
+  /** Jog-wheel rotation per deck, degrees (0-360, wraps) — accumulated from that deck's real <audio> element's playbackRate each tick, frozen while paused. Speeds up/slows down for real during brake and spin-up transitions since it's driven by the actual element, not a fixed animation. */
+  deckJogAngle: Record<DeckId, number>;
 
   playlists: Playlist[];
   playlistsLoaded: boolean;
@@ -140,6 +142,7 @@ interface PlayerState {
   setDeckFilterPos: (deckId: DeckId, pos: number) => void;
   setCrossfaderPosition: (pos: number) => void;
   setDeckMeterLevel: (deckId: DeckId, level: number) => void;
+  setDeckJogAngle: (deckId: DeckId, angle: number) => void;
 
   loadPlaylists: () => Promise<void>;
   createPlaylist: () => Promise<string>;
@@ -192,6 +195,7 @@ export const useStore = create<PlayerState>()(
       deckFilterPos: { A: 0, B: 0 },
       crossfaderPosition: 0.5,
       deckMeterLevel: { A: 0, B: 0 },
+      deckJogAngle: { A: 0, B: 0 },
 
       playlists: [],
       playlistsLoaded: false,
@@ -361,6 +365,8 @@ export const useStore = create<PlayerState>()(
       setCrossfaderPosition: (pos) => set({ crossfaderPosition: pos }),
       setDeckMeterLevel: (deckId, level) =>
         set((s) => ({ deckMeterLevel: { ...s.deckMeterLevel, [deckId]: level } })),
+      setDeckJogAngle: (deckId, angle) =>
+        set((s) => ({ deckJogAngle: { ...s.deckJogAngle, [deckId]: angle } })),
 
       setYoutubeBpm: (trackId, analysis, bpmSource, persist) => {
         set((s) => {

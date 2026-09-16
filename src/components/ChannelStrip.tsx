@@ -2,6 +2,7 @@
 
 import { useStore } from "@/lib/store";
 import { EQ_DB_MIN, EQ_DB_MAX } from "@/lib/mixer-controls";
+import { JogWheel } from "@/components/JogWheel";
 import type { DeckId } from "@/types/music";
 
 function VerticalBar({ label, value, min, max, title }: { label: string; value: number; min: number; max: number; title: string }) {
@@ -45,6 +46,7 @@ export function ChannelStrip({ deckId }: { deckId: DeckId }) {
         Deck {deckId}
         {activeDeckId === deckId && <span className="text-accent-teal" title="Currently audible">● Live</span>}
       </p>
+      <JogWheel deckId={deckId} />
       <div className="flex items-end gap-3">
         <VerticalBar
           label="Low"
