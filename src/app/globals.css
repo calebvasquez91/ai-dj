@@ -513,6 +513,77 @@ body {
   }
 }
 
+/* ---- Mixer channel strip ----
+   Vertical range inputs via writing-mode (not the old rotate-transform
+   hack) — keeps native slider interaction/accessibility, just reoriented
+   so the bottom is the minimum, like a real fader. */
+.mixer-vertical-slider {
+  width: 28px;
+  height: 128px;
+}
+
+.mixer-readonly-bar {
+  position: relative;
+  border-radius: 6px;
+  background: var(--surface-hover);
+  overflow: hidden;
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--foreground) calc(8% * var(--shadow-boost)), transparent);
+}
+
+.mixer-readonly-bar-fill {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  background: var(--accent-purple);
+  transition: height 80ms linear;
+}
+
+.mixer-readonly-bar-horizontal {
+  width: 100%;
+  height: 10px;
+  border-radius: 999px;
+  overflow: visible;
+}
+
+.mixer-readonly-bar-fill-horizontal {
+  right: auto;
+  height: 100%;
+  border-radius: 999px;
+  transition: width 80ms linear;
+}
+
+.mixer-readonly-bar-thumb {
+  position: absolute;
+  top: 50%;
+  width: 10px;
+  height: 10px;
+  margin-left: -5px;
+  border-radius: 999px;
+  background: var(--foreground);
+  transform: translateY(-50%);
+  transition: left 80ms linear;
+}
+
+.mixer-meter {
+  position: relative;
+  width: 14px;
+  height: 128px;
+  border-radius: 6px;
+  background: var(--surface-hover);
+  overflow: hidden;
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--foreground) calc(8% * var(--shadow-boost)), transparent);
+}
+
+.mixer-meter-fill {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  background: linear-gradient(to top, var(--accent-teal), var(--accent-yellow) 75%, var(--accent-pink) 92%);
+  transition: height 60ms linear;
+}
+
 /* ---- Now Playing panel collapse ----
    translate-y-full already pushes this fully below the viewport, but that
    alone depends on the element's own box height exactly matching the

@@ -28,6 +28,7 @@ import { useDjWeights, LEARNING_NUDGE_UP, LEARNING_NUDGE_DOWN } from "@/lib/dj-w
 import { planMashup, MASHUP_COOLDOWN_SEC, type MashupPlan } from "@/lib/mashup-engine";
 import { resolveHotCues, upcomingDropCueAtSec } from "@/lib/hot-cues";
 import { createTimeStretchVoice, type TimeStretchVoice } from "@/lib/time-stretch";
+import { filterStateToKnobPos } from "@/lib/mixer-controls";
 import type { LocalTrack, Track } from "@/types/music";
 
 type DeckId = "A" | "B";
@@ -158,6 +159,12 @@ const SPIN_UP_MIN_RATE = 0.2;
 
 interface DeckNodes {
   source: MediaElementAudioSourceNode;
+  /** Read-only tap for the mixer panel's level meter — no further output, doesn't affect the signal path. */
+  meterAnalyser: AnalyserNode;
+  // ---- Automation nodes, driven entirely by mix-engine.ts's transition
+  // plans (plus mashups/tempo-ramps/ducking/vocal-echo elsewhere in this
+  // file). The mixer panel is a read-only mirror of these — see the
+  // meter-poll effect near the bottom of this file — never a second writer.
   /** Dedicated bass band for EQ Kill's stepped cuts — independent of `filter` so it never conflicts with the highpass/lowpass sweeps that node is reused for. */
   lowShelf: BiquadFilterNode;
   filter: BiquadFilterNode;
@@ -253,6 +260,7 @@ export function DualDeckStage() {
 
   useEffect(() => {
     activeDeckRef.current = activeDeck;
+    useStore.getState().setActiveDeckId(activeDeck);
   }, [activeDeck]);
 
   const resetDeckNodes = useCallback((id: DeckId, gainValue: number) => {
@@ -455,6 +463,7 @@ export function DualDeckStage() {
 
       function buildDeckNodes(el: HTMLAudioElement, initialGain: number): DeckNodes {
         const source = ctx.createMediaElementSource(el);
+
         const lowShelf = ctx.createBiquadFilter();
         lowShelf.type = "lowshelf";
         lowShelf.frequency.value = 150;
@@ -469,11 +478,14 @@ export function DualDeckStage() {
         delay.delayTime.value = ECHO_DELAY_SEC;
         const delayFeedback = ctx.createGain();
         delayFeedback.gain.value = ECHO_FEEDBACK;
+        const meterAnalyser = ctx.createAnalyser();
+        meterAnalyser.fftSize = 256;
 
         source.connect(lowShelf);
         lowShelf.connect(filter);
         filter.connect(gain);
         gain.connect(masterGain);
+        gain.connect(meterAnalyser); // metering tap only — analyser has no further output
 
         filter.connect(delaySend);
         delaySend.connect(delay);
@@ -481,13 +493,25 @@ export function DualDeckStage() {
         delayFeedback.connect(delay);
         delay.connect(masterGain);
 
-        return { source, lowShelf, filter, gain, delaySend, delay, delayFeedback };
+        return {
+          source,
+          meterAnalyser,
+          lowShelf,
+          filter,
+          gain,
+          delaySend,
+          delay,
+          delayFeedback,
+        };
       }
 
       graphCacheRef.current = {
         ctx,
         masterGain,
-        decks: { A: buildDeckNodes(elA, 1), B: buildDeckNodes(elB, 0) },
+        decks: {
+          A: buildDeckNodes(elA, 1),
+          B: buildDeckNodes(elB, 0),
+        },
       };
     }
 
@@ -1894,6 +1918,47 @@ export function DualDeckStage() {
   useEffect(() => {
     masterGainRef.current?.gain.setValueAtTime(volume, audioCtxRef.current?.currentTime ?? 0);
   }, [volume]);
+
+  // ---- Mixer: a read-only live view of the AI's own mixing. Every ~50ms,
+  // mirror the *real* automation nodes mix-engine.ts (and mashups/tempo-ramps/
+  // ducking elsewhere in this file) already drive into the store — nothing
+  // here ever writes to a node. The user's only input stays Mix Now / the
+  // Auto-DJ toggle; this panel just shows what those already do.
+  useEffect(() => {
+    const meterBuffer = new Float32Array(256);
+    const intervalId = setInterval(() => {
+      const store = useStore.getState();
+      (["A", "B"] as const).forEach((id) => {
+        const nodes = deckNodesRef.current[id];
+        if (!nodes) return;
+        nodes.meterAnalyser.getFloatTimeDomainData(meterBuffer);
+        let sumSquares = 0;
+        for (let i = 0; i < meterBuffer.length; i++) sumSquares += meterBuffer[i] * meterBuffer[i];
+        const rms = Math.sqrt(sumSquares / meterBuffer.length);
+        store.setDeckMeterLevel(id, Math.min(1, rms * 2.5));
+
+        store.setDeckEqLowDb(id, nodes.lowShelf.gain.value);
+        store.setDeckFilterPos(id, filterStateToKnobPos(nodes.filter.type, nodes.filter.frequency.value));
+      });
+
+      // Crossfader position: only meaningful while both decks are actually
+      // audible (a transition/mashup/tempo-ramp handoff in progress) — derive
+      // a share from their live gain values. Otherwise just snap to whichever
+      // deck is solely active, regardless of what its gain node reads (a
+      // ducking dip shouldn't make the fader look like it's mid-crossfade).
+      const nodeA = deckNodesRef.current.A;
+      const nodeB = deckNodesRef.current.B;
+      const bothAudible = !audioARef.current?.paused && !audioBRef.current?.paused;
+      if (nodeA && nodeB && bothAudible) {
+        const a = nodeA.gain.gain.value;
+        const b = nodeB.gain.gain.value;
+        store.setCrossfaderPosition(a + b > 0 ? Math.min(1, Math.max(0, b / (a + b))) : 0.5);
+      } else {
+        store.setCrossfaderPosition(activeDeckRef.current === "A" ? 0 : 1);
+      }
+    }, 50);
+    return () => clearInterval(intervalId);
+  }, []);
 
   useEffect(() => {
     if (seekRequest == null || currentTrack?.source !== "local") return; // owned by YouTubeDeckStage

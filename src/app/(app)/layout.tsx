@@ -8,6 +8,7 @@ import { PlayerBar } from "@/components/PlayerBar";
 import { NowPlayingView } from "@/components/NowPlayingView";
 import { QueuePanel } from "@/components/QueuePanel";
 import { DeckView } from "@/components/DeckView";
+import { Mixer } from "@/components/Mixer";
 import { KeyboardShortcuts } from "@/components/KeyboardShortcuts";
 
 export default async function AppLayout({ children }: { children: React.ReactNode }) {
@@ -29,6 +30,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
       <NowPlayingView />
       <QueuePanel />
       <DeckView />
+      <Mixer />
     </AuthSessionProvider>
   );
 }

@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import type { Playlist, Track } from "@/types/music";
+import type { DeckId, Playlist, Track } from "@/types/music";
 import type { TrackAnalysis } from "@/lib/audio-analysis";
 import type { DjSetMode } from "@/lib/mix-engine";
 import type { AmbienceFrequency } from "@/lib/ambience";
@@ -49,6 +49,25 @@ interface PlayerState {
   ambienceFrequency: AmbienceFrequency;
   /** Opportunistic tempo/key-matched dual-track mashup moments — a distinct, rarer "special moment" from ambience FX. */
   mashupEnabled: boolean;
+
+  // ---- Mixer: a read-only live view of the AI's own mixing. Every field
+  // here is written by DualDeckStage.tsx's read-back poll off the *real*
+  // automation nodes mix-engine.ts already drives for Auto-DJ transitions
+  // (nodes.gain/nodes.filter/nodes.lowShelf) — nothing here is user-settable;
+  // there is no "apply store to node" direction anymore. Same in-memory-only
+  // treatment as volume/crossfadeOverrideSec above (a mixing session's own
+  // state, not saved to the DB).
+  mixerPanelOpen: boolean;
+  /** Which deck (A/B) is currently the audible one — mirrors DualDeckStage's own activeDeck state so the mixer UI knows which channel strip is "live" without needing to reach into that component. */
+  activeDeckId: DeckId;
+  /** Low-shelf cut per deck, dB — mirrors nodes.lowShelf.gain.value, the same node eq-kill transitions actually drive. */
+  deckEqLowDb: Record<DeckId, number>;
+  /** One-knob filter per deck, -1 (lowpass, full left) .. 0 (bypass) .. 1 (highpass, full right) — mirrors nodes.filter's live type/frequency via mixer-controls.ts's filterStateToKnobPos. */
+  deckFilterPos: Record<DeckId, number>;
+  /** Crossfader position, 0 (full deck A) .. 1 (full deck B) — derived from both decks' live nodes.gain.gain.value while both are actually audible (a transition/mashup/tempo-ramp in progress), otherwise snapped to whichever deck is solely active. */
+  crossfaderPosition: number;
+  /** Live 0-1 level per deck, written ~20x/sec by DualDeckStage from a real AnalyserNode tap — read-only from the UI's side, for the channel-strip meters. */
+  deckMeterLevel: Record<DeckId, number>;
 
   playlists: Playlist[];
   playlistsLoaded: boolean;
@@ -115,6 +134,13 @@ interface PlayerState {
   setTrackPlayPreference: (trackId: string, preference: Track["playPreference"]) => void;
   setHotCueOverride: (trackId: string, cueNumber: number, atSec: number) => void;
 
+  toggleMixerPanel: () => void;
+  setActiveDeckId: (deckId: DeckId) => void;
+  setDeckEqLowDb: (deckId: DeckId, db: number) => void;
+  setDeckFilterPos: (deckId: DeckId, pos: number) => void;
+  setCrossfaderPosition: (pos: number) => void;
+  setDeckMeterLevel: (deckId: DeckId, level: number) => void;
+
   loadPlaylists: () => Promise<void>;
   createPlaylist: () => Promise<string>;
   renamePlaylist: (playlistId: string, name: string) => void;
@@ -159,6 +185,13 @@ export const useStore = create<PlayerState>()(
       ambienceEnabled: true,
       ambienceFrequency: "occasional",
       mashupEnabled: true,
+
+      mixerPanelOpen: false,
+      activeDeckId: "A",
+      deckEqLowDb: { A: 0, B: 0 },
+      deckFilterPos: { A: 0, B: 0 },
+      crossfaderPosition: 0.5,
+      deckMeterLevel: { A: 0, B: 0 },
 
       playlists: [],
       playlistsLoaded: false,
@@ -321,6 +354,14 @@ export const useStore = create<PlayerState>()(
           body: JSON.stringify({ hotCueOverrides: updated?.hotCueOverrides ?? { [cueNumber]: atSec } }),
         });
       },
+      toggleMixerPanel: () => set((s) => ({ mixerPanelOpen: !s.mixerPanelOpen })),
+      setActiveDeckId: (deckId) => set({ activeDeckId: deckId }),
+      setDeckEqLowDb: (deckId, db) => set((s) => ({ deckEqLowDb: { ...s.deckEqLowDb, [deckId]: db } })),
+      setDeckFilterPos: (deckId, pos) => set((s) => ({ deckFilterPos: { ...s.deckFilterPos, [deckId]: pos } })),
+      setCrossfaderPosition: (pos) => set({ crossfaderPosition: pos }),
+      setDeckMeterLevel: (deckId, level) =>
+        set((s) => ({ deckMeterLevel: { ...s.deckMeterLevel, [deckId]: level } })),
+
       setYoutubeBpm: (trackId, analysis, bpmSource, persist) => {
         set((s) => {
           const patch = (t: Track) => (t.id === trackId && t.source === "youtube" ? { ...t, bpmSource } : t);

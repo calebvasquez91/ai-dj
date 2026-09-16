@@ -40,6 +40,7 @@ export function PlayerBar() {
   const setCrossfadeOverride = useStore((s) => s.setCrossfadeOverride);
   const toggleQueuePanel = useStore((s) => s.toggleQueuePanel);
   const toggleDeckView = useStore((s) => s.toggleDeckView);
+  const toggleMixerPanel = useStore((s) => s.toggleMixerPanel);
   const styleGenreHint = useStore((s) => s.styleGenreHint);
   const setStyleGenreHint = useStore((s) => s.setStyleGenreHint);
   const djMode = useStore((s) => s.djMode);
@@ -171,6 +172,15 @@ export function PlayerBar() {
           title="Show the DJ decks — tempo, key, and what's lined up next"
         >
           🎛
+        </button>
+        <button
+          type="button"
+          onClick={toggleMixerPanel}
+          disabled={!currentTrack}
+          className="btn-icon text-accent-purple hover:text-accent-pink disabled:text-muted"
+          title="Mixer — watch the AI's live crossfader, EQ, and filter"
+        >
+          🎚
         </button>
         <button
           type="button"
