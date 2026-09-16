@@ -10,11 +10,12 @@ import { submitYoutubeTapTempo } from "@/lib/youtubeBpm";
 import { computeAutoHotCues, mergeHotCues, HOT_CUE_LABELS, type HotCueSlot } from "@/lib/hot-cues";
 import { formatTime } from "@/lib/format";
 import { TrackThumbnail } from "@/components/TrackThumbnail";
+import { JogWheel } from "@/components/JogWheel";
 import { transitions } from "@/data/transitions";
 import { genreFamilies } from "@/data/styles";
 import { CROSSFADE_PRESETS, DJ_MODES } from "@/components/PlayerBar";
 import type { AmbienceFrequency } from "@/lib/ambience";
-import type { Track } from "@/types/music";
+import type { Track, DeckId } from "@/types/music";
 
 const PICKABLE_TRANSITIONS = transitions.filter((t) => t.executable);
 
@@ -78,6 +79,7 @@ function Waveform({
 
 function DeckCard({
   label,
+  deckId,
   track,
   analysis,
   progressRatio,
@@ -86,6 +88,8 @@ function DeckCard({
   currentTimeSec,
 }: {
   label: string;
+  /** Which physical deck (A/B) this card corresponds to — drives the real, read-only jog wheel (see JogWheel.tsx/DualDeckStage.tsx); "Cued Next" only actually starts spinning once a transition loads it onto that deck. */
+  deckId: DeckId;
   track: Track | null;
   analysis: TrackAnalysis | undefined;
   progressRatio?: number;
@@ -107,11 +111,14 @@ function DeckCard({
   return (
     <div className="card p-3 flex flex-col gap-2 flex-1 min-w-0">
       <p className="text-xs font-semibold text-accent-purple uppercase tracking-wide">{label}</p>
-      <div className="flex items-center gap-2 min-w-0">
-        <TrackThumbnail thumbnailUrl={track.thumbnailUrl} title={track.title} size={36} />
-        <div className="min-w-0 flex-1">
-          <p className="text-sm font-medium truncate">{track.title}</p>
-          <p className="text-xs text-muted truncate">{track.artist}</p>
+      <div className="flex items-center gap-3 min-w-0">
+        <JogWheel deckId={deckId} />
+        <div className="flex items-center gap-2 min-w-0 flex-1">
+          <TrackThumbnail thumbnailUrl={track.thumbnailUrl} title={track.title} size={36} />
+          <div className="min-w-0 flex-1">
+            <p className="text-sm font-medium truncate">{track.title}</p>
+            <p className="text-xs text-muted truncate">{track.artist}</p>
+          </div>
         </div>
       </div>
       <div className="flex items-center gap-2 text-[11px]">
@@ -257,6 +264,7 @@ function TapTempoControl({ trackId }: { trackId: string }) {
 export function DeckView() {
   const open = useStore((s) => s.deckViewOpen);
   const toggle = useStore((s) => s.toggleDeckView);
+  const activeDeckId = useStore((s) => s.activeDeckId);
   const currentTrack = useStore((s) => s.currentTrack);
   const queue = useStore((s) => s.queue);
   const trackAnalysis = useStore((s) => s.trackAnalysis);
@@ -460,13 +468,20 @@ export function DeckView() {
         <div className="flex flex-col sm:flex-row gap-3">
           <DeckCard
             label="Now Playing"
+            deckId={activeDeckId}
             track={currentTrack}
             analysis={currentAnalysis}
             progressRatio={progressRatio}
             hotCues={hotCueSlots}
             currentTimeSec={currentTimeSec}
           />
-          <DeckCard label="Cued Next" track={nextTrack} analysis={nextAnalysis} markerRatio={markerRatio} />
+          <DeckCard
+            label="Cued Next"
+            deckId={activeDeckId === "A" ? "B" : "A"}
+            track={nextTrack}
+            analysis={nextAnalysis}
+            markerRatio={markerRatio}
+          />
         </div>
 
         {preview ? (
