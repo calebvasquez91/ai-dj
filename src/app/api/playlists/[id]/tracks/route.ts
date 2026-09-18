@@ -22,15 +22,24 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
     return NextResponse.json({ error: "Track not found." }, { status: 404 });
   }
 
-  const last = await prisma.playlistTrack.findFirst({
-    where: { playlistId: id },
-    orderBy: { position: "desc" },
-  });
-
-  await prisma.playlistTrack.upsert({
-    where: { playlistId_trackId: { playlistId: id, trackId } },
-    create: { playlistId: id, trackId, position: (last?.position ?? -1) + 1 },
-    update: {}, // already in the playlist — no-op, matches the old client-side "don't duplicate" check
+  // Reading the current max position and writing the new row are two
+  // separate statements — without serializing them, adding several tracks
+  // to the same playlist at once (e.g. a multi-select "add to playlist")
+  // lets concurrent requests all read the same stale max and land on the
+  // same position. A Postgres advisory lock scoped to this playlist id
+  // makes concurrent adds to the SAME playlist queue up one at a time,
+  // while adds to different playlists stay fully parallel.
+  await prisma.$transaction(async (tx) => {
+    await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${id}))`;
+    const last = await tx.playlistTrack.findFirst({
+      where: { playlistId: id },
+      orderBy: { position: "desc" },
+    });
+    await tx.playlistTrack.upsert({
+      where: { playlistId_trackId: { playlistId: id, trackId } },
+      create: { playlistId: id, trackId, position: (last?.position ?? -1) + 1 },
+      update: {}, // already in the playlist — no-op, matches the old client-side "don't duplicate" check
+    });
   });
 
   const updated = await loadPlaylist(id);
