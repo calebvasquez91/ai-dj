@@ -194,6 +194,16 @@ export function YouTubeDeckStage() {
               useStore.getState().next();
             }
           },
+          // Unplayable (removed, private, or embedding disabled by the
+          // owner — common for official-audio uploads) leaves the player
+          // stuck at 0:00 forever with no other signal. Treat it the same
+          // as the track ending: skip forward rather than silently stalling
+          // the whole session on one bad video.
+          onError: (e) => {
+            if (id !== activeDeckRef.current || fadeRef.current) return;
+            console.warn(`YouTube video ${loadedVideoId.current[id] ?? "(unknown)"} failed to play (error ${e.data}); skipping.`);
+            useStore.getState().next();
+          },
         },
       });
     });
