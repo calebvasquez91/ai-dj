@@ -55,13 +55,25 @@ describe("listPlaylistItemsWithDuration", () => {
                   resourceId: { videoId: "private1" },
                 },
               },
+              {
+                snippet: {
+                  title: "Official Audio Upload",
+                  videoOwnerChannelTitle: "Some Label - Topic",
+                  resourceId: { videoId: "notembeddable1" },
+                },
+              },
             ],
           })
         ) as unknown as Response;
       }
       if (url.includes("/videos")) {
         return new Response(
-          JSON.stringify({ items: [{ id: "abc123", contentDetails: { duration: "PT3M30S" } }] })
+          JSON.stringify({
+            items: [
+              { id: "abc123", contentDetails: { duration: "PT3M30S" }, status: { embeddable: true } },
+              { id: "notembeddable1", contentDetails: { duration: "PT4M0S" }, status: { embeddable: false } },
+            ],
+          })
         ) as unknown as Response;
       }
       throw new Error(`Unexpected fetch: ${url}`);
@@ -81,5 +93,10 @@ describe("listPlaylistItemsWithDuration", () => {
       artist: "Real Artist", // " - Topic" suffix stripped
       durationSec: 210,
     });
+  });
+
+  it("filters out videos that are public but not embeddable", async () => {
+    const items = await listPlaylistItemsWithDuration("PL123");
+    expect(items.find((i) => i.videoId === "notembeddable1")).toBeUndefined();
   });
 });
