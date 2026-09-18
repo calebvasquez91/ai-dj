@@ -6,7 +6,13 @@ import { JogWheel } from "@/components/JogWheel";
 import type { DeckId } from "@/types/music";
 
 function VerticalBar({ label, value, min, max, title }: { label: string; value: number; min: number; max: number; title: string }) {
-  const percent = ((value - min) / (max - min)) * 100;
+  // Real automation (e.g. EQ Kill's -30dB bass cut) can drive `value` well
+  // past this display's own min/max — clamp so the bar reads "fully empty/
+  // full" instead of an out-of-range percent, which the browser silently
+  // rejects for a negative height, freezing the bar at its last valid
+  // frame instead of showing the real (bigger) move. The title tooltip
+  // still shows the exact unclamped number.
+  const percent = Math.max(0, Math.min(100, ((value - min) / (max - min)) * 100));
   return (
     <div className="flex flex-col items-center gap-1.5">
       <div className="mixer-vertical-slider mixer-readonly-bar" title={title}>
