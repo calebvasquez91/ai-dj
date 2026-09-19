@@ -8,7 +8,6 @@ import { TrackGrid } from "@/components/TrackGrid";
 import { AddSelectedToPlaylistButton } from "@/components/AddSelectedToPlaylistButton";
 import { ConnectYouTubeButton } from "@/components/ConnectYouTubeButton";
 import { YouTubeImportModal } from "@/components/YouTubeImportModal";
-import { shuffleForPlay } from "@/lib/shuffle";
 
 type SourceFilter = "all" | "local" | "youtube";
 
@@ -18,10 +17,8 @@ function LibraryContent() {
   const localLibrary = useStore((s) => s.localLibrary);
   const addLocalTracks = useStore((s) => s.addLocalTracks);
   const removeLocalTrack = useStore((s) => s.removeLocalTrack);
-  const playTrackList = useStore((s) => s.playTrackList);
+  const startShuffle = useStore((s) => s.startShuffle);
   const libraryLoaded = useStore((s) => s.libraryLoaded);
-  const trackAnalysis = useStore((s) => s.trackAnalysis);
-  const trackLyricalFingerprints = useStore((s) => s.trackLyricalFingerprints);
   const query = (useSearchParams().get("q") ?? "").trim().toLowerCase();
   const [sourceFilter, setSourceFilter] = useState<SourceFilter>("all");
 
@@ -91,7 +88,7 @@ function LibraryContent() {
         <div className="flex items-center justify-between sm:justify-end gap-1.5 sm:gap-3">
           <button
             type="button"
-            onClick={() => playTrackList(shuffleForPlay(filtered, trackAnalysis, trackLyricalFingerprints), 0)}
+            onClick={() => startShuffle(filtered)}
             disabled={shufflableCount < 2}
             className="btn-outline"
             title="Play these tracks ordered by tempo/key/energy/theme compatibility — skips Do-Not-Play tracks, puts Must-Play tracks first"

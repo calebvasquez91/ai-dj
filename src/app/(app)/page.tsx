@@ -5,7 +5,6 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useStore } from "@/lib/store";
 import { Que } from "@/components/Que";
-import { shuffleForPlay } from "@/lib/shuffle";
 import { Shelf, ShelfCard } from "@/components/Shelf";
 import { TrackThumbnail } from "@/components/TrackThumbnail";
 import type { Track } from "@/types/music";
@@ -36,8 +35,7 @@ export default function Home() {
   const localLibrary = useStore((s) => s.localLibrary);
   const history = useStore((s) => s.history);
   const playlists = useStore((s) => s.playlists);
-  const trackAnalysis = useStore((s) => s.trackAnalysis);
-  const trackLyricalFingerprints = useStore((s) => s.trackLyricalFingerprints);
+  const startShuffle = useStore((s) => s.startShuffle);
   const playTrackList = useStore((s) => s.playTrackList);
   const getStartedRef = useRef<HTMLDivElement>(null);
   // Computed only after mount, from the *client's* local time — computing
@@ -57,7 +55,7 @@ export default function Home() {
   const shufflableCount = localLibrary.filter((t) => t.playPreference !== "do-not").length;
 
   function handleShuffle() {
-    playTrackList(shuffleForPlay(localLibrary, trackAnalysis, trackLyricalFingerprints), 0);
+    startShuffle(localLibrary);
   }
 
   async function handleBuildPlaylist() {

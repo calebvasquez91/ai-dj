@@ -112,3 +112,56 @@ export function buildCompatibleOrder(
   }
   return ordered;
 }
+
+/** Floor added to every candidate's weight so an all-zero-score pool (e.g. nothing analyzed yet) still picks uniformly at random instead of every weight being zero. */
+const WEIGHT_FLOOR = 0.01;
+/** Multiplier applied to a deprioritized candidate's weight — a soft nudge away, not an exclusion. */
+const DEPRIORITIZE_FACTOR = 0.2;
+
+/**
+ * A genuinely non-deterministic sibling to buildCompatibleOrder's greedy
+ * walk: instead of always taking the single best-scoring remaining
+ * candidate against `last` (which collapses to nearly the same order every
+ * time a library has real analysis data), this scores every candidate,
+ * keeps only the top `topK`, and picks among them weighted by score — so
+ * compatibility still biases every pick, but the walk actually varies
+ * run to run. `last === null` means every score is 0 (nothing to be
+ * compatible with yet), so the first pick in a session is uniform random.
+ */
+export function pickWeightedNext(
+  last: SequencingCandidate | null,
+  remaining: SequencingCandidate[],
+  topK = 5,
+  deprioritizeIds?: Set<string>
+): SequencingCandidate {
+  // Shuffled first so that `.sort()` (stable) breaks tied scores in random
+  // relative order rather than original array order — without this, an
+  // all-tied pool (the common case: nothing analyzed yet) would always
+  // hand the same fixed top-K slice to the weighted pick below, silently
+  // reintroducing the exact "always the same order" bug this function
+  // exists to fix.
+  const shuffled = [...remaining];
+  for (let i = shuffled.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
+  }
+  const scored = shuffled.map((candidate) => ({
+    candidate,
+    score: last ? scoreCompatibility(last, candidate) : 0,
+  }));
+  scored.sort((a, b) => b.score - a.score);
+  const top = scored.slice(0, Math.min(topK, scored.length));
+
+  const weights = top.map(({ candidate, score }) => {
+    const weight = score + WEIGHT_FLOOR;
+    return deprioritizeIds?.has(candidate.track.id) ? weight * DEPRIORITIZE_FACTOR : weight;
+  });
+  const totalWeight = weights.reduce((sum, w) => sum + w, 0);
+
+  let roll = Math.random() * totalWeight;
+  for (let i = 0; i < top.length; i++) {
+    roll -= weights[i];
+    if (roll <= 0) return top[i].candidate;
+  }
+  return top[top.length - 1].candidate;
+}

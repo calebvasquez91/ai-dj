@@ -1,5 +1,5 @@
 import { describe, expect, it, vi, afterEach } from "vitest";
-import { buildCompatibleOrder, scoreCompatibility, type SequencingCandidate } from "./track-sequencing";
+import { buildCompatibleOrder, pickWeightedNext, scoreCompatibility, type SequencingCandidate } from "./track-sequencing";
 import type { Track } from "@/types/music";
 import type { TrackAnalysis } from "@/lib/audio-analysis";
 import { fingerprintFromText } from "@/lib/lyrics";
@@ -136,5 +136,86 @@ describe("buildCompatibleOrder", () => {
     const c = candidate("c", null);
     const ordered = buildCompatibleOrder([a, b, c]);
     expect(ordered.map((o) => o.track.id)).toEqual(["a", "c", "b"]);
+  });
+});
+
+describe("pickWeightedNext", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("is deterministic under a mocked Math.random", () => {
+    const last = candidate("a", makeAnalysis({ bpm: 120, camelotKey: "8A" }));
+    const near = candidate("near", makeAnalysis({ bpm: 122, camelotKey: "8A" }));
+    const far = candidate("far", makeAnalysis({ bpm: 174, camelotKey: "2B" }));
+    vi.spyOn(Math, "random").mockReturnValue(0); // roll of 0 always lands on the first (highest-weighted) slot
+    const picked = pickWeightedNext(last, [far, near]);
+    expect(picked.track.id).toBe("near");
+  });
+
+  it("doesn't always pick the single best-scoring candidate — the actual fix for 'always the same order'", () => {
+    const last = candidate("a", makeAnalysis({ bpm: 120, camelotKey: "8A" }));
+    const best = candidate("best", makeAnalysis({ bpm: 120, camelotKey: "8A" }));
+    const others = Array.from({ length: 4 }, (_, i) =>
+      candidate(`other${i}`, makeAnalysis({ bpm: 90 + i * 5, camelotKey: "2B" }))
+    );
+    const pool = [best, ...others];
+    const picks = new Set<string>();
+    for (let i = 0; i < 200; i++) {
+      picks.add(pickWeightedNext(last, pool).track.id);
+    }
+    // A deterministic greedy walk would only ever produce "best" here.
+    expect(picks.size).toBeGreaterThan(1);
+  });
+
+  it("still picks the best-scoring candidate most often, not uniformly", () => {
+    const last = candidate("a", makeAnalysis({ bpm: 120, camelotKey: "8A" }));
+    const best = candidate("best", makeAnalysis({ bpm: 120, camelotKey: "8A" }));
+    const others = Array.from({ length: 4 }, (_, i) =>
+      candidate(`other${i}`, makeAnalysis({ bpm: 90 + i * 5, camelotKey: "2B" }))
+    );
+    const pool = [best, ...others];
+    let bestCount = 0;
+    const trials = 300;
+    for (let i = 0; i < trials; i++) {
+      if (pickWeightedNext(last, pool).track.id === "best") bestCount++;
+    }
+    // Uniform-random over 5 candidates would land on "best" ~20% of the
+    // time; a real compatibility bias should clear that comfortably.
+    expect(bestCount).toBeGreaterThan(trials * 0.3);
+  });
+
+  it("only considers the top K candidates by score", () => {
+    const last = candidate("a", makeAnalysis({ bpm: 120, camelotKey: "8A" }));
+    const good = Array.from({ length: 2 }, (_, i) => candidate(`good${i}`, makeAnalysis({ bpm: 120, camelotKey: "8A" })));
+    const bad = candidate("bad", makeAnalysis({ bpm: 174, camelotKey: "2B" }));
+    const picks = new Set<string>();
+    for (let i = 0; i < 100; i++) {
+      picks.add(pickWeightedNext(last, [...good, bad], 2).track.id);
+    }
+    expect(picks.has("bad")).toBe(false);
+  });
+
+  it("measurably lowers a deprioritized candidate's pick rate without excluding it", () => {
+    const pool = Array.from({ length: 5 }, (_, i) => candidate(`t${i}`, null)); // all score 0 — pure weight-floor comparison
+    let flaggedCount = 0;
+    const trials = 300;
+    for (let i = 0; i < trials; i++) {
+      if (pickWeightedNext(null, pool, 5, new Set(["t0"])).track.id === "t0") flaggedCount++;
+    }
+    // Uniform would be ~20%; the deprioritize penalty should land well below that.
+    expect(flaggedCount).toBeLessThan(trials * 0.1);
+  });
+
+  it("doesn't throw or divide by zero over an all-zero-score pool", () => {
+    const pool = [candidate("a", null), candidate("b", null)];
+    expect(() => pickWeightedNext(null, pool)).not.toThrow();
+  });
+
+  it("returns uniformly at random when `last` is null (nothing to be compatible with yet)", () => {
+    const pool = [candidate("a", makeAnalysis()), candidate("b", makeAnalysis())];
+    const picks = new Set<string>();
+    for (let i = 0; i < 50; i++) picks.add(pickWeightedNext(null, pool).track.id);
+    expect(picks.size).toBe(2);
   });
 });

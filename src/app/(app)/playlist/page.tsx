@@ -5,7 +5,6 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { useStore } from "@/lib/store";
 import { formatTime } from "@/lib/format";
 import { TrackThumbnail } from "@/components/TrackThumbnail";
-import { shuffleForPlay } from "@/lib/shuffle";
 
 function PlaylistContent() {
   const id = useSearchParams().get("id") ?? "";
@@ -19,10 +18,9 @@ function PlaylistContent() {
   const removeTrackFromPlaylist = useStore((s) => s.removeTrackFromPlaylist);
   const moveTrackInPlaylist = useStore((s) => s.moveTrackInPlaylist);
   const playTrackList = useStore((s) => s.playTrackList);
+  const startShuffle = useStore((s) => s.startShuffle);
   const currentTrack = useStore((s) => s.currentTrack);
   const setTrackPlayPreference = useStore((s) => s.setTrackPlayPreference);
-  const trackAnalysis = useStore((s) => s.trackAnalysis);
-  const trackLyricalFingerprints = useStore((s) => s.trackLyricalFingerprints);
 
   if (!playlist) {
     return (
@@ -71,7 +69,7 @@ function PlaylistContent() {
             </button>
             <button
               type="button"
-              onClick={() => playTrackList(shuffleForPlay(playlist.tracks, trackAnalysis, trackLyricalFingerprints), 0)}
+              onClick={() => startShuffle(playlist.tracks)}
               disabled={playlist.tracks.filter((t) => t.playPreference !== "do-not").length < 2}
               className="btn-outline self-start"
               title="Play this playlist ordered by tempo/key/energy/theme compatibility — skips Do-Not-Play tracks, puts Must-Play tracks first"

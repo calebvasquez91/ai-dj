@@ -4,6 +4,12 @@ import type { TrackAnalysis } from "@/lib/audio-analysis";
 import type { DjSetMode } from "@/lib/mix-engine";
 import type { AmbienceFrequency } from "@/lib/ambience";
 import {
+  buildInitialShuffleBatch,
+  buildShuffleSessionPool,
+  extendShuffleQueue,
+  SHUFFLE_EXTEND_THRESHOLD,
+} from "@/lib/shuffle";
+import {
   deserializeFingerprint,
   serializeFingerprint,
   type LyricalFingerprint,
@@ -12,9 +18,20 @@ import {
 
 const MAX_HISTORY = 50;
 
+/** An active self-extending Shuffle Play session — see startShuffle/extendShuffleQueue in lib/shuffle.ts. Null whenever the queue isn't currently DJ-driven (a manual track click, playlist, or direct queue clears it via playTrackList). */
+interface ShuffleSession {
+  /** Eligible (non-do-not) tracks captured when Shuffle Play was pressed. */
+  pool: Track[];
+  /** pool ids not yet handed out this "lap" — refilled by extendShuffleQueue once it runs out. */
+  unplayedIds: string[];
+}
+
 interface PlayerState {
   queue: Track[];
   history: Track[];
+  shuffleSession: ShuffleSession | null;
+  /** The previous shuffle session's opening batch ids — nudges a fresh session's very first pick away from repeating the same start, without hard-excluding it. */
+  recentShuffleOpeningIds: string[];
   currentTrack: Track | null;
   isPlaying: boolean;
   volume: number; // 0-1
@@ -85,6 +102,8 @@ interface PlayerState {
   enqueue: (track: Track) => void;
   removeFromQueue: (trackId: string) => void;
   playTrackList: (tracks: Track[], startIndex: number) => void;
+  /** Starts a true, DJ-driven shuffle session: queues an initial compatibility-aware, non-repeating batch and marks the session active so `next()` keeps extending it as it runs low. See lib/shuffle.ts. */
+  startShuffle: (tracks: Track[]) => void;
   togglePlay: () => void;
   setVolume: (volume: number) => void;
   setAutoDj: (enabled: boolean) => void;
@@ -162,6 +181,8 @@ export const useStore = create<PlayerState>()(
   (set, get) => ({
       queue: [],
       history: [],
+      shuffleSession: null,
+      recentShuffleOpeningIds: [],
       currentTrack: null,
       isPlaying: false,
       volume: 1,
@@ -222,6 +243,23 @@ export const useStore = create<PlayerState>()(
           history: nextHistory,
           isPlaying: true,
           currentTimeSec: 0,
+          // Any direct/manual play (including a plain, non-shuffle queue)
+          // ends a running shuffle session — the single choke point every
+          // manual click path already goes through, so nothing else needs
+          // to know about shuffle mode to correctly leave it.
+          shuffleSession: null,
+        });
+      },
+
+      startShuffle: (tracks) => {
+        const { trackAnalysis, trackLyricalFingerprints, recentShuffleOpeningIds, playTrackList: play } = get();
+        const pool = buildShuffleSessionPool(tracks);
+        const batch = buildInitialShuffleBatch(pool, trackAnalysis, trackLyricalFingerprints, recentShuffleOpeningIds);
+        play(batch, 0);
+        const batchIds = new Set(batch.map((t) => t.id));
+        set({
+          shuffleSession: { pool, unplayedIds: pool.filter((t) => !batchIds.has(t.id)).map((t) => t.id) },
+          recentShuffleOpeningIds: batch.map((t) => t.id),
         });
       },
 
@@ -389,7 +427,7 @@ export const useStore = create<PlayerState>()(
       },
 
       next: () => {
-        const { queue, currentTrack, history } = get();
+        const { queue, currentTrack, history, shuffleSession, trackAnalysis, trackLyricalFingerprints } = get();
         const nextHistory = currentTrack
           ? [...history, currentTrack].slice(-MAX_HISTORY)
           : history;
@@ -399,15 +437,36 @@ export const useStore = create<PlayerState>()(
             isPlaying: false,
             currentTimeSec: 0,
             history: nextHistory,
+            shuffleSession: null,
           });
           return;
         }
         const [nextTrack, ...rest] = queue;
+
+        // Running low on a DJ-driven shuffle queue — extend it now, in the
+        // same tick, so whatever reads queue[0] next never sees it empty.
+        let extendedQueue = rest;
+        let nextSession = shuffleSession;
+        if (shuffleSession && rest.length <= SHUFFLE_EXTEND_THRESHOLD) {
+          const anchor = rest[rest.length - 1] ?? nextTrack;
+          const protectIds = new Set([nextTrack.id, ...rest.map((t) => t.id)]);
+          const { batch, unplayedIds } = extendShuffleQueue(
+            shuffleSession,
+            anchor,
+            protectIds,
+            trackAnalysis,
+            trackLyricalFingerprints
+          );
+          extendedQueue = [...rest, ...batch];
+          nextSession = { ...shuffleSession, unplayedIds };
+        }
+
         set({
           currentTrack: nextTrack,
-          queue: rest,
+          queue: extendedQueue,
           history: nextHistory,
           currentTimeSec: 0,
+          shuffleSession: nextSession,
         });
       },
 
