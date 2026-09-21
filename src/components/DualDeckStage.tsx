@@ -171,6 +171,9 @@ interface DeckNodes {
   // meter-poll effect near the bottom of this file — never a second writer.
   /** Dedicated bass band for EQ Kill's stepped cuts — independent of `filter` so it never conflicts with the highpass/lowpass sweeps that node is reused for. */
   lowShelf: BiquadFilterNode;
+  /** Fixed channel-EQ mid/high bands (Three-Band Sweep) — real gain-only bands, distinct from `filter`'s job as a moving-cutoff sweep control. */
+  eqMid: BiquadFilterNode;
+  eqHigh: BiquadFilterNode;
   filter: BiquadFilterNode;
   gain: GainNode;
   delaySend: GainNode;
@@ -277,6 +280,10 @@ export function DualDeckStage() {
     nodes.filter.type = "allpass";
     nodes.lowShelf.gain.cancelScheduledValues(now);
     nodes.lowShelf.gain.setValueAtTime(0, now);
+    nodes.eqMid.gain.cancelScheduledValues(now);
+    nodes.eqMid.gain.setValueAtTime(0, now);
+    nodes.eqHigh.gain.cancelScheduledValues(now);
+    nodes.eqHigh.gain.setValueAtTime(0, now);
     nodes.delaySend.gain.cancelScheduledValues(now);
     nodes.delaySend.gain.setValueAtTime(0, now);
     // Reverb Wash repurposes this same delay network with different
@@ -473,6 +480,18 @@ export function DualDeckStage() {
         lowShelf.type = "lowshelf";
         lowShelf.frequency.value = 150;
         lowShelf.gain.value = 0;
+        const eqMid = ctx.createBiquadFilter();
+        eqMid.type = "peaking";
+        eqMid.frequency.value = 1000;
+        eqMid.Q.value = 1;
+        eqMid.gain.value = 0;
+        const eqHigh = ctx.createBiquadFilter();
+        // 3000Hz deliberately lines up with eq-kill's own "top" cutoff
+        // (3500Hz) — the same sonic territory this codebase already treats
+        // as "the highs."
+        eqHigh.type = "highshelf";
+        eqHigh.frequency.value = 3000;
+        eqHigh.gain.value = 0;
         const filter = ctx.createBiquadFilter();
         filter.type = "allpass";
         const gain = ctx.createGain();
@@ -487,7 +506,9 @@ export function DualDeckStage() {
         meterAnalyser.fftSize = 256;
 
         source.connect(lowShelf);
-        lowShelf.connect(filter);
+        lowShelf.connect(eqMid);
+        eqMid.connect(eqHigh);
+        eqHigh.connect(filter);
         filter.connect(gain);
         gain.connect(masterGain);
         gain.connect(meterAnalyser); // metering tap only — analyser has no further output
@@ -502,6 +523,8 @@ export function DualDeckStage() {
           source,
           meterAnalyser,
           lowShelf,
+          eqMid,
+          eqHigh,
           filter,
           gain,
           delaySend,
@@ -594,6 +617,38 @@ export function DualDeckStage() {
         fromNodes.delaySend.gain.setValueAtTime(0, now);
         fromNodes.delaySend.gain.linearRampToValueAtTime(0.5, now + plan.windowSec * 0.8);
         fromNodes.delaySend.gain.linearRampToValueAtTime(0, now + plan.windowSec + 1.2);
+      } else if (plan.effect === "channel-eq-work") {
+        // Three-Band Sweep: a real DJ working all three channel-EQ bands
+        // across one handoff, not just one moving cutoff. Highs roll off
+        // early (a continuous ramp — "roll off" implies gradual); mids swap
+        // at the midpoint and bass hands off near the end, both snapped in
+        // eq-kill's own two-step idiom (a DJ's hand flipping a band, not a
+        // fade) rather than ramped.
+        const W = plan.windowSec;
+        fromNodes.eqHigh.gain.cancelScheduledValues(now);
+        fromNodes.eqHigh.gain.setValueAtTime(0, now);
+        fromNodes.eqHigh.gain.linearRampToValueAtTime(-15, now + W * 0.35);
+
+        // Mid swap at the midpoint: the incoming deck starts this effect
+        // with its mids already scooped ("making room"), then both decks'
+        // mids snap to their final state together.
+        toNodes.eqMid.gain.cancelScheduledValues(now);
+        toNodes.eqMid.gain.setValueAtTime(-6, now);
+        fromNodes.eqMid.gain.cancelScheduledValues(now);
+        fromNodes.eqMid.gain.setValueAtTime(0, now + W * 0.5);
+        fromNodes.eqMid.gain.setValueAtTime(-10, now + W * 0.5 + 0.02);
+        toNodes.eqMid.gain.setValueAtTime(-6, now + W * 0.5);
+        toNodes.eqMid.gain.setValueAtTime(0, now + W * 0.5 + 0.02);
+
+        // Bass handoff, snapped, near the end — only one deck's bass plays
+        // at a time for the whole handoff, not just at the snap itself.
+        toNodes.lowShelf.gain.cancelScheduledValues(now);
+        toNodes.lowShelf.gain.setValueAtTime(-30, now);
+        fromNodes.lowShelf.gain.cancelScheduledValues(now);
+        fromNodes.lowShelf.gain.setValueAtTime(0, now + W * 0.85);
+        fromNodes.lowShelf.gain.setValueAtTime(-30, now + W * 0.85 + 0.02);
+        toNodes.lowShelf.gain.setValueAtTime(-30, now + W * 0.85);
+        toNodes.lowShelf.gain.setValueAtTime(0, now + W * 0.85 + 0.02);
       }
       // "brake" and "stutter-gate" are expressed entirely through the main
       // gain curves chosen in startTransition(); "riser" and "tag-sample"

@@ -180,7 +180,8 @@ export type TransitionEffect =
   | "reverb-wash"
   | "tag-sample"
   | "word-play"
-  | "loop-roll";
+  | "loop-roll"
+  | "channel-eq-work";
 
 const TRANSITION_EFFECT_BY_ID: Record<string, TransitionEffect> = {
   "bass-swap": "highpass-sweep",
@@ -197,6 +198,7 @@ const TRANSITION_EFFECT_BY_ID: Record<string, TransitionEffect> = {
   "tag-drop": "tag-sample",
   "word-play-drop": "word-play",
   "beat-repeat-transition": "loop-roll",
+  "three-band-sweep": "channel-eq-work",
 };
 
 /**

@@ -107,6 +107,16 @@ export const transitions: TransitionEntry[] = [
     executable: true,
     exampleDjs: ["Sven Väth", "Paul van Dyk"],
   },
+  {
+    id: "three-band-sweep",
+    name: "Three-Band Sweep",
+    category: "eq-filter",
+    description: "Works the channel EQ across the whole handoff like a real DJ — rolls the outgoing track's highs off early, swaps the mids at the transition's midpoint, then snaps the bass over near the end.",
+    idealBpmDeltaMax: 0.08,
+    idealGenres: ["house", "techno"],
+    executable: true,
+    exampleDjs: ["Sven Väth", "Marco Carola"],
+  },
 
   // Effects-based
   {

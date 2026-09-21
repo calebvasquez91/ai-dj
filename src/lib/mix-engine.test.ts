@@ -489,6 +489,19 @@ describe("planTransition — Beat Repeat", () => {
   });
 });
 
+describe("planTransition — Three-Band Sweep", () => {
+  it("resolves to the channel-eq-work effect when forced, in the existing eq-filter category", () => {
+    const plan = planTransition({
+      current: { track: makeTrack("a", 240), analysis: makeAnalysis({ bpm: 128 }) },
+      next: { track: makeTrack("b", 240), analysis: makeAnalysis({ bpm: 128 }) },
+      forceTransitionId: "three-band-sweep",
+    });
+    expect(plan.transitionId).toBe("three-band-sweep");
+    expect(plan.category).toBe("eq-filter");
+    expect(plan.effect).toBe("channel-eq-work");
+  });
+});
+
 describe("stutterGateCurves", () => {
   it("only ever has one deck audible at a time", () => {
     const { outCurve, inCurve } = stutterGateCurves(32, 8);
