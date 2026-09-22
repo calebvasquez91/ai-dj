@@ -4,6 +4,7 @@ import { useStore } from "@/lib/store";
 import { formatTime, formatRelativeTime, isRecentlyAdded } from "@/lib/format";
 import { useNow } from "@/lib/useNow";
 import { AddToPlaylistButton } from "@/components/AddToPlaylistButton";
+import { SeparateStemsButton } from "@/components/SeparateStemsButton";
 import { TrackThumbnail } from "@/components/TrackThumbnail";
 import type { Track } from "@/types/music";
 
@@ -116,6 +117,7 @@ export function TrackList({
                 🚫
               </button>
               <AddToPlaylistButton track={track} />
+              <SeparateStemsButton track={track} />
               {onRemove && (
                 <button
                   type="button"

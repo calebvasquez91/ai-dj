@@ -81,12 +81,56 @@ model Track {
   hotCueOverridesJson String?
 
   playlistTracks PlaylistTrack[]
+  stemJobs       StemSeparationJob[]
 
   @@index([userId])
   // Prevents re-importing the same YouTube video twice for the same user
   // (storageKey holds the video id for source="youtube" rows); harmless for
   // local/blob rows since their storageKey is already unique by construction.
   @@unique([userId, storageKey])
+}
+
+/**
+ * Real per-track stem separation (vocals/drums/bass/other), run once via
+ * Replicate (hosting Demucs — see src/app/api/tracks/[id]/stems/route.ts)
+ * and cached forever, same "compute once" philosophy as Track's own cached
+ * analysis fields above. A separate model rather than more Track columns
+ * because this has a real job lifecycle, not just a cached scalar — trackId
+ * is deliberately not unique so a failed run can be retried without deleting
+ * history; "current state" for a track is just its most recent row.
+ */
+model StemSeparationJob {
+  id      String @id @default(cuid())
+  trackId String
+  track   Track  @relation(fields: [trackId], references: [id], onDelete: Cascade)
+
+  /** "pending" | "processing" | "ready" | "failed" — enforced in app code, matching Track.source's own convention, not a DB enum. */
+  status String
+
+  /** Replicate's own id for this run — used to poll it. */
+  replicatePredictionId String
+  /** The resolved model version actually used, for debugging/reproducibility — null until Replicate reports it back. */
+  replicateModelVersion String?
+  /** Set when status = "failed". */
+  errorMessage String?
+
+  /** Replicate's own metrics.predict_time (real GPU-seconds) — authoritative, populated once the job resolves. */
+  predictTimeSec Float?
+  /** predictTimeSec * a documented per-second rate constant (see the route) — labeled "estimated": Replicate's API reports compute time, not a dollar figure, directly. */
+  estimatedCostUsd Float?
+
+  // Final URLs in this app's own Blob storage (never Replicate's own,
+  // temporary output URLs) — all null until status = "ready".
+  vocalsUrl String?
+  drumsUrl  String?
+  bassUrl   String?
+  otherUrl  String?
+
+  createdAt   DateTime  @default(now())
+  completedAt DateTime?
+
+  @@index([trackId])
+  @@index([status])
 }
 
 model Playlist {

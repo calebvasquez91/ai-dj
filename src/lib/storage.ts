@@ -12,7 +12,7 @@
 import { mkdir, writeFile, unlink, stat } from "node:fs/promises";
 import { createReadStream } from "node:fs";
 import path from "node:path";
-import { del } from "@vercel/blob";
+import { del, put } from "@vercel/blob";
 
 export type StorageBackend = "local" | "blob";
 
@@ -59,4 +59,20 @@ export function localFileStream(storageKey: string, range?: { start: number; end
 /** Deletes an object from Vercel Blob storage given its public URL. */
 export async function deleteBlobFile(storageKey: string): Promise<void> {
   await del(storageKey);
+}
+
+/**
+ * Uploads a server-generated file (e.g. one of Replicate's stem-separation
+ * outputs, downloaded then re-hosted here so we don't depend on Replicate's
+ * own temporary URLs staying valid) to Vercel Blob and returns its public
+ * URL. This app's first server-side Blob *upload* — every other upload goes
+ * client -> Blob directly (see app/api/tracks/upload-token/route.ts)
+ * because Vercel's server functions cap request bodies at 4.5MB; a single
+ * separated stem can exceed that, so this path only ever handles files this
+ * server itself already has in memory after fetching them from elsewhere,
+ * never a browser upload.
+ */
+export async function uploadBlobFile(pathname: string, data: Buffer, contentType: string): Promise<string> {
+  const blob = await put(pathname, data, { access: "public", contentType });
+  return blob.url;
 }
