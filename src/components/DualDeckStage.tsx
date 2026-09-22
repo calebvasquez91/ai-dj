@@ -34,11 +34,13 @@ import type { LocalTrack, Track } from "@/types/music";
 
 type DeckId = "A" | "B";
 
-/** One-shot synthesized layer (riser or tag-sample stab) that isn't part of the persistent per-deck graph. */
+/** One-shot layer (a synthesized riser/tag-sample stab, or a decoded real audio buffer like a vocal stem) that isn't part of the persistent per-deck graph. */
 interface OverlayNodes {
   source: AudioBufferSourceNode;
   gain: GainNode;
   filter: BiquadFilterNode;
+  /** Only populated for the vocal-layer effect — lets the meter-poll effect report its live level without adding a second read-back mechanism. */
+  analyser?: AnalyserNode;
 }
 
 interface ActiveTransition {
@@ -216,6 +218,7 @@ export function DualDeckStage() {
   const activeDeckRef = useRef<DeckId>("A");
   const analyzingRef = useRef<Set<string>>(new Set());
   const lyricsFetchingRef = useRef<Set<string>>(new Set());
+  const stemCheckingRef = useRef<Set<string>>(new Set());
   const mashupRef = useRef<ActiveMashup | null>(null);
   // True synchronously as soon as a mashup decode kicks off, before mashupRef
   // itself is populated — guards against the tick loop starting a second
@@ -255,6 +258,7 @@ export function DualDeckStage() {
 
   const currentTrack = useStore((s) => s.currentTrack);
   const queue = useStore((s) => s.queue);
+  const stemAvailability = useStore((s) => s.stemAvailability);
   const isPlaying = useStore((s) => s.isPlaying);
   const volume = useStore((s) => s.volume);
   const seekRequest = useStore((s) => s.seekRequest);
@@ -444,6 +448,60 @@ export function DualDeckStage() {
         });
     }
   }, [currentTrack, queue]);
+
+  // Same reachability rule again, for whether a track already has a real,
+  // ready isolated vocal stem (StemSeparationJob, separated via the
+  // library's own "Separate Stems" button — never triggered from here).
+  // Reuses the existing GET /api/tracks/[id]/stems endpoint as-is: a track
+  // with no job at all 404s cheaply (no Replicate call), a resolved job
+  // answers straight from Postgres. Once checked, cached forever — same
+  // "once-ever-per-track" contract as trackAnalysis/trackLyricalFingerprints
+  // above, so a track whose stems finish separating after this cache
+  // already recorded "not ready" won't be picked up until it cycles back
+  // into the queue. Only gates the "vocal-layering" transition's
+  // eligibility (see the excludeTransitionIds merges below) — no other
+  // effect.
+  useEffect(() => {
+    const tracks = currentTrack ? [currentTrack, ...queue] : queue;
+    for (const track of tracks) {
+      if (track.source !== "local") continue; // only local tracks can ever have stems
+      const state = useStore.getState();
+      if (state.stemAvailability[track.id] !== undefined || stemCheckingRef.current.has(track.id)) continue;
+      stemCheckingRef.current.add(track.id);
+      fetch(`/api/tracks/${track.id}/stems`)
+        .then((res) => (res.ok ? res.json() : null))
+        .then((job: { status?: string; vocalsUrl?: string | null } | null) => {
+          useStore.getState().setStemAvailability(track.id, job?.status === "ready" ? (job.vocalsUrl ?? null) : null);
+        })
+        .catch(() => useStore.getState().setStemAvailability(track.id, null))
+        .finally(() => stemCheckingRef.current.delete(track.id));
+    }
+  }, [currentTrack, queue]);
+
+  // Once the immediately-next queued track is known to have a ready vocal
+  // stem, eagerly fetch+decode it into an AudioBuffer — only ever for
+  // queue[0], not the whole queue, since it's the only track that could
+  // actually start a transition soon. Shares mashupBufferCacheRef (keyed by
+  // URL) with the mashup engine's own decodeTrackBuffer, so this never
+  // double-decodes if a later mashup happens to reuse the same URL. Decode
+  // is fire-and-forget: startTransition reads straight from the cache and
+  // simply skips the vocal-layer overlay (falls back to a plain blend) if
+  // this hasn't resolved yet by the time it's needed.
+  useEffect(() => {
+    const nextTrack = queue[0];
+    const url = nextTrack ? stemAvailability[nextTrack.id] : null;
+    const ctx = audioCtxRef.current;
+    if (!url || !ctx || mashupBufferCacheRef.current[url]) return;
+    fetch(url)
+      .then((res) => res.arrayBuffer())
+      .then((arrayBuffer) => ctx.decodeAudioData(arrayBuffer))
+      .then((buffer) => {
+        mashupBufferCacheRef.current[url] = buffer;
+      })
+      .catch(() => {
+        // Left uncached — startTransition's cache read just comes up empty and skips the overlay.
+      });
+  }, [queue, stemAvailability]);
 
   // Build the Web Audio graph once per <audio> element pair, ever. Each
   // deck: <audio> -> MediaElementSource -> BiquadFilter (neutral "allpass"
@@ -774,6 +832,36 @@ export function DualDeckStage() {
       return { source, filter, gain };
     }
 
+    /** Plays a real, already-decoded isolated vocal stem over the outgoing track for the "vocal-layering" transition's window — a genuine audio layer, not a synthesized stand-in like the three helpers above. Fully faded out (and self-stopped) before the window ends, so it never overlaps the real incoming track's own vocals once the handoff completes. entryOffsetSec is the same offset the real incoming <audio> element is seeked to (plan.incomingEntryOffsetSec) — same file's timeline, so this is phase-exact rather than a beat-grid approximation. */
+    function startVocalLayer(ctx: AudioContext, windowSec: number, buffer: AudioBuffer, entryOffsetSec: number): OverlayNodes | null {
+      const masterGain = masterGainRef.current;
+      if (!masterGain) return null;
+      const source = ctx.createBufferSource();
+      source.buffer = buffer;
+      const filter = ctx.createBiquadFilter();
+      filter.type = "highpass";
+      filter.frequency.value = 120; // gentle declutter of any low-end bleed in the isolated stem — headroom for the outgoing track's own bass, not a real EQ move
+      const gain = ctx.createGain();
+      const analyser = ctx.createAnalyser();
+
+      source.connect(filter);
+      filter.connect(gain);
+      gain.connect(masterGain);
+      gain.connect(analyser);
+
+      const now = ctx.currentTime;
+      gain.gain.setValueAtTime(0.0001, now);
+      gain.gain.exponentialRampToValueAtTime(0.8, now + windowSec * 0.15);
+      gain.gain.setValueAtTime(0.8, now + windowSec * 0.75);
+      gain.gain.exponentialRampToValueAtTime(0.0001, now + windowSec); // fully faded before the real incoming track's own vocals take over at handoff — never double-voiced
+
+      const safeOffset = Math.max(0, Math.min(entryOffsetSec, Math.max(0, buffer.duration - 0.05)));
+      source.start(now, safeOffset);
+      source.stop(now + windowSec + 0.05);
+
+      return { source, filter, gain, analyser };
+    }
+
     function startTransition(nextTrack: LocalTrack, plan: TransitionPlan) {
       if (transitionRef.current) return;
       const ctx = audioCtxRef.current;
@@ -831,7 +919,16 @@ export function DualDeckStage() {
             ? startTagSampleStab(ctx, plan.windowSec)
             : plan.effect === "scratch-chirp"
               ? startScratchChirpLayer(ctx, plan.windowSec)
-              : null;
+              : plan.effect === "vocal-layer"
+                ? (() => {
+                    const url = useStore.getState().stemAvailability[nextTrack.id];
+                    const buf = url ? mashupBufferCacheRef.current[url] : null;
+                    // Not decoded yet (or stems weren't actually ready) —
+                    // graceful degradation: the transition still plays out
+                    // as the plain equal-power blend already scheduled above.
+                    return buf ? startVocalLayer(ctx, plan.windowSec, buf, plan.incomingEntryOffsetSec) : null;
+                  })()
+                : null;
       if (plan.effect === "word-play") {
         // Fire-and-forget: SpeechSynthesis doesn't route through this
         // component's Web Audio graph, so it can't be volume-matched or
@@ -1711,7 +1808,9 @@ export function DualDeckStage() {
         djMode: state.djMode,
         recentTransitionIds: recentTransitionIdsRef.current,
         forceTransitionId: state.forcedTransitionId,
-        excludeTransitionIds: state.rerolledTransitionIds,
+        excludeTransitionIds: state.stemAvailability[nextTrack.id]
+          ? state.rerolledTransitionIds
+          : [...state.rerolledTransitionIds, "vocal-layering"],
         varietyBias: state.djVarietyBias,
         categoryWeights: useDjWeights.getState().categoryWeights,
       });
@@ -1844,7 +1943,9 @@ export function DualDeckStage() {
         djMode: state.djMode,
         recentTransitionIds: recentTransitionIdsRef.current,
         forceTransitionId: state.forcedTransitionId,
-        excludeTransitionIds: state.rerolledTransitionIds,
+        excludeTransitionIds: state.stemAvailability[nextTrack.id]
+          ? state.rerolledTransitionIds
+          : [...state.rerolledTransitionIds, "vocal-layering"],
         varietyBias: state.djVarietyBias,
         categoryWeights: useDjWeights.getState().categoryWeights,
       });
@@ -2044,6 +2145,18 @@ export function DualDeckStage() {
         store.setCrossfaderPosition(a + b > 0 ? Math.min(1, Math.max(0, b / (a + b))) : 0.5);
       } else {
         store.setCrossfaderPosition(activeDeckRef.current === "A" ? 0 : 1);
+      }
+
+      // "vocal-layering"'s one-shot overlay voice, when active — same RMS
+      // treatment as the per-deck meters above, off its own analyser tap.
+      const overlay = transitionRef.current?.overlayNodes;
+      if (transitionRef.current?.effect === "vocal-layer" && overlay?.analyser) {
+        overlay.analyser.getFloatTimeDomainData(meterBuffer);
+        let sumSquares = 0;
+        for (let i = 0; i < meterBuffer.length; i++) sumSquares += meterBuffer[i] * meterBuffer[i];
+        store.setVocalLayerVoiceLevel(Math.min(1, Math.sqrt(sumSquares / meterBuffer.length) * 2.5));
+      } else {
+        store.setVocalLayerVoiceLevel(0);
       }
     }, POLL_MS);
     return () => clearInterval(intervalId);

@@ -49,6 +49,8 @@ interface PlayerState {
   trackAnalysis: Record<string, TrackAnalysis>;
   /** Cached lyrical/thematic fingerprint per track id — present (even if empty) once looked up, absent if never attempted. Never the lyrics text itself, see lib/lyrics.ts. */
   trackLyricalFingerprints: Record<string, LyricalFingerprint>;
+  /** Cached "does this track have a ready, real isolated vocal stem" check per track id (from StemSeparationJob, via the existing GET /api/tracks/[id]/stems) — absent if never checked, null if checked and not ready, a string (the vocalsUrl) once ready. Checked once per track, never invalidated, same convention as trackLyricalFingerprints. Used only to gate the "vocal-layering" transition's eligibility — never triggers separation itself. */
+  stemAvailability: Record<string, string | null>;
   analyzingTrackIds: Set<string>;
   styleGenreHint: string | null;
   djMode: DjSetMode;
@@ -85,6 +87,8 @@ interface PlayerState {
   crossfaderPosition: number;
   /** Live 0-1 level per deck, written ~20x/sec by DualDeckStage from a real AnalyserNode tap — read-only from the UI's side, for the channel-strip meters. */
   deckMeterLevel: Record<DeckId, number>;
+  /** Live 0-1 level of the "vocal-layering" transition's one-shot overlay voice, from a real AnalyserNode tap — 0 whenever that effect isn't currently active. Read-only, same convention as deckMeterLevel. */
+  vocalLayerVoiceLevel: number;
   /** Jog-wheel rotation per deck, degrees (0-360, wraps) — accumulated from that deck's real <audio> element's playbackRate each tick, frozen while paused. Speeds up/slows down for real during brake and spin-up transitions since it's driven by the actual element, not a fixed animation. */
   deckJogAngle: Record<DeckId, number>;
 
@@ -162,6 +166,8 @@ interface PlayerState {
   setCrossfaderPosition: (pos: number) => void;
   setDeckMeterLevel: (deckId: DeckId, level: number) => void;
   setDeckJogAngle: (deckId: DeckId, angle: number) => void;
+  setVocalLayerVoiceLevel: (level: number) => void;
+  setStemAvailability: (trackId: string, vocalsUrl: string | null) => void;
 
   loadPlaylists: () => Promise<void>;
   createPlaylist: () => Promise<string>;
@@ -197,6 +203,7 @@ export const useStore = create<PlayerState>()(
       deckViewOpen: false,
       nowPlayingExpanded: false,
       trackAnalysis: {},
+      stemAvailability: {},
       trackLyricalFingerprints: {},
       analyzingTrackIds: new Set<string>(),
       styleGenreHint: null,
@@ -216,6 +223,7 @@ export const useStore = create<PlayerState>()(
       deckFilterPos: { A: 0, B: 0 },
       crossfaderPosition: 0.5,
       deckMeterLevel: { A: 0, B: 0 },
+      vocalLayerVoiceLevel: 0,
       deckJogAngle: { A: 0, B: 0 },
 
       playlists: [],
@@ -403,6 +411,9 @@ export const useStore = create<PlayerState>()(
       setCrossfaderPosition: (pos) => set({ crossfaderPosition: pos }),
       setDeckMeterLevel: (deckId, level) =>
         set((s) => ({ deckMeterLevel: { ...s.deckMeterLevel, [deckId]: level } })),
+      setVocalLayerVoiceLevel: (level) => set({ vocalLayerVoiceLevel: level }),
+      setStemAvailability: (trackId, vocalsUrl) =>
+        set((s) => ({ stemAvailability: { ...s.stemAvailability, [trackId]: vocalsUrl } })),
       setDeckJogAngle: (deckId, angle) =>
         set((s) => ({ deckJogAngle: { ...s.deckJogAngle, [deckId]: angle } })),
 

@@ -14,6 +14,7 @@ import { Crossfader } from "@/components/Crossfader";
 export function Mixer() {
   const open = useStore((s) => s.mixerPanelOpen);
   const toggle = useStore((s) => s.toggleMixerPanel);
+  const vocalLayerVoiceLevel = useStore((s) => s.vocalLayerVoiceLevel);
 
   if (!open) return null;
 
@@ -41,6 +42,17 @@ export function Mixer() {
           <ChannelStrip deckId="B" />
         </div>
         <Crossfader />
+        {vocalLayerVoiceLevel > 0 && (
+          <div className="flex items-center gap-2 text-xs text-muted">
+            <span>🎤 Vocals</span>
+            <div className="flex-1 h-1.5 rounded-full bg-surface-hover overflow-hidden">
+              <div
+                className="h-full bg-accent-purple transition-[width] duration-75"
+                style={{ width: `${Math.round(vocalLayerVoiceLevel * 100)}%` }}
+              />
+            </div>
+          </div>
+        )}
       </div>
     </>
   );

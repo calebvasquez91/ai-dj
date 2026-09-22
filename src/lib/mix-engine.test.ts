@@ -502,6 +502,19 @@ describe("planTransition — Three-Band Sweep", () => {
   });
 });
 
+describe("planTransition — Vocal Layering", () => {
+  it("resolves to the vocal-layer effect when forced, and is executable", () => {
+    const plan = planTransition({
+      current: { track: makeTrack("a", 240), analysis: makeAnalysis({ bpm: 128 }) },
+      next: { track: makeTrack("b", 240), analysis: makeAnalysis({ bpm: 128 }) },
+      forceTransitionId: "vocal-layering",
+    });
+    expect(plan.transitionId).toBe("vocal-layering");
+    expect(plan.category).toBe("vocal");
+    expect(plan.effect).toBe("vocal-layer");
+  });
+});
+
 describe("stutterGateCurves", () => {
   it("only ever has one deck audible at a time", () => {
     const { outCurve, inCurve } = stutterGateCurves(32, 8);
@@ -665,7 +678,7 @@ describe("chooseTransition — manual override (forceTransitionId)", () => {
       tempoSync: true,
       genreHint: null,
       personaDjNames: [],
-      forceTransitionId: "vocal-layering", // data-only, executable: false
+      forceTransitionId: "acapella-mashup", // data-only, executable: false
     });
     expect(forcedBogus.id).toBe(normal.id);
     expect(forcedNonExecutable.id).toBe(normal.id);

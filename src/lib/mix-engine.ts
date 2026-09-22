@@ -135,6 +135,10 @@ function windowBeatsForTransition(t: TransitionEntry, tempoSync: boolean, bpmDel
       // BEAT_REPEAT_REPEATS in DualDeckStage.tsx (0.25 * 4 * 8), so the
       // stutter always fills its window regardless of tempo.
       return 8;
+    case "vocal":
+      // Doubled vs. the 8-beat default — a layered vocal needs enough
+      // runway to actually register as a musical gesture, not a blip.
+      return 16;
     default:
       return 8;
   }
@@ -181,7 +185,8 @@ export type TransitionEffect =
   | "tag-sample"
   | "word-play"
   | "loop-roll"
-  | "channel-eq-work";
+  | "channel-eq-work"
+  | "vocal-layer";
 
 const TRANSITION_EFFECT_BY_ID: Record<string, TransitionEffect> = {
   "bass-swap": "highpass-sweep",
@@ -199,6 +204,7 @@ const TRANSITION_EFFECT_BY_ID: Record<string, TransitionEffect> = {
   "word-play-drop": "word-play",
   "beat-repeat-transition": "loop-roll",
   "three-band-sweep": "channel-eq-work",
+  "vocal-layering": "vocal-layer",
 };
 
 /**

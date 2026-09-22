@@ -195,18 +195,20 @@ export const transitions: TransitionEntry[] = [
     exampleDjs: ["Grandmaster Flash", "Kool Herc"],
   },
 
-  // Vocal / layering-based (data/persona only — not executed: isolating a
-  // clean vocal or instrumental stem from an arbitrary track needs a
-  // source-separation model, which is out of scope for this app's
-  // client-side audio stack).
+  // Vocal / layering-based. vocal-layering is real and executable — it
+  // plays the incoming track's actual isolated vocal stem (via Replicate,
+  // see StemSeparationJob) over the outgoing track, opportunistically, only
+  // when that stem has already been separated (never auto-triggered by
+  // playback). acapella-mashup needs isolated stems from *two* different
+  // tracks at once — out of scope for now, data/persona only.
   {
     id: "vocal-layering",
     name: "Vocal Layering",
     category: "vocal",
-    description: "Layers the incoming track's vocal or acapella over the outgoing track's instrumental before the full switch. Needs an isolated vocal stem, which this app can't extract on its own — data/persona only.",
+    description: "Layers the incoming track's real isolated vocal stem over the outgoing track before the full switch. Only available once that track's stems have been separated (via the library's Separate Stems button).",
     idealBpmDeltaMax: 0.05,
     idealGenres: ["house"],
-    executable: false,
+    executable: true,
     exampleDjs: ["The Blessed Madonna", "Honey Dijon"],
   },
   {
