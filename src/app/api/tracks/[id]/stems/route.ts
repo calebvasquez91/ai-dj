@@ -128,7 +128,13 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
   if (!track) return new NextResponse(null, { status: 404 });
 
   const job = await latestJob(id);
-  if (!job) return new NextResponse(null, { status: 404 });
+  // "No job yet" is the normal state for most tracks (nobody's run Separate
+  // Stems on them) — a 200 with a null body, not a 404, since this is now
+  // polled automatically in the background for every queued track
+  // (DualDeckStage's vocal-layering eligibility check), not just fetched
+  // once by a manual button click. A 404 here would mean every un-separated
+  // track spams the console every session.
+  if (!job) return NextResponse.json(null);
 
   // Already resolved — no need to ask Replicate again.
   if (job.status === "ready" || job.status === "failed") {
