@@ -65,7 +65,10 @@ export const AI_CANDIDATE_CAP = 60;
 const SYSTEM_PROMPT =
   "You are an AI DJ. Given the current track and the remaining unplayed tracks, choose the single best next track for a seamless mix. Consider BPM compatibility (prefer within 6 BPM or exact double/half), key compatibility (same key, relative major/minor, or adjacent on the circle of fifths), energy arc (build, sustain, or release depending on DJ board energy setting), and the active mix mode. Return only a JSON object: { trackId: string, transitionNote: string, recommendedCrossfadeSeconds: number }";
 
-const MODEL = "claude-sonnet-4-20250514";
+// The originally-specified "claude-sonnet-4-20250514" 404s on the current
+// Anthropic API (confirmed in production logs — not_found_error) — that
+// model id no longer exists. claude-sonnet-5 is the current Sonnet model.
+const MODEL = "claude-sonnet-5";
 const ANTHROPIC_TIMEOUT_MS = 8000;
 const DEFAULT_FALLBACK_CROSSFADE_SEC = 8;
 
