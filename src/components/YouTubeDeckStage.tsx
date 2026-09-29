@@ -14,6 +14,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useStore } from "@/lib/store";
 import { equalPowerGains } from "@/lib/mix-engine";
 import { lookupYoutubeBpm } from "@/lib/youtubeBpm";
+import { estimateStructuralCues } from "@/lib/structural-estimate";
 import type { YouTubeTrack } from "@/types/music";
 
 type DeckId = "A" | "B";
@@ -26,7 +27,8 @@ interface YTPlayer {
   getCurrentTime: () => number;
   getDuration: () => number;
   cueVideoById: (videoId: string) => void;
-  loadVideoById: (videoId: string) => void;
+  /** startSeconds, when passed, is honored as the actual load-in point — unlike a separate seekTo() called right after loadVideoById(), which races the async load and reliably gets overridden back to 0. */
+  loadVideoById: (videoId: string, startSeconds?: number) => void;
   destroy: () => void;
 }
 
@@ -83,6 +85,24 @@ const YT_CROSSFADE_SEC = 6;
 /** Shorter fixed window for the manual "Mix Now" button. */
 const YT_MIX_NOW_SEC = 3;
 const TICK_MS = 100;
+/** Never seek an incoming track's drop-entry point so late that less than this much of it is left to actually play. */
+const MIN_REMAINING_AFTER_DROP_ENTRY_SEC = 20;
+
+/**
+ * Where to start the incoming track in a YouTube -> YouTube crossfade —
+ * lands on structural-estimate.ts's guessed drop instead of always the cold
+ * open, the same "arrive at the hype" idea as DualDeckStage's real
+ * dropAtSec-targeted transitions, just driven by a duration-based guess
+ * since there's no real per-sample analysis to target here. Clamped so a
+ * short track (or one whose estimated drop lands too close to its own end)
+ * still gets a sensible amount of runway rather than seeking into its tail.
+ */
+function computeDropEntrySec(durationSec: number): number {
+  if (durationSec <= 0) return 0;
+  const { estimatedDropAtSec } = estimateStructuralCues(durationSec);
+  const latestSensibleEntrySec = Math.max(0, durationSec - MIN_REMAINING_AFTER_DROP_ENTRY_SEC);
+  return Math.min(estimatedDropAtSec, latestSensibleEntrySec);
+}
 
 interface ActiveFade {
   fromDeckId: DeckId;
@@ -97,7 +117,10 @@ export function YouTubeDeckStage() {
   const containerBRef = useRef<HTMLDivElement>(null);
   const playersRef = useRef<Record<DeckId, YTPlayer | null>>({ A: null, B: null });
   const playersReadyRef = useRef<Record<DeckId, boolean>>({ A: false, B: false });
-  const pendingLoadRef = useRef<Record<DeckId, { videoId: string; play: boolean } | null>>({ A: null, B: null });
+  const pendingLoadRef = useRef<Record<DeckId, { videoId: string; play: boolean; startSeconds?: number } | null>>({
+    A: null,
+    B: null,
+  });
   const loadedVideoId = useRef<Record<DeckId, string | null>>({ A: null, B: null });
   const activeDeckRef = useRef<DeckId>("A");
   const attemptedBpmLookupRef = useRef<Set<string>>(new Set());
@@ -145,14 +168,14 @@ export function YouTubeDeckStage() {
     []
   );
 
-  const applyLoad = useCallback((id: DeckId, videoId: string, play: boolean) => {
+  const applyLoad = useCallback((id: DeckId, videoId: string, play: boolean, startSeconds?: number) => {
     const player = playersRef.current[id];
     if (!player || !playersReadyRef.current[id]) {
-      pendingLoadRef.current[id] = { videoId, play };
+      pendingLoadRef.current[id] = { videoId, play, startSeconds };
       return;
     }
     loadedVideoId.current[id] = videoId;
-    if (play) player.loadVideoById(videoId);
+    if (play) player.loadVideoById(videoId, startSeconds);
     else player.cueVideoById(videoId);
   }, []);
 
@@ -186,7 +209,7 @@ export function YouTubeDeckStage() {
             const pending = pendingLoadRef.current[id];
             if (pending) {
               pendingLoadRef.current[id] = null;
-              applyLoad(id, pending.videoId, pending.play);
+              applyLoad(id, pending.videoId, pending.play, pending.startSeconds);
             }
           },
           onStateChange: (e) => {
@@ -256,7 +279,11 @@ export function YouTubeDeckStage() {
       const fromDeckId = activeDeckRef.current;
       if (toDeckId && nextTrack) {
         loadedVideoId.current[toDeckId] = nextTrack.youtubeVideoId;
-        applyLoad(toDeckId, nextTrack.youtubeVideoId, true);
+        // The drop-entry point must go through loadVideoById's own
+        // startSeconds argument, not a separate seekTo() call right after —
+        // seekTo() called before the async load actually completes races it
+        // and reliably gets silently overridden back to 0.
+        applyLoad(toDeckId, nextTrack.youtubeVideoId, true, computeDropEntrySec(nextTrack.durationSec));
         getPlayer(toDeckId)?.setVolume(0);
       }
       fadeRef.current = { fromDeckId, toDeckId, startTime: performance.now(), durationMs: durationSec * 1000 };
