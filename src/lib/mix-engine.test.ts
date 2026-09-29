@@ -278,6 +278,22 @@ describe("planTransition — Double Drop", () => {
     expect(plan.incomingEntryOffsetSec).toBeGreaterThan(expectedEntry - 1);
     expect(plan.incomingEntryOffsetSec).toBeLessThanOrEqual(expectedEntry + 1);
   });
+
+  it("targets a structurally-estimated drop when the incoming track has no real drop detection at all (e.g. a YouTube track)", () => {
+    const plan = planTransition({
+      current: { track: makeTrack("a", 240), analysis: makeAnalysis({ bpm: 140 }) },
+      next: {
+        track: makeTrack("b", 200), // no dropAtSec, no buildDropPairs, waveformPeaks: [] (makeAnalysis default)
+        analysis: makeAnalysis({ bpm: 140, beatGridOffsetSec: 0 }),
+      },
+      genreHint: "dubstep",
+    });
+    expect(plan.category).toBe("drop");
+    const estimatedDrop = 200 * 0.3; // structural-estimate.ts's ESTIMATED_DROP_FRACTION
+    const expectedEntry = estimatedDrop - plan.windowSec;
+    expect(plan.incomingEntryOffsetSec).toBeGreaterThan(expectedEntry - 1);
+    expect(plan.incomingEntryOffsetSec).toBeLessThanOrEqual(expectedEntry + 1);
+  });
 });
 
 describe("planTransition — Drop Swap (Hot Cue-aware Double Drop)", () => {

@@ -184,4 +184,56 @@ describe("shouldTriggerAmbience", () => {
     });
     expect(cue).toBeNull();
   });
+
+  describe("structural-guess fallback (no waveform data, e.g. a YouTube track)", () => {
+    it("fires a build cue approaching the estimated drop (30% into the track)", () => {
+      vi.spyOn(Math, "random").mockReturnValue(0.1); // riser branch
+      const analysis = makeAnalysis([]); // no real waveform data
+      const cue = shouldTriggerAmbience({
+        analysis,
+        durationSec: DURATION_SEC, // estimated drop at 30s
+        currentTimeSec: 15, // within the 20s lookahead
+        lastTriggeredSec: null,
+        frequency: "occasional",
+      });
+      expect(cue).toEqual({ effect: "riser", windowSec: 6 });
+    });
+
+    it("does not fire a build cue far before the estimated drop", () => {
+      const analysis = makeAnalysis([]);
+      const cue = shouldTriggerAmbience({
+        analysis,
+        durationSec: DURATION_SEC,
+        currentTimeSec: 5, // 25s before the estimated 30s drop, outside the 20s lookahead
+        lastTriggeredSec: null,
+        frequency: "occasional",
+      });
+      expect(cue).toBeNull();
+    });
+
+    it("fires a breakdown cue at the estimated breakdown (65% into the track)", () => {
+      vi.spyOn(Math, "random").mockReturnValue(0.1); // echo-tail branch
+      const analysis = makeAnalysis([]);
+      const cue = shouldTriggerAmbience({
+        analysis,
+        durationSec: DURATION_SEC, // estimated breakdown at 65s
+        currentTimeSec: 67,
+        lastTriggeredSec: null,
+        frequency: "occasional",
+      });
+      expect(cue).toEqual({ effect: "echo-tail", windowSec: 3 });
+    });
+
+    it("returns null well after the estimated breakdown window has passed", () => {
+      const analysis = makeAnalysis([]);
+      const cue = shouldTriggerAmbience({
+        analysis,
+        durationSec: DURATION_SEC,
+        currentTimeSec: 90,
+        lastTriggeredSec: null,
+        frequency: "occasional",
+      });
+      expect(cue).toBeNull();
+    });
+  });
 });

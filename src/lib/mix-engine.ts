@@ -4,6 +4,7 @@ import { transitions, type TransitionCategory, type TransitionEntry } from "@/da
 import type { TrackAnalysis } from "@/lib/audio-analysis";
 import { resolveHotCues, upcomingDropCueAtSec } from "@/lib/hot-cues";
 import { snapToBeatGrid } from "@/lib/beat-grid";
+import { estimateStructuralCues } from "@/lib/structural-estimate";
 
 export { snapToBeatGrid } from "@/lib/beat-grid";
 
@@ -829,7 +830,16 @@ export function planTransition({
   // computed above) over the single best-effort dropAtSec whenever one's
   // actually placed — same target either way whichever "drop"-category
   // entry scoring picked, cue-aware or not.
-  const dropTargetSec = nextCueDropAtSec ?? next.analysis.dropAtSec;
+  // When there's no real drop detection at all (no waveform data — e.g. a
+  // YouTube track, see structural-estimate.ts), fall back to a structural
+  // guess instead of leaving a "drop"-category transition targeting
+  // nothing (which would otherwise just land at t=0, the very start of the
+  // track).
+  const estimatedDropTargetSec =
+    next.analysis.waveformPeaks.length === 0 && next.track.durationSec > 0
+      ? estimateStructuralCues(next.track.durationSec).estimatedDropAtSec
+      : null;
+  const dropTargetSec = nextCueDropAtSec ?? next.analysis.dropAtSec ?? estimatedDropTargetSec;
   const rawEntryOffsetSec =
     transition.category === "drop" && dropTargetSec != null
       ? Math.max(0, dropTargetSec - windowSec)

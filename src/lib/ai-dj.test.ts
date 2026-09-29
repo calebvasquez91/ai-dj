@@ -18,6 +18,7 @@ const candidate = (id: string, bpm: number | null): AiNextTrackCandidate => ({
   bpm,
   camelotKey: null,
   energy: null,
+  hasRealAnalysis: true,
 });
 
 function anthropicResponse(text: string) {

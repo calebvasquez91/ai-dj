@@ -55,6 +55,17 @@ function energyScore(a: TrackAnalysis, b: TrackAnalysis): number {
   return 1 - Math.min(1, Math.abs(ea - eb) / Math.max(ea, eb));
 }
 
+/**
+ * Small nudge toward candidates with real per-track analysis (local
+ * uploads) over ones that never get it (YouTube imports — no raw audio
+ * buffer access, see types/music.ts's YouTubeTrack) — their bpm/key/energy
+ * inputs above are either real or a best-effort/estimated stand-in, so this
+ * only breaks an otherwise-close tie rather than overriding a real
+ * compatibility difference (WEIGHTS above sum to 1; this is a fraction of
+ * the smallest of them).
+ */
+const LOCAL_ANALYSIS_BONUS = 0.05;
+
 /** 0-1: how well `candidate` follows `current` — tempo/key closeness, similar energy (avoids a jarring energy whiplash), and lyrical/thematic overlap when both sides have a fingerprint. */
 export function scoreCompatibility(current: SequencingCandidate, candidate: SequencingCandidate): number {
   if (!current.analysis || !candidate.analysis) return 0;
@@ -62,12 +73,12 @@ export function scoreCompatibility(current: SequencingCandidate, candidate: Sequ
     current.lyricalFingerprint && candidate.lyricalFingerprint
       ? lyricalSimilarity(current.lyricalFingerprint, candidate.lyricalFingerprint)
       : 0;
-  return (
+  const base =
     WEIGHTS.tempo * tempoScore(current.analysis, candidate.analysis) +
     WEIGHTS.key * keyScore(current.analysis, candidate.analysis) +
     WEIGHTS.energy * energyScore(current.analysis, candidate.analysis) +
-    WEIGHTS.lyrical * lyrical
-  );
+    WEIGHTS.lyrical * lyrical;
+  return candidate.track.source === "local" ? base + LOCAL_ANALYSIS_BONUS : base;
 }
 
 /**

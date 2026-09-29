@@ -11,6 +11,7 @@
  */
 
 import type { TrackAnalysis } from "@/lib/audio-analysis";
+import { estimateStructuralCues } from "@/lib/structural-estimate";
 
 export type AmbienceFrequency = "off" | "occasional" | "frequent";
 
@@ -103,7 +104,14 @@ function peakWindowAverage(peaks: number[], durationSec: number, fromSec: number
 
 function detectBuild(analysis: TrackAnalysis, durationSec: number, currentTimeSec: number): boolean {
   const { waveformPeaks, dropAtSec } = analysis;
-  if (waveformPeaks.length === 0) return false;
+  if (waveformPeaks.length === 0) {
+    // No real energy envelope to read a rise from (no per-sample analysis
+    // at all, e.g. a YouTube track) — fall back to a structural guess of
+    // where a drop typically lands, purely from elapsed time.
+    if (durationSec <= 0) return false;
+    const timeToDrop = estimateStructuralCues(durationSec).estimatedDropAtSec - currentTimeSec;
+    return timeToDrop > 0 && timeToDrop <= BUILD_LOOKAHEAD_SEC;
+  }
   // A detected drop at or before t=0 (the loudest moment in the track being
   // its very intro, e.g. a cold-open hit) isn't a meaningful lookahead
   // target — treat it the same as "no drop known" rather than letting it
@@ -125,7 +133,12 @@ function detectBuild(analysis: TrackAnalysis, durationSec: number, currentTimeSe
 
 function detectBreakdown(analysis: TrackAnalysis, durationSec: number, currentTimeSec: number): boolean {
   const { waveformPeaks, breakdownAtSec } = analysis;
-  if (waveformPeaks.length === 0) return false;
+  if (waveformPeaks.length === 0) {
+    // Same structural-guess fallback as detectBuild above.
+    if (durationSec <= 0) return false;
+    const estimated = estimateStructuralCues(durationSec).estimatedBreakdownAtSec;
+    return currentTimeSec >= estimated && currentTimeSec < estimated + BREAKDOWN_WINDOW_SEC;
+  }
   if (breakdownAtSec != null) {
     return currentTimeSec >= breakdownAtSec && currentTimeSec < breakdownAtSec + BREAKDOWN_WINDOW_SEC;
   }

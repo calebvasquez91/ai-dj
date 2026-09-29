@@ -89,6 +89,17 @@ describe("scoreCompatibility", () => {
     const unanalyzed = candidate("b", null);
     expect(scoreCompatibility(a, unanalyzed)).toBe(0);
   });
+
+  it("scores an equally-compatible local candidate higher than a YouTube one (real analysis is more trustworthy)", () => {
+    const a = candidate("a", makeAnalysis());
+    const localCandidate = candidate("local", makeAnalysis());
+    const youtubeCandidate: SequencingCandidate = {
+      track: { id: "yt", title: "yt", artist: "Test Artist", durationSec: 200, addedAt: 0, source: "youtube", youtubeVideoId: "abc123" },
+      analysis: makeAnalysis(),
+      lyricalFingerprint: undefined,
+    };
+    expect(scoreCompatibility(a, localCandidate)).toBeGreaterThan(scoreCompatibility(a, youtubeCandidate));
+  });
 });
 
 describe("buildCompatibleOrder", () => {

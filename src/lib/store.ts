@@ -363,6 +363,7 @@ export const useStore = create<PlayerState>()(
             bpm: analysis?.bpm ?? (t.source === "local" ? t.bpm ?? null : null),
             camelotKey: analysis?.camelotKey ?? null,
             energy: analysis ? meanEnergy(analysis.waveformPeaks) : null,
+            hasRealAnalysis: analysis != null && !analysis.fallback,
           };
         };
 
