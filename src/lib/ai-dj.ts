@@ -156,11 +156,17 @@ export async function pickNextTrackWithAI(
       }),
       signal: AbortSignal.timeout(ANTHROPIC_TIMEOUT_MS),
     });
-    if (!res.ok) return pickByBpmProximity(current, candidates);
+    if (!res.ok) {
+      console.warn(`[ai-dj] Anthropic API returned ${res.status}: ${await res.text().catch(() => "")}`);
+      return pickByBpmProximity(current, candidates);
+    }
 
     const data = (await res.json()) as { content?: { type: string; text?: string }[] };
     const text = data.content?.find((block) => block.type === "text")?.text;
-    if (!text) return pickByBpmProximity(current, candidates);
+    if (!text) {
+      console.warn("[ai-dj] Anthropic response had no text content block", JSON.stringify(data));
+      return pickByBpmProximity(current, candidates);
+    }
 
     const parsed = extractJsonObject(text) as {
       trackId?: unknown;
@@ -168,7 +174,10 @@ export async function pickNextTrackWithAI(
       recommendedCrossfadeSeconds?: unknown;
     };
     const trackId = typeof parsed.trackId === "string" ? parsed.trackId : null;
-    if (!trackId || !candidates.some((c) => c.id === trackId)) return pickByBpmProximity(current, candidates);
+    if (!trackId || !candidates.some((c) => c.id === trackId)) {
+      console.warn(`[ai-dj] Claude picked an unusable trackId: ${JSON.stringify(parsed)}`);
+      return pickByBpmProximity(current, candidates);
+    }
 
     return {
       trackId,
@@ -179,7 +188,8 @@ export async function pickNextTrackWithAI(
           : DEFAULT_FALLBACK_CROSSFADE_SEC,
       usedFallback: false,
     };
-  } catch {
+  } catch (err) {
+    console.warn("[ai-dj] Anthropic call failed, falling back to BPM proximity:", err);
     return pickByBpmProximity(current, candidates);
   }
 }
