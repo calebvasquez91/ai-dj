@@ -262,6 +262,7 @@ export function DualDeckStage() {
   const analyzingRef = useRef<Set<string>>(new Set());
   const lyricsFetchingRef = useRef<Set<string>>(new Set());
   const stemCheckingRef = useRef<Set<string>>(new Set());
+  const aiPickRequestedForRef = useRef<string | null>(null);
   const mashupRef = useRef<ActiveMashup | null>(null);
   // True synchronously as soon as a mashup decode kicks off, before mashupRef
   // itself is populated — guards against the tick loop starting a second
@@ -307,6 +308,7 @@ export function DualDeckStage() {
 
   const currentTrack = useStore((s) => s.currentTrack);
   const queue = useStore((s) => s.queue);
+  const shuffleSession = useStore((s) => s.shuffleSession);
   const stemAvailability = useStore((s) => s.stemAvailability);
   const isPlaying = useStore((s) => s.isPlaying);
   const volume = useStore((s) => s.volume);
@@ -565,6 +567,20 @@ export function DualDeckStage() {
         .finally(() => stemCheckingRef.current.delete(track.id));
     }
   }, [currentTrack, queue]);
+
+  // AI DJ next-track pick (lib/ai-dj.ts via store.ts's requestAiNextPick):
+  // once per new currentTrack, while a shuffle session is active, ask
+  // Claude to reorder the front of the queue. Guarded by a ref (not just
+  // the dependency array) so a re-render that doesn't actually change
+  // currentTrack.id — e.g. shuffleSession's object identity changing from
+  // an unrelated extend — never fires a duplicate request for the same
+  // track.
+  useEffect(() => {
+    if (!currentTrack || !shuffleSession) return;
+    if (aiPickRequestedForRef.current === currentTrack.id) return;
+    aiPickRequestedForRef.current = currentTrack.id;
+    void useStore.getState().requestAiNextPick();
+  }, [currentTrack, shuffleSession]);
 
   // Once the immediately-next queued track is known to have a ready vocal
   // stem, eagerly fetch+decode it into an AudioBuffer — only ever for

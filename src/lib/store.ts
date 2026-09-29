@@ -15,6 +15,13 @@ import {
   type LyricalFingerprint,
   type SerializedLyricalFingerprint,
 } from "@/lib/lyrics";
+import { meanEnergy } from "@/lib/track-sequencing";
+import {
+  AI_CANDIDATE_CAP,
+  DJ_MODE_DESCRIPTIONS,
+  pickByBpmProximity,
+  type AiNextTrackCandidate,
+} from "@/lib/ai-dj";
 
 const MAX_HISTORY = 50;
 
@@ -32,6 +39,13 @@ interface PlayerState {
   shuffleSession: ShuffleSession | null;
   /** The previous shuffle session's opening batch ids — nudges a fresh session's very first pick away from repeating the same start, without hard-excluding it. */
   recentShuffleOpeningIds: string[];
+  /** id of the track requestAiNextPick last moved to the front of the queue — null whenever no AI pick is active (shuffle off, or the pick hasn't resolved yet). Drives the "AI Pick" badge in QueuePanel. */
+  aiNextPickTrackId: string | null;
+  /** Claude's (or the BPM-proximity fallback's) rationale for aiNextPickTrackId — shown as that badge's tooltip. */
+  aiNextPickTransitionNote: string | null;
+  /** Claude's recommended crossfade length for the upcoming mix into aiNextPickTrackId, seconds — informational only, never auto-applied to crossfadeOverrideSec (that field stays exclusively user-controlled). */
+  aiNextPickRecommendedCrossfadeSec: number | null;
+  aiNextPickLoading: boolean;
   currentTrack: Track | null;
   isPlaying: boolean;
   volume: number; // 0-1
@@ -125,6 +139,16 @@ interface PlayerState {
   playTrackList: (tracks: Track[], startIndex: number) => void;
   /** Starts a true, DJ-driven shuffle session: queues an initial compatibility-aware, non-repeating batch and marks the session active so `next()` keeps extending it as it runs low. See lib/shuffle.ts. */
   startShuffle: (tracks: Track[]) => void;
+  /**
+   * Asks the Anthropic API (via /api/dj/next-track) to pick the best next
+   * track for a shuffle session, then reorders it to the front of the
+   * queue. No-ops outside an active shuffle session. Falls back to a local
+   * BPM-proximity pick (lib/ai-dj.ts's pickByBpmProximity, same algorithm
+   * the API route itself falls back to) if the request fails outright —
+   * shuffle playback should never stall waiting on this. See the effect in
+   * DualDeckStage.tsx that calls this once per new currentTrack.
+   */
+  requestAiNextPick: () => Promise<void>;
   togglePlay: () => void;
   setVolume: (volume: number) => void;
   setAutoDj: (enabled: boolean) => void;
@@ -215,6 +239,10 @@ export const useStore = create<PlayerState>()(
       history: [],
       shuffleSession: null,
       recentShuffleOpeningIds: [],
+      aiNextPickTrackId: null,
+      aiNextPickTransitionNote: null,
+      aiNextPickRecommendedCrossfadeSec: null,
+      aiNextPickLoading: false,
       currentTrack: null,
       isPlaying: false,
       volume: 1,
@@ -293,6 +321,9 @@ export const useStore = create<PlayerState>()(
           // manual click path already goes through, so nothing else needs
           // to know about shuffle mode to correctly leave it.
           shuffleSession: null,
+          aiNextPickTrackId: null,
+          aiNextPickTransitionNote: null,
+          aiNextPickRecommendedCrossfadeSec: null,
         });
       },
 
@@ -306,6 +337,120 @@ export const useStore = create<PlayerState>()(
           shuffleSession: { pool, unplayedIds: pool.filter((t) => !batchIds.has(t.id)).map((t) => t.id) },
           recentShuffleOpeningIds: batch.map((t) => t.id),
         });
+      },
+
+      requestAiNextPick: async () => {
+        const {
+          currentTrack,
+          queue,
+          shuffleSession,
+          trackAnalysis,
+          djMode,
+          crossfadeOverrideSec,
+          styleGenreHint,
+          ambienceEnabled,
+          mashupEnabled,
+          djVarietyBias,
+        } = get();
+        if (!currentTrack || !shuffleSession || queue.length === 0) return;
+
+        const toCandidate = (t: Track): AiNextTrackCandidate => {
+          const analysis = trackAnalysis[t.id];
+          return {
+            id: t.id,
+            title: t.title,
+            artist: t.artist,
+            bpm: analysis?.bpm ?? (t.source === "local" ? t.bpm ?? null : null),
+            camelotKey: analysis?.camelotKey ?? null,
+            energy: analysis ? meanEnergy(analysis.waveformPeaks) : null,
+          };
+        };
+
+        // Candidate pool for the AI: everything already queued, topped up
+        // (bounded by AI_CANDIDATE_CAP) with the wider still-unplayed pool
+        // so Claude reasons over more than just the small rolling window —
+        // see lib/ai-dj.ts's AI_CANDIDATE_CAP comment for why it's capped.
+        const queuedIds = new Set(queue.map((t) => t.id));
+        const poolById = new Map(shuffleSession.pool.map((t) => [t.id, t]));
+        const extraUnplayed = shuffleSession.unplayedIds
+          .filter((id) => !queuedIds.has(id))
+          .map((id) => poolById.get(id))
+          .filter((t): t is Track => t != null)
+          .slice(0, Math.max(0, AI_CANDIDATE_CAP - queue.length));
+        const candidateTracks = [...queue, ...extraUnplayed];
+
+        const trackIdAtStart = currentTrack.id;
+        set({ aiNextPickLoading: true });
+
+        let picked: { trackId: string; transitionNote?: string; recommendedCrossfadeSeconds?: number };
+        try {
+          const res = await fetch("/api/dj/next-track", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              currentTrack: toCandidate(currentTrack),
+              candidates: candidateTracks.map(toCandidate),
+              boardState: {
+                mixMode: djMode,
+                mixModeDescription: DJ_MODE_DESCRIPTIONS[djMode],
+                crossfadeSeconds: crossfadeOverrideSec,
+                styleGenreHint,
+                ambienceEnabled,
+                mashupEnabled,
+                djVarietyBias,
+              },
+            }),
+          });
+          picked = res.ok
+            ? await res.json()
+            : pickByBpmProximity(toCandidate(currentTrack), candidateTracks.map(toCandidate));
+        } catch {
+          picked = pickByBpmProximity(toCandidate(currentTrack), candidateTracks.map(toCandidate));
+        }
+
+        // The current track may have changed (a manual skip, or the
+        // session ended) while this request was in flight — bail rather
+        // than reordering a queue that's no longer the one this pick was
+        // computed for. Same "trackIdAtStart" guard DualDeckStage.tsx uses
+        // for its own async continuations.
+        const state = get();
+        if (state.currentTrack?.id !== trackIdAtStart || !state.shuffleSession) {
+          set({ aiNextPickLoading: false });
+          return;
+        }
+
+        const pickedId: string = picked.trackId;
+        const applyPick = (nextQueue: Track[], nextSession: ShuffleSession) =>
+          set({
+            queue: nextQueue,
+            shuffleSession: nextSession,
+            aiNextPickTrackId: pickedId,
+            aiNextPickTransitionNote: picked.transitionNote ?? null,
+            aiNextPickRecommendedCrossfadeSec: picked.recommendedCrossfadeSeconds ?? null,
+            aiNextPickLoading: false,
+          });
+
+        if (pickedId === state.queue[0]?.id) {
+          applyPick(state.queue, state.shuffleSession);
+          return;
+        }
+        const alreadyQueued = state.queue.find((t) => t.id === pickedId);
+        if (alreadyQueued) {
+          applyPick([alreadyQueued, ...state.queue.filter((t) => t.id !== pickedId)], state.shuffleSession);
+          return;
+        }
+        const fromPool = state.shuffleSession.pool.find((t) => t.id === pickedId);
+        if (fromPool) {
+          applyPick([fromPool, ...state.queue], {
+            ...state.shuffleSession,
+            unplayedIds: state.shuffleSession.unplayedIds.filter((id) => id !== pickedId),
+          });
+          return;
+        }
+        // Picked id matched no known track (shouldn't happen — the route
+        // validates it against the candidates it was sent) — leave the
+        // queue untouched rather than risk dropping the current one.
+        set({ aiNextPickLoading: false });
       },
 
       togglePlay: () => set((s) => ({ isPlaying: !s.isPlaying })),
@@ -498,6 +643,9 @@ export const useStore = create<PlayerState>()(
             currentTimeSec: 0,
             history: nextHistory,
             shuffleSession: null,
+            aiNextPickTrackId: null,
+            aiNextPickTransitionNote: null,
+            aiNextPickRecommendedCrossfadeSec: null,
           });
           return;
         }

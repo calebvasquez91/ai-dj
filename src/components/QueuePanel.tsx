@@ -11,6 +11,8 @@ export function QueuePanel() {
   const queue = useStore((s) => s.queue);
   const removeFromQueue = useStore((s) => s.removeFromQueue);
   const isTransitioning = useStore((s) => s.isTransitioning);
+  const aiNextPickTrackId = useStore((s) => s.aiNextPickTrackId);
+  const aiNextPickTransitionNote = useStore((s) => s.aiNextPickTransitionNote);
 
   if (!open) return null;
 
@@ -76,6 +78,14 @@ export function QueuePanel() {
                       <p className="text-sm font-medium truncate">{track.title}</p>
                       <p className="text-xs text-muted truncate">{track.artist}</p>
                     </div>
+                    {track.id === aiNextPickTrackId && (
+                      <span
+                        title={aiNextPickTransitionNote || "Chosen by the AI DJ"}
+                        className="shrink-0 text-[10px] leading-none px-1.5 py-1 rounded-full bg-accent-purple/20 text-accent-purple font-medium"
+                      >
+                        🤖 AI Pick
+                      </span>
+                    )}
                     <span className="text-xs text-muted">
                       {formatTime(track.durationSec)}
                     </span>

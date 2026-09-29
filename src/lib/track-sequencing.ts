@@ -31,7 +31,8 @@ const MAX_MEANINGFUL_BPM_DELTA = 0.3;
 
 const WEIGHTS = { tempo: 0.35, key: 0.25, energy: 0.2, lyrical: 0.2 };
 
-function meanEnergy(peaks: number[]): number {
+/** Exported for lib/ai-dj.ts, which needs the identical energy definition when describing a track to the AI DJ next-track prompt. */
+export function meanEnergy(peaks: number[]): number {
   if (peaks.length === 0) return 0;
   return peaks.reduce((sum, v) => sum + v, 0) / peaks.length;
 }
