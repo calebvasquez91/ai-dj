@@ -20,11 +20,18 @@ export function getStorageBackend(): StorageBackend {
   return process.env.NEXT_PUBLIC_STORAGE_BACKEND === "blob" ? "blob" : "local";
 }
 
-const UPLOADS_DIR = path.resolve(process.env.UPLOADS_DIR ?? "./uploads");
+// Statically scoped to process.cwd() + a literal segment (not read from
+// process.env) on purpose: Next's file tracer can only bound a path it can
+// resolve at build time, and an env-derived path made it give up and sweep
+// the whole project into every route that imports this module instead. This
+// branch is dev-only anyway (see the "local" backend note up top — it never
+// runs in production, where getStorageBackend() always resolves to "blob"),
+// so losing runtime configurability here costs nothing.
+const UPLOADS_DIR = path.join(process.cwd(), "uploads");
 
 /** Resolves a local storage key to an absolute path, rejecting anything that would escape UPLOADS_DIR. */
 function resolveLocalPath(storageKey: string): string {
-  const resolved = path.resolve(UPLOADS_DIR, storageKey);
+  const resolved = path.join(UPLOADS_DIR, storageKey);
   if (resolved !== UPLOADS_DIR && !resolved.startsWith(UPLOADS_DIR + path.sep)) {
     throw new Error(`Invalid storage key: ${storageKey}`);
   }
