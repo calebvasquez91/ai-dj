@@ -139,6 +139,14 @@ function windowBeatsForTransition(t: TransitionEntry, tempoSync: boolean, bpmDel
       // Doubled vs. the 8-beat default — a layered vocal needs enough
       // runway to actually register as a musical gesture, not a blip.
       return 16;
+    case "reverse":
+      // A short, punchy rewind gesture — real reversed audio for the
+      // outgoing track's own last few bars, not a long, gradual effect.
+      return 8;
+    case "loop":
+      // Long enough for the real, indefinite loop to actually repeat a few
+      // times (not just once) while the incoming track's intro plays.
+      return 16;
     default:
       return 8;
   }
@@ -168,6 +176,8 @@ const MIN_WINDOW_SEC_BY_CATEGORY: Record<TransitionCategory, number> = {
   digital: MIN_CROSSFADE_SEC,
   vocal: MIN_CROSSFADE_SEC,
   "beat-repeat": 2,
+  reverse: 2,
+  loop: 4,
 };
 
 export type TransitionEffect =
@@ -186,7 +196,9 @@ export type TransitionEffect =
   | "word-play"
   | "loop-roll"
   | "channel-eq-work"
-  | "vocal-layer";
+  | "vocal-layer"
+  | "reverse-out"
+  | "loop-hold";
 
 const TRANSITION_EFFECT_BY_ID: Record<string, TransitionEffect> = {
   "bass-swap": "highpass-sweep",
@@ -205,6 +217,8 @@ const TRANSITION_EFFECT_BY_ID: Record<string, TransitionEffect> = {
   "beat-repeat-transition": "loop-roll",
   "three-band-sweep": "channel-eq-work",
   "vocal-layering": "vocal-layer",
+  "reverse-tail": "reverse-out",
+  "loop-hold-transition": "loop-hold",
 };
 
 /**
@@ -629,6 +643,8 @@ interface PlanTransitionArgs {
   varietyBias?: boolean;
   /** Per-category score adjustment learned from the user's own manual picks/rerolls over time — see lib/dj-weights.ts. */
   categoryWeights?: Partial<Record<TransitionCategory, number>>;
+  /** Whether the incoming track's entry point (and the outgoing-phase-lock nudge) snaps to the beat grid. Defaults true — this is a real, user-visible toggle (DJ Decks panel), not always-on internal behavior. */
+  quantize?: boolean;
 }
 
 function buildRationale(
@@ -735,6 +751,7 @@ export function planTransition({
   excludeTransitionIds = [],
   varietyBias = false,
   categoryWeights = {},
+  quantize = true,
 }: PlanTransitionArgs): TransitionPlan {
   const bpmDelta = Math.abs(bestTempoRatio(current.analysis.bpm, next.analysis.bpm) - 1);
   // Two tracks that both fell back to the same neutral 120 BPM (low
@@ -813,10 +830,13 @@ export function planTransition({
   // actually placed — same target either way whichever "drop"-category
   // entry scoring picked, cue-aware or not.
   const dropTargetSec = nextCueDropAtSec ?? next.analysis.dropAtSec;
-  const baseEntryOffsetSec =
+  const rawEntryOffsetSec =
     transition.category === "drop" && dropTargetSec != null
-      ? snapToBeatGrid(Math.max(0, dropTargetSec - windowSec), next.analysis.beatGridOffsetSec, next.analysis.bpm)
-      : snapToBeatGrid(next.analysis.energyOnsetSec, next.analysis.beatGridOffsetSec, next.analysis.bpm);
+      ? Math.max(0, dropTargetSec - windowSec)
+      : next.analysis.energyOnsetSec;
+  const baseEntryOffsetSec = quantize
+    ? snapToBeatGrid(rawEntryOffsetSec, next.analysis.beatGridOffsetSec, next.analysis.bpm)
+    : rawEntryOffsetSec;
   const latestSensibleEntrySec = Math.max(0, next.track.durationSec - MIN_CROSSFADE_SEC);
 
   // Phase-lock: snapping to the incoming track's own beat grid gets the
@@ -827,7 +847,7 @@ export function planTransition({
   // track-time via the rate the incoming deck starts at) so the two
   // downbeats actually coincide the moment the incoming track starts.
   let entryOffsetSec = baseEntryOffsetSec;
-  if (currentElapsedSec != null && current.analysis.bpm > 0) {
+  if (quantize && currentElapsedSec != null && current.analysis.bpm > 0) {
     const fromBeatLenSec = 60 / current.analysis.bpm;
     const fromPhaseSec =
       (((currentElapsedSec - current.analysis.beatGridOffsetSec) % fromBeatLenSec) + fromBeatLenSec) %

@@ -96,8 +96,8 @@ function camelotSemitoneShift(currentCode: string | null, nextCode: string | nul
   return semitones > 6 ? semitones - 12 : semitones < -6 ? semitones + 12 : semitones;
 }
 
-/** Plans a mashup for an eligible pair, or returns null if the pair doesn't qualify — safe to call without checking isMashupEligible() first. */
-export function planMashup(current: TrackInput, next: TrackInput): MashupPlan | null {
+/** Plans a mashup for an eligible pair, or returns null if the pair doesn't qualify — safe to call without checking isMashupEligible() first. `quantize` (default true) gates whether the entry offset snaps to the incoming track's beat grid — a real, user-visible toggle, not always-on internal behavior. */
+export function planMashup(current: TrackInput, next: TrackInput, quantize = true): MashupPlan | null {
   if (!isMashupEligible(current, next)) return null;
 
   const tempoRatio = bestTempoRatio(current.analysis.bpm, next.analysis.bpm);
@@ -108,11 +108,9 @@ export function planMashup(current: TrackInput, next: TrackInput): MashupPlan | 
   const effectiveBpm = current.analysis.bpm > 0 ? current.analysis.bpm : 120;
   const durationSec = (barsCount * 4 * 60) / effectiveBpm; // 4 beats per bar
 
-  const entryOffsetSec = snapToBeatGrid(
-    next.analysis.energyOnsetSec,
-    next.analysis.beatGridOffsetSec,
-    next.analysis.bpm
-  );
+  const entryOffsetSec = quantize
+    ? snapToBeatGrid(next.analysis.energyOnsetSec, next.analysis.beatGridOffsetSec, next.analysis.bpm)
+    : next.analysis.energyOnsetSec;
 
   const harmonicNote = camelotScore >= 2 ? "same key" : "compatible keys";
   const pitchNote =

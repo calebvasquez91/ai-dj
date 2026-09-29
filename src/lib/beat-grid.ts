@@ -13,3 +13,22 @@ export function snapToBeatGrid(timeSec: number, beatGridOffsetSec: number, bpm: 
   const snappedBeats = Math.round(beatsSinceOffset);
   return Math.max(0, beatGridOffsetSec + snappedBeats * beatLenSec);
 }
+
+/** Beat Jump's fixed nudge size — a real CDJ lets you choose 1/2/4/8/16/32; this ships one sensible default rather than a picker. Shared between DualDeckStage.tsx (the actual seek) and DeckView.tsx (the button labels) so they can never drift apart. */
+export const BEAT_JUMP_COUNT = 4;
+
+/**
+ * Beat Jump: moves a playhead forward/back by a fixed number of beats,
+ * instantly (no restart) — the CDJ control of the same name. A beat's
+ * length doesn't depend on the grid's phase offset (only its tempo), so
+ * this doesn't need beatGridOffsetSec the way snapToBeatGrid does — a
+ * caller wanting the result quantized can pass it through snapToBeatGrid
+ * afterward. `beatCount` may be negative (jump back). Clamped to the
+ * track's actual bounds — a jump never runs off either end.
+ */
+export function jumpBeats(currentSec: number, bpm: number, beatCount: number, durationSec: number): number {
+  if (bpm <= 0) return Math.max(0, Math.min(durationSec, currentSec));
+  const beatLenSec = 60 / bpm;
+  const target = currentSec + beatCount * beatLenSec;
+  return Math.max(0, Math.min(durationSec, target));
+}

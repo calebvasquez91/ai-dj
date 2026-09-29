@@ -9,6 +9,7 @@ import { useTapTempo } from "@/lib/tapTempo";
 import { submitYoutubeTapTempo } from "@/lib/youtubeBpm";
 import { computeAutoHotCues, mergeHotCues, HOT_CUE_LABELS, type HotCueSlot } from "@/lib/hot-cues";
 import { formatTime } from "@/lib/format";
+import { BEAT_JUMP_COUNT } from "@/lib/beat-grid";
 import { TrackThumbnail } from "@/components/TrackThumbnail";
 import { JogWheel } from "@/components/JogWheel";
 import { transitions } from "@/data/transitions";
@@ -143,6 +144,94 @@ function DeckCard({
       {hotCues && currentTimeSec != null && (
         <HotCuePads trackId={track.id} slots={hotCues} currentTimeSec={currentTimeSec} />
       )}
+      {hotCues && currentTimeSec != null && track.source === "local" && <LiveDeckControls />}
+    </div>
+  );
+}
+
+/**
+ * Real-time CDJ-style manual controls for whatever's actually playing —
+ * distinct from the read-only Mixer panel (never a slider/drag control) and
+ * from Hot Cues (which are per-track, persisted positions): these fire an
+ * instant, one-shot action on the live deck, same request-counter pattern
+ * as the existing Mix Now button (see requestMixNow/mixNowRequestId).
+ * Local-track only — beat jump/backspin manipulate DualDeckStage's own
+ * <audio> element, which YouTubeDeckStage owns instead for a YouTube track.
+ */
+function LiveDeckControls() {
+  const requestBeatJump = useStore((s) => s.requestBeatJump);
+  const requestBackspin = useStore((s) => s.requestBackspin);
+  const requestReverse = useStore((s) => s.requestReverse);
+  const requestLoopIn = useStore((s) => s.requestLoopIn);
+  const requestLoopOut = useStore((s) => s.requestLoopOut);
+  const requestLoopExit = useStore((s) => s.requestLoopExit);
+  const manualLoopActive = useStore((s) => s.manualLoopActive);
+  const manualLoopInSec = useStore((s) => s.manualLoopInSec);
+  const manualLoopOutSec = useStore((s) => s.manualLoopOutSec);
+
+  return (
+    <div className="flex items-center gap-1.5">
+      <button
+        type="button"
+        onClick={() => requestBeatJump(-1)}
+        className="btn-outline !px-2 !py-1 text-xs"
+        title={`Beat Jump back ${BEAT_JUMP_COUNT} beats — instant, no restart`}
+      >
+        ⏪ {BEAT_JUMP_COUNT}
+      </button>
+      <button
+        type="button"
+        onClick={() => requestBeatJump(1)}
+        className="btn-outline !px-2 !py-1 text-xs"
+        title={`Beat Jump forward ${BEAT_JUMP_COUNT} beats — instant, no restart`}
+      >
+        {BEAT_JUMP_COUNT} ⏩
+      </button>
+      <button
+        type="button"
+        onClick={() => requestBackspin()}
+        className="btn-outline !px-2 !py-1 text-xs"
+        title="Vinyl Brake Stop — decelerates to a stop and spins back up, same technique the ambience system uses opportunistically"
+      >
+        🛑 Brake Stop
+      </button>
+      <button
+        type="button"
+        onClick={() => requestReverse()}
+        className="btn-outline !px-2 !py-1 text-xs"
+        title="Reverse Playback — plays the last couple of seconds backwards, then hands back to normal playback at the same spot"
+      >
+        ◀◀ Reverse
+      </button>
+      <button
+        type="button"
+        onClick={() => requestLoopIn()}
+        disabled={manualLoopActive}
+        className="btn-outline !px-2 !py-1 text-xs"
+        title="Loop In — marks the current position as the loop's start"
+      >
+        Loop In
+      </button>
+      <button
+        type="button"
+        onClick={() => requestLoopOut()}
+        disabled={manualLoopActive || manualLoopInSec == null}
+        className="btn-outline !px-2 !py-1 text-xs"
+        title="Loop Out — marks the current position as the loop's end and starts it looping indefinitely"
+      >
+        Loop Out
+      </button>
+      <button
+        type="button"
+        onClick={() => requestLoopExit()}
+        disabled={!manualLoopActive}
+        className={`btn-outline !px-2 !py-1 text-xs ${manualLoopActive ? "bg-accent-purple/15 text-accent-purple" : ""}`}
+        title="Exit Loop — releases the active loop and continues playing forward normally"
+      >
+        {manualLoopActive
+          ? `Looping ${formatTime(manualLoopInSec ?? 0)}–${formatTime(manualLoopOutSec ?? 0)}`
+          : "Exit Loop"}
+      </button>
     </div>
   );
 }
@@ -289,6 +378,8 @@ export function DeckView() {
   const setAmbienceFrequency = useStore((s) => s.setAmbienceFrequency);
   const mashupEnabled = useStore((s) => s.mashupEnabled);
   const setMashupEnabled = useStore((s) => s.setMashupEnabled);
+  const quantizeEnabled = useStore((s) => s.quantizeEnabled);
+  const setQuantizeEnabled = useStore((s) => s.setQuantizeEnabled);
   const categoryWeights = useDjWeights((s) => s.categoryWeights);
 
   const nextTrack = queue[0] ?? null;
@@ -319,6 +410,7 @@ export function DeckView() {
       excludeTransitionIds: rerolledTransitionIds,
       varietyBias: djVarietyBias,
       categoryWeights,
+      quantize: quantizeEnabled,
     });
   }, [
     currentTrack,
@@ -333,6 +425,7 @@ export function DeckView() {
     rerolledTransitionIds,
     djVarietyBias,
     categoryWeights,
+    quantizeEnabled,
   ]);
 
   if (!open) return null;
@@ -412,6 +505,18 @@ export function DeckView() {
                 className="accent-accent-purple"
               />
               Mashups
+            </label>
+            <label
+              className="flex items-center gap-1.5 text-xs text-muted cursor-pointer"
+              title="Snap transitions, mashups, and loops to the beat grid — a real CDJ-style setting, on by default. Turn off for raw, unsnapped timing."
+            >
+              <input
+                type="checkbox"
+                checked={quantizeEnabled}
+                onChange={(e) => setQuantizeEnabled(e.target.checked)}
+                className="accent-accent-purple"
+              />
+              Quantize
             </label>
             <button
               type="button"

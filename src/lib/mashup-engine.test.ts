@@ -119,4 +119,16 @@ describe("planMashup", () => {
     };
     expect(planMashup(current, next)!.entryOffsetSec).toBeGreaterThan(0);
   });
+
+  it("snaps the entry point to the beat grid by default (quantize on)", () => {
+    const current = { track: makeTrack("a"), analysis: makeAnalysis({ bpm: 128, camelotKey: "8A" }) };
+    const next = { track: makeTrack("b"), analysis: makeAnalysis({ bpm: 128, camelotKey: "8A", energyOnsetSec: 8 }) };
+    expect(planMashup(current, next)!.entryOffsetSec).not.toBe(8);
+  });
+
+  it("uses the raw, unsnapped energy onset when quantize is off", () => {
+    const current = { track: makeTrack("a"), analysis: makeAnalysis({ bpm: 128, camelotKey: "8A" }) };
+    const next = { track: makeTrack("b"), analysis: makeAnalysis({ bpm: 128, camelotKey: "8A", energyOnsetSec: 8 }) };
+    expect(planMashup(current, next, false)!.entryOffsetSec).toBe(8);
+  });
 });

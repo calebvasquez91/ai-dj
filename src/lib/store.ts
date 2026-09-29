@@ -40,6 +40,21 @@ interface PlayerState {
   seekRequest: number | null;
   crossfadeOverrideSec: number | null;
   mixNowRequestId: number;
+  /** Beat Jump — a CDJ-style instant forward/back nudge, in a fixed beat count. Two independent counters (not one +/- field) so a rapid forward-then-back tap can never collide into "no change" — same shape as mixNowRequestId. */
+  beatJumpForwardRequestId: number;
+  beatJumpBackRequestId: number;
+  /** Vinyl Brake Stop, exposed as a direct manual cue — see triggerBackspin in DualDeckStage.tsx. */
+  backspinRequestId: number;
+  /** Reverse Playback, a direct manual cue — see startReversePlayback in DualDeckStage.tsx. */
+  reverseRequestId: number;
+  /** Manual Loop In/Out — three independent request counters (not a single combined action) so a rapid in-then-out-then-exit sequence can never collide into "no change", same shape as every other manual request field above. See setLoopIn/setLoopOut/releaseManualLoop in DualDeckStage.tsx. */
+  loopInRequestId: number;
+  loopOutRequestId: number;
+  loopExitRequestId: number;
+  /** Read-only mirror of the real manual-loop state, for the DJ Decks panel to display — written only by DualDeckStage's real deck logic, same "mirror real nodes, never a second writer" contract as the Mixer panel's fields. */
+  manualLoopActive: boolean;
+  manualLoopInSec: number | null;
+  manualLoopOutSec: number | null;
   isTransitioning: boolean;
   sidebarOpen: boolean;
   queuePanelOpen: boolean;
@@ -59,6 +74,8 @@ interface PlayerState {
   /** transitionIds the user has "rerolled" away from for the upcoming mix — cleared automatically once that mix starts. */
   rerolledTransitionIds: string[];
   djVarietyBias: boolean;
+  /** Real, visible CDJ-style Quantize toggle — when on (default, matches every prior session's always-on behavior), transitions/mashups/loop starts snap to the beat grid; when off, they use raw unsnapped positions. */
+  quantizeEnabled: boolean;
   /** Rationale text for the mix currently in progress, captured at the moment it started — so the DJ Decks panel keeps showing what's actually playing out instead of a live recompute that goes stale the instant a one-shot override clears. */
   activeTransitionRationale: string | null;
   /** Terse version of the same rationale, for Que's dismissible player-side label — set/cleared at the exact same moments as activeTransitionRationale, see mix-engine.ts's shortWhy. */
@@ -118,6 +135,14 @@ interface PlayerState {
   previous: () => void;
   setCrossfadeOverride: (seconds: number | null) => void;
   requestMixNow: () => void;
+  requestBeatJump: (direction: 1 | -1) => void;
+  requestBackspin: () => void;
+  requestReverse: () => void;
+  requestLoopIn: () => void;
+  requestLoopOut: () => void;
+  requestLoopExit: () => void;
+  /** Write-only from the DJ Decks panel's perspective — called by DualDeckStage's real deck logic to mirror actual manual-loop state; never called from a component. */
+  setManualLoopState: (active: boolean, inSec: number | null, outSec: number | null) => void;
   setIsTransitioning: (isTransitioning: boolean) => void;
   setSidebarOpen: (open: boolean) => void;
   toggleQueuePanel: () => void;
@@ -151,6 +176,7 @@ interface PlayerState {
   addRerolledTransitionId: (id: string) => void;
   clearRerolledTransitionIds: () => void;
   setDjVarietyBias: (enabled: boolean) => void;
+  setQuantizeEnabled: (enabled: boolean) => void;
   setActiveTransitionRationale: (rationale: string | null) => void;
   setActiveTransitionShortWhy: (shortWhy: string | null) => void;
   setAmbienceEnabled: (enabled: boolean) => void;
@@ -197,6 +223,16 @@ export const useStore = create<PlayerState>()(
       seekRequest: null,
       crossfadeOverrideSec: null,
       mixNowRequestId: 0,
+      beatJumpForwardRequestId: 0,
+      beatJumpBackRequestId: 0,
+      backspinRequestId: 0,
+      reverseRequestId: 0,
+      loopInRequestId: 0,
+      loopOutRequestId: 0,
+      loopExitRequestId: 0,
+      manualLoopActive: false,
+      manualLoopInSec: null,
+      manualLoopOutSec: null,
       isTransitioning: false,
       sidebarOpen: false,
       queuePanelOpen: false,
@@ -211,6 +247,7 @@ export const useStore = create<PlayerState>()(
       forcedTransitionId: null,
       rerolledTransitionIds: [],
       djVarietyBias: false,
+      quantizeEnabled: true,
       activeTransitionRationale: null,
       activeTransitionShortWhy: null,
       ambienceEnabled: true,
@@ -279,6 +316,17 @@ export const useStore = create<PlayerState>()(
       clearSeekRequest: () => set({ seekRequest: null }),
       setCrossfadeOverride: (seconds) => set({ crossfadeOverrideSec: seconds }),
       requestMixNow: () => set((s) => ({ mixNowRequestId: s.mixNowRequestId + 1 })),
+      requestBeatJump: (direction) =>
+        direction === 1
+          ? set((s) => ({ beatJumpForwardRequestId: s.beatJumpForwardRequestId + 1 }))
+          : set((s) => ({ beatJumpBackRequestId: s.beatJumpBackRequestId + 1 })),
+      requestBackspin: () => set((s) => ({ backspinRequestId: s.backspinRequestId + 1 })),
+      requestReverse: () => set((s) => ({ reverseRequestId: s.reverseRequestId + 1 })),
+      requestLoopIn: () => set((s) => ({ loopInRequestId: s.loopInRequestId + 1 })),
+      requestLoopOut: () => set((s) => ({ loopOutRequestId: s.loopOutRequestId + 1 })),
+      requestLoopExit: () => set((s) => ({ loopExitRequestId: s.loopExitRequestId + 1 })),
+      setManualLoopState: (active, inSec, outSec) =>
+        set({ manualLoopActive: active, manualLoopInSec: inSec, manualLoopOutSec: outSec }),
       setIsTransitioning: (isTransitioning) => set({ isTransitioning }),
       setSidebarOpen: (open) => set({ sidebarOpen: open }),
       toggleQueuePanel: () => set((s) => ({ queuePanelOpen: !s.queuePanelOpen })),
@@ -357,6 +405,7 @@ export const useStore = create<PlayerState>()(
         set((s) => ({ rerolledTransitionIds: [...s.rerolledTransitionIds, id] })),
       clearRerolledTransitionIds: () => set({ rerolledTransitionIds: [] }),
       setDjVarietyBias: (enabled) => set({ djVarietyBias: enabled }),
+      setQuantizeEnabled: (enabled) => set({ quantizeEnabled: enabled }),
       setActiveTransitionRationale: (rationale) => set({ activeTransitionRationale: rationale }),
       setActiveTransitionShortWhy: (shortWhy) => set({ activeTransitionShortWhy: shortWhy }),
       setAmbienceEnabled: (enabled) => set({ ambienceEnabled: enabled }),

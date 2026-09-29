@@ -83,6 +83,20 @@ describe("planTransition", () => {
     expect(Math.abs(beatsFromOffset - Math.round(beatsFromOffset))).toBeLessThan(1e-6);
   });
 
+  it("uses the raw, unsnapped energy onset when quantize is off — no phase-lock nudge either", () => {
+    const plan = planTransition({
+      current: { track: makeTrack("a", 240), analysis: makeAnalysis({ bpm: 128 }) },
+      next: {
+        track: makeTrack("b", 240),
+        analysis: makeAnalysis({ bpm: 120, beatGridOffsetSec: 0.5, energyOnsetSec: 10.1 }),
+      },
+      genreHint: "house",
+      currentElapsedSec: 37.3,
+      quantize: false,
+    });
+    expect(plan.incomingEntryOffsetSec).toBe(10.1);
+  });
+
   it("clamps the incoming entry point so it never lands too close to the track's end", () => {
     const plan = planTransition({
       current: { track: makeTrack("a", 240), analysis: makeAnalysis({ bpm: 128 }) },
@@ -364,6 +378,11 @@ describe("planTransition — Tempo Ramp", () => {
       current: { track: makeTrack("a", 240), analysis: makeAnalysis({ bpm: 128 }) },
       next: { track: makeTrack("b", 240), analysis: makeAnalysis({ bpm: 150 }) },
       genreHint: "dnb",
+      // Reverse Tail also targets dnb and is tempo-insensitive, so it's a
+      // genuine close competitor here — excluded so this test keeps
+      // isolating Tempo Ramp's own selection, not an incidental scoring
+      // collision with an unrelated technique.
+      excludeTransitionIds: ["reverse-tail"],
     });
     expect(plan.category).toBe("tempo-ramp");
     expect(plan.tempoSync).toBe(false);
@@ -512,6 +531,32 @@ describe("planTransition — Vocal Layering", () => {
     expect(plan.transitionId).toBe("vocal-layering");
     expect(plan.category).toBe("vocal");
     expect(plan.effect).toBe("vocal-layer");
+  });
+});
+
+describe("planTransition — Reverse Tail", () => {
+  it("resolves to the reverse-out effect when forced, and is executable", () => {
+    const plan = planTransition({
+      current: { track: makeTrack("a", 240), analysis: makeAnalysis({ bpm: 128 }) },
+      next: { track: makeTrack("b", 240), analysis: makeAnalysis({ bpm: 128 }) },
+      forceTransitionId: "reverse-tail",
+    });
+    expect(plan.transitionId).toBe("reverse-tail");
+    expect(plan.category).toBe("reverse");
+    expect(plan.effect).toBe("reverse-out");
+  });
+});
+
+describe("planTransition — Loop Hold", () => {
+  it("resolves to the loop-hold effect when forced, and is executable", () => {
+    const plan = planTransition({
+      current: { track: makeTrack("a", 240), analysis: makeAnalysis({ bpm: 128 }) },
+      next: { track: makeTrack("b", 240), analysis: makeAnalysis({ bpm: 128 }) },
+      forceTransitionId: "loop-hold-transition",
+    });
+    expect(plan.transitionId).toBe("loop-hold-transition");
+    expect(plan.category).toBe("loop");
+    expect(plan.effect).toBe("loop-hold");
   });
 });
 
@@ -732,6 +777,12 @@ describe("chooseTransition — varietyBias", () => {
       tempoSync: false,
       genreHint: "dubstep",
       personaDjNames: [],
+      // Reverse Tail also targets dubstep and is tempo-insensitive, so it's
+      // a genuine close competitor here — excluded so this test keeps
+      // isolating the specific dynamic it's about (the repetition penalty
+      // on echo-out), not incidental scoring collisions with an unrelated
+      // technique.
+      excludeTransitionIds: ["reverse-tail"],
     };
     const top = chooseTransition(ctx);
     expect(top.id).toBe("echo-out");

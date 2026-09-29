@@ -26,7 +26,9 @@ export type TransitionCategory =
   | "tag-sample"
   | "spin-up"
   | "word-play"
-  | "beat-repeat";
+  | "beat-repeat"
+  | "reverse"
+  | "loop";
 
 export interface TransitionEntry {
   id: string;
@@ -167,6 +169,34 @@ export const transitions: TransitionEntry[] = [
     idealGenres: ["techno"],
     executable: true,
     exampleDjs: ["Skrillex", "Noisia", "Excision"],
+  },
+
+  // Reverse — genuinely reverses the outgoing track's own decoded audio
+  // (not a gain trick, not playbackRate) for the last stretch before the
+  // handoff, a classic "rewind" gesture into the next track's drop.
+  {
+    id: "reverse-tail",
+    name: "Reverse Tail",
+    category: "reverse",
+    description: "Reverses the outgoing track's own last few bars — real, reversed audio, not an effect trick — building anticipation into the handoff, a classic jungle/dubstep rewind gesture.",
+    idealBpmDeltaMax: Infinity,
+    idealGenres: ["dnb", "dubstep"],
+    executable: true,
+    exampleDjs: ["Andy C", "Skream"],
+  },
+
+  // Loop Hold — a real, indefinite Loop In/Out (not a fixed-repeat
+  // stutter) holds the outgoing track's last couple of bars while the
+  // incoming track's intro plays underneath, a classic build-tension move.
+  {
+    id: "loop-hold-transition",
+    name: "Loop Hold",
+    category: "loop",
+    description: "Holds the outgoing track's last couple of bars in a real, indefinite loop — not a fixed-repeat stutter — while the incoming track's intro plays underneath, building tension into the handoff.",
+    idealBpmDeltaMax: Infinity,
+    idealGenres: ["house", "techno"],
+    executable: true,
+    exampleDjs: ["Carl Cox", "Adam Beyer"],
   },
 
   // Brake-based

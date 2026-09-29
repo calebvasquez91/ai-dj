@@ -21,12 +21,14 @@ import {
   stutterGateCurves,
   type TransitionPlan,
 } from "@/lib/mix-engine";
+import { jumpBeats, BEAT_JUMP_COUNT } from "@/lib/beat-grid";
 import { analyzeTrackFromUrl, fallbackAnalysis, type TrackAnalysis } from "@/lib/audio-analysis";
 import { getLyricalFingerprint } from "@/lib/lyrics";
 import { cancelHypePhrase, speakHypePhrase } from "@/lib/wordPlay";
 import { shouldTriggerAmbience } from "@/lib/ambience";
 import { useDjWeights, LEARNING_NUDGE_UP, LEARNING_NUDGE_DOWN } from "@/lib/dj-weights";
 import { planMashup, MASHUP_COOLDOWN_SEC, type MashupPlan } from "@/lib/mashup-engine";
+import { reverseSamples } from "@/lib/reverse-audio";
 import { resolveHotCues, upcomingDropCueAtSec } from "@/lib/hot-cues";
 import { createTimeStretchVoice, type TimeStretchVoice } from "@/lib/time-stretch";
 import { filterStateToKnobPos } from "@/lib/mixer-controls";
@@ -117,6 +119,30 @@ const TEMPO_RAMP_PRE_WINDOW_SEC = 8;
 /** Short fade at the <audio>-element/buffer-voice swap boundary (both directions) — belt-and-suspenders against a click even though both sides play identical content from the same position. */
 const TEMPO_RAMP_SWAP_FADE_SEC = 0.03;
 
+/**
+ * Reverse Playback in progress: the deck's own <audio> element is paused
+ * (frozen at entryTrackTimeSec) while a one-shot AudioBufferSourceNode
+ * plays the immediately-preceding windowSec of the same track, backwards,
+ * through its own dedicated gain node straight into masterGain — not the
+ * deck's own automated `gain` node, mirroring the mashup voice's own
+ * "separate overlay, not a repurposed automation node" pattern. Ends
+ * itself (source.onended) after windowSec, no tick loop needed since
+ * nothing about it changes over time the way a tempo ramp's rate does.
+ */
+interface ActiveReverse {
+  deckId: DeckId;
+  entryTrackTimeSec: number;
+  source: AudioBufferSourceNode;
+  gain: GainNode;
+}
+
+/** Fade at the <audio>/reverse-voice swap boundary, both directions — same purpose as TEMPO_RAMP_SWAP_FADE_SEC, just a hair longer since the reverse voice's own internal fade is already handled separately (this one is only the deck's own `gain` node ducking out of the way and back). */
+const REVERSE_SWAP_FADE_SEC = 0.05;
+/** Manual Reverse Playback's fixed window — a few beats' worth is enough to read as an intentional "rewind" gesture. */
+const MANUAL_REVERSE_WINDOW_SEC = 2;
+/** The "Loop Hold" transition's fixed loop length, in bars — how much of the outgoing track's tail gets held in a real, indefinite loop (not a fixed-repeat stutter like Beat Repeat) for the whole transition window while the incoming track's intro plays underneath. */
+const LOOP_HOLD_BARS = 2;
+
 /** Per-deck nodes for the acoustic-feel + stadium-echo vocal moment — built lazily on first use, not part of the always-present per-deck graph, since it's a rarely-triggered effect. */
 interface VocalEchoNodes {
   splitter: ChannelSplitterNode;
@@ -149,6 +175,21 @@ interface ActiveLoop {
   tickIntervalId: ReturnType<typeof setInterval> | null;
 }
 
+/**
+ * A real CDJ-style Loop In/Out, holding an arbitrary, user-set (or, for the
+ * "loop-hold" transition, engine-set) range indefinitely until released —
+ * distinct from ActiveLoop/startBeatLoop above, which is always a fixed
+ * bars-count, fixed-repeat-count stutter that expires on its own. Same
+ * setInterval-polls-currentTime-and-reseeks mechanism, minus the repeat
+ * countdown.
+ */
+interface ActiveManualLoop {
+  deckId: DeckId;
+  startSec: number;
+  endSec: number;
+  tickIntervalId: ReturnType<typeof setInterval> | null;
+}
+
 /** A backspin ad-lib in progress — a plain interval driving the active deck's own playbackRate down and back up (never its gain), tracked so an external track change or seek mid-backspin can cancel it before it applies a stale rate to whatever loads next. */
 interface ActiveBackspin {
   deckId: DeckId;
@@ -162,6 +203,8 @@ const SPIN_UP_MIN_RATE = 0.2;
 /** Beat Repeat's loop-roll: how much of the outgoing track's tail gets re-triggered (a quarter-bar = one beat) and how many times — sized so BEAT_REPEAT_BARS * 4 * BEAT_REPEAT_REPEATS (8 beats) exactly matches "beat-repeat"'s windowBeats in mix-engine.ts, regardless of tempo. */
 const BEAT_REPEAT_BARS = 0.25;
 const BEAT_REPEAT_REPEATS = 8;
+/** Manual Vinyl Brake Stop's decelerate+recover window — same fixed duration the ambience system's own "backspin" cue already uses (ambience.ts). */
+const MANUAL_BACKSPIN_WINDOW_SEC = 2;
 
 interface DeckNodes {
   source: MediaElementAudioSourceNode;
@@ -238,11 +281,17 @@ export function DualDeckStage() {
   const vocalEchoNodesRef = useRef<Record<DeckId, VocalEchoNodes | null>>({ A: null, B: null });
   const stadiumIrRef = useRef<AudioBuffer | null>(null);
   const loopRef = useRef<ActiveLoop | null>(null);
+  const manualLoopRef = useRef<ActiveManualLoop | null>(null);
   const backspinRef = useRef<ActiveBackspin | null>(null);
   const tempoRampRef = useRef<ActiveTempoRamp | null>(null);
   // True synchronously as soon as a tempo-ramp decode kicks off, before
   // tempoRampRef itself is populated — same reason mashupStartingRef exists.
   const tempoRampStartingRef = useRef(false);
+  const reverseRef = useRef<ActiveReverse | null>(null);
+  // Same reason mashupStartingRef/tempoRampStartingRef exist — true
+  // synchronously as soon as a reverse-playback decode kicks off, before
+  // reverseRef itself is populated.
+  const reverseStartingRef = useRef(false);
   // Set once a pre-transition tempo ramp finishes for a given
   // `${trackId}>${nextTrackId}` pairing — tryAutoTransition consults this so
   // the eventual startTransition() call knows the outgoing deck already did
@@ -321,6 +370,15 @@ export function DualDeckStage() {
     loopRef.current = null;
   }, []);
 
+  /** Releases a real Loop In/Out (manual or "loop-hold"-transition-driven) — playback just stops being rewound and continues forward exactly as it already was, same seamless-release property ActiveLoop/cancelLoop already has. Safe to call whether or not a loop is actually active. */
+  const releaseManualLoop = useCallback(() => {
+    const l = manualLoopRef.current;
+    if (!l) return;
+    if (l.tickIntervalId != null) clearInterval(l.tickIntervalId);
+    manualLoopRef.current = null;
+    useStore.getState().setManualLoopState(false, null, null);
+  }, []);
+
   const cancelTransition = useCallback(() => {
     const t = transitionRef.current;
     if (!t) return;
@@ -335,6 +393,11 @@ export function DualDeckStage() {
     stopOverlayNodes(t.overlayNodes);
     if (t.effect === "word-play") cancelHypePhrase();
     if (t.effect === "loop-roll") cancelLoop();
+    if (t.effect === "loop-hold") releaseManualLoop();
+    // Reverse Tail paused fromEl to replace it with the reversed overlay —
+    // an abrupt cancel needs to explicitly resume it, unlike every other
+    // effect (which never paused fromEl in the first place).
+    if (t.effect === "reverse-out" && fromEl) fromEl.play().catch(() => {});
     resetDeckNodes(t.toDeckId, 0);
     resetDeckNodes(t.fromDeckId, 1);
     loadedTrackId.current[t.toDeckId] = null;
@@ -342,7 +405,7 @@ export function DualDeckStage() {
     useStore.getState().setIsTransitioning(false);
     useStore.getState().setActiveTransitionRationale(null);
     useStore.getState().setActiveTransitionShortWhy(null);
-  }, [deckEl, resetDeckNodes, stopOverlayNodes, cancelLoop]);
+  }, [deckEl, resetDeckNodes, stopOverlayNodes, cancelLoop, releaseManualLoop]);
 
   /** Tears down an in-progress mashup cleanly (user seeked or picked a different track mid-mashup) — the idle toDeck was never touched yet, so only the buffer-voice and the still-playing fromDeck need resetting. */
   const cancelMashup = useCallback(() => {
@@ -397,6 +460,31 @@ export function DualDeckStage() {
     }
     tempoRampRef.current = null;
     tempoRampCompletedPairRef.current = null;
+  }, [deckEl]);
+
+  /** Tears down an in-progress Reverse Playback (user skipped/seeked, or a transition needs the deck back) — hands playback straight back to the deck's own <audio> element at the same position it was frozen at, no smoothing, same abrupt-interruption posture as cancelTempoRamp/cancelBackspin. */
+  const cancelReversePlayback = useCallback(() => {
+    const r = reverseRef.current;
+    if (!r) return;
+    try {
+      r.source.onended = null;
+      r.source.stop();
+    } catch {
+      // Already stopped/ended — harmless.
+    }
+    r.gain.disconnect();
+    const el = deckEl(r.deckId);
+    const nodes = deckNodesRef.current[r.deckId];
+    const ctx = audioCtxRef.current;
+    if (el) {
+      el.currentTime = r.entryTrackTimeSec;
+      el.play().catch(() => {});
+    }
+    if (nodes && ctx) {
+      nodes.gain.gain.cancelScheduledValues(ctx.currentTime);
+      nodes.gain.gain.setValueAtTime(1, ctx.currentTime);
+    }
+    reverseRef.current = null;
   }, [deckEl]);
 
   // Background analysis: as soon as a track is reachable (now playing or
@@ -615,8 +703,35 @@ export function DualDeckStage() {
       deckNodesRef.current = { A: null, B: null };
       masterGainRef.current = null;
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // Eagerly decode the CURRENT track's own audio (not the next one) so the
+  // "Reverse Tail" transition — which needs to reverse the outgoing deck's
+  // own recent audio — has a ready buffer by the time a transition might
+  // pick it, without stalling startTransition's synchronous dispatch to
+  // decode on demand. Same shared, URL-keyed mashupBufferCacheRef as the
+  // vocal-layer pre-decode effect and the mashup/tempo-ramp engines
+  // themselves — never double-decodes the same URL twice. Declared after
+  // the graph-building effect above (not before it) so audioCtxRef.current
+  // is already populated the very first time this runs, even when
+  // currentTrack is already set on mount — effects run in declaration
+  // order within the same commit, so ordering here is load-bearing, not
+  // cosmetic.
+  useEffect(() => {
+    if (!currentTrack || currentTrack.source !== "local") return;
+    const url = currentTrack.sourceUrl;
+    const ctx = audioCtxRef.current;
+    if (!ctx || mashupBufferCacheRef.current[url]) return;
+    fetch(url)
+      .then((res) => res.arrayBuffer())
+      .then((arrayBuffer) => ctx.decodeAudioData(arrayBuffer))
+      .then((buffer) => {
+        mashupBufferCacheRef.current[url] = buffer;
+      })
+      .catch(() => {
+        // Left uncached — the reverse-tail dispatch just skips the overlay (plain blend instead).
+      });
+  }, [currentTrack]);
 
   // Core transition machinery + auto-DJ lookahead + Mix Now subscription.
   useEffect(() => {
@@ -862,6 +977,66 @@ export function DualDeckStage() {
       return { source, filter, gain, analyser };
     }
 
+    /**
+     * Reverse Tail transition overlay: reverses the outgoing deck's own
+     * last windowSec of audio (up to fromEl's current playhead) and plays
+     * it through a one-shot buffer voice while fromEl is paused for the
+     * rest of the transition window — a real "rewind" gesture, not a gain
+     * trick. Unlike the other overlay layers (riser/tag-sample/vocal-layer,
+     * which all play ON TOP of the outgoing deck's still-forward-playing
+     * audio), this one REPLACES it, since hearing both at once would be
+     * incoherent. Pausing fromEl here is safe: completeTransition already
+     * unconditionally pauses/resets the outgoing deck at handoff, and
+     * cancelTransition's own "reverse-out" branch resumes it if the
+     * transition is cut short instead.
+     */
+    function startReverseTailLayer(
+      ctx: AudioContext,
+      windowSec: number,
+      buffer: AudioBuffer,
+      fromEl: HTMLAudioElement
+    ): OverlayNodes | null {
+      const masterGain = masterGainRef.current;
+      if (!masterGain) return null;
+      const entryTrackTimeSec = fromEl.currentTime;
+      const sliceStartSec = Math.max(0, entryTrackTimeSec - windowSec);
+      const sliceDurSec = entryTrackTimeSec - sliceStartSec;
+      if (sliceDurSec < 0.2) return null; // too close to the top of the file for a meaningful reverse
+
+      const sampleRate = buffer.sampleRate;
+      const startSample = Math.floor(sliceStartSec * sampleRate);
+      const endSample = Math.floor(entryTrackTimeSec * sampleRate);
+      const length = endSample - startSample;
+      const reversedBuffer = ctx.createBuffer(buffer.numberOfChannels, length, sampleRate);
+      for (let ch = 0; ch < buffer.numberOfChannels; ch++) {
+        const src = buffer.getChannelData(ch).subarray(startSample, endSample);
+        reversedBuffer.copyToChannel(reverseSamples(src), ch);
+      }
+
+      const source = ctx.createBufferSource();
+      source.buffer = reversedBuffer;
+      const filter = ctx.createBiquadFilter();
+      filter.type = "allpass"; // neutral passthrough — this effect is about the reversed audio itself, not tone-shaping
+      const gain = ctx.createGain();
+
+      source.connect(filter);
+      filter.connect(gain);
+      gain.connect(masterGain);
+
+      const now = ctx.currentTime;
+      const fadeSec = Math.min(0.05, sliceDurSec / 4);
+      gain.gain.setValueAtTime(0, now);
+      gain.gain.linearRampToValueAtTime(1, now + fadeSec);
+      gain.gain.setValueAtTime(1, now + sliceDurSec - fadeSec);
+      gain.gain.linearRampToValueAtTime(0, now + sliceDurSec);
+
+      fromEl.pause();
+      source.start(now);
+      source.stop(now + sliceDurSec + 0.05);
+
+      return { source, filter, gain };
+    }
+
     function startTransition(nextTrack: LocalTrack, plan: TransitionPlan) {
       if (transitionRef.current) return;
       const ctx = audioCtxRef.current;
@@ -928,7 +1103,17 @@ export function DualDeckStage() {
                     // as the plain equal-power blend already scheduled above.
                     return buf ? startVocalLayer(ctx, plan.windowSec, buf, plan.incomingEntryOffsetSec) : null;
                   })()
-                : null;
+                : plan.effect === "reverse-out"
+                  ? (() => {
+                      const fromTrack = useStore.getState().currentTrack;
+                      const url = fromTrack?.source === "local" ? fromTrack.sourceUrl : null;
+                      const buf = url ? mashupBufferCacheRef.current[url] : null;
+                      // Not decoded yet — graceful degradation: the transition
+                      // still plays out as the plain equal-power blend already
+                      // scheduled above, fromEl keeps playing forward normally.
+                      return buf ? startReverseTailLayer(ctx, plan.windowSec, buf, fromEl) : null;
+                    })()
+                  : null;
       if (plan.effect === "word-play") {
         // Fire-and-forget: SpeechSynthesis doesn't route through this
         // component's Web Audio graph, so it can't be volume-matched or
@@ -945,6 +1130,20 @@ export function DualDeckStage() {
         const fromAnalysis = fromTrackId ? getAnalysis(fromTrackId) : null;
         if (fromAnalysis && fromAnalysis.bpm > 0 && fromAnalysis.bpmConfidence >= MIN_TEMPO_CONFIDENCE_FOR_TRUST) {
           startBeatLoop(fromDeckId, fromAnalysis, fromEl.currentTime, BEAT_REPEAT_BARS, BEAT_REPEAT_REPEATS);
+        }
+      }
+      if (plan.effect === "loop-hold") {
+        // Holds the outgoing deck's last LOOP_HOLD_BARS bars in a real,
+        // indefinite loop for the whole transition window while the
+        // incoming track's intro plays underneath — same trustworthy-tempo
+        // gate as loop-roll; untrustworthy data just skips it (plain blend).
+        const fromTrackId = useStore.getState().currentTrack?.id;
+        const fromAnalysis = fromTrackId ? getAnalysis(fromTrackId) : null;
+        if (fromAnalysis && fromAnalysis.bpm > 0 && fromAnalysis.bpmConfidence >= MIN_TEMPO_CONFIDENCE_FOR_TRUST) {
+          const barLenSec = (4 * 60) / fromAnalysis.bpm;
+          const endSec = snapToBeatGrid(fromEl.currentTime, fromAnalysis.beatGridOffsetSec, fromAnalysis.bpm);
+          const startSec = Math.max(0, endSec - LOOP_HOLD_BARS * barLenSec);
+          if (endSec > startSec) startManualLoop(fromDeckId, startSec, endSec);
         }
       }
 
@@ -1009,6 +1208,10 @@ export function DualDeckStage() {
       // window on its own, but this guarantees it never outlives it (e.g.
       // rounding, or the window ending slightly early).
       if (t.effect === "loop-roll") cancelLoop();
+      // Same safety net for "loop-hold" — releases the real Loop In/Out
+      // that's been holding the outgoing deck's tail all window, so it
+      // doesn't keep rewinding a deck that's about to go idle anyway.
+      if (t.effect === "loop-hold") releaseManualLoop();
       const fromEl = deckEl(t.fromDeckId);
       if (fromEl) {
         fromEl.pause();
@@ -1073,6 +1276,100 @@ export function DualDeckStage() {
       const buffer = await ctx.decodeAudioData(arrayBuffer);
       mashupBufferCacheRef.current[url] = buffer;
       return buffer;
+    }
+
+    /**
+     * Reverse Playback: decodes the deck's own current track (reusing
+     * decodeTrackBuffer's cache — instant if a mashup already decoded this
+     * URL), reverses the windowSec immediately preceding the current
+     * playhead, and plays that reversed slice through a one-shot buffer
+     * voice while the real <audio> element is paused (frozen at its current
+     * position). Ends on its own (source.onended) and hands back to the
+     * <audio> element at the exact same position it was frozen at — the
+     * reversed slice plays what already happened, so forward playback
+     * resumes from the same point, not further ahead.
+     */
+    async function startReversePlayback(deckId: DeckId, windowSec: number) {
+      if (reverseRef.current || reverseStartingRef.current) return;
+      const state = useStore.getState();
+      const track = state.currentTrack;
+      if (!track || track.source !== "local" || deckId !== activeDeckRef.current) return;
+      const trackIdAtStart = track.id;
+      reverseStartingRef.current = true;
+      try {
+        const ctx = audioCtxRef.current;
+        const masterGain = masterGainRef.current;
+        const el = deckEl(deckId);
+        const nodes = deckNodesRef.current[deckId];
+        if (!ctx || !masterGain || !el || !nodes) return;
+
+        const buffer = await decodeTrackBuffer(ctx, track.sourceUrl);
+
+        // The world may have moved on while decoding — abort rather than
+        // reverse a slice that's no longer where playback actually is.
+        if (reverseRef.current || transitionRef.current || mashupRef.current || tempoRampRef.current) return;
+        if (useStore.getState().currentTrack?.id !== trackIdAtStart) return;
+        if (activeDeckRef.current !== deckId || loadedTrackId.current[deckId] !== trackIdAtStart) return;
+
+        const entryTrackTimeSec = el.currentTime;
+        const sliceStartSec = Math.max(0, entryTrackTimeSec - windowSec);
+        const sliceDurSec = entryTrackTimeSec - sliceStartSec;
+        if (sliceDurSec < 0.2) return; // too close to the top of the file for a meaningful reverse
+
+        const sampleRate = buffer.sampleRate;
+        const startSample = Math.floor(sliceStartSec * sampleRate);
+        const endSample = Math.floor(entryTrackTimeSec * sampleRate);
+        const length = endSample - startSample;
+        const reversedBuffer = ctx.createBuffer(buffer.numberOfChannels, length, sampleRate);
+        for (let ch = 0; ch < buffer.numberOfChannels; ch++) {
+          const src = buffer.getChannelData(ch).subarray(startSample, endSample);
+          reversedBuffer.copyToChannel(reverseSamples(src), ch);
+        }
+
+        const source = ctx.createBufferSource();
+        source.buffer = reversedBuffer;
+        const gain = ctx.createGain();
+        source.connect(gain);
+        gain.connect(masterGain);
+
+        const now = ctx.currentTime;
+        const fadeSec = Math.min(REVERSE_SWAP_FADE_SEC, sliceDurSec / 4);
+        gain.gain.setValueAtTime(0, now);
+        gain.gain.linearRampToValueAtTime(1, now + fadeSec);
+        gain.gain.setValueAtTime(1, now + sliceDurSec - fadeSec);
+        gain.gain.linearRampToValueAtTime(0, now + sliceDurSec);
+
+        nodes.gain.gain.cancelScheduledValues(now);
+        nodes.gain.gain.setValueAtTime(nodes.gain.gain.value, now);
+        nodes.gain.gain.linearRampToValueAtTime(0, now + fadeSec);
+
+        el.pause();
+        source.start(now);
+
+        const active: ActiveReverse = { deckId, entryTrackTimeSec, source, gain };
+        reverseRef.current = active;
+        source.onended = () => {
+          if (reverseRef.current === active) completeReversePlayback(active);
+        };
+      } finally {
+        reverseStartingRef.current = false;
+      }
+    }
+
+    /** Hands Reverse Playback back to the deck's own <audio> element at the exact position it was frozen at, then tears the buffer-voice down — mirrors completeTempoRamp's own handoff shape. */
+    function completeReversePlayback(r: ActiveReverse) {
+      const ctx = audioCtxRef.current;
+      const el = deckEl(r.deckId);
+      const nodes = deckNodesRef.current[r.deckId];
+      if (ctx && el && nodes) {
+        el.currentTime = r.entryTrackTimeSec;
+        el.play().catch(() => {});
+        const now = ctx.currentTime;
+        nodes.gain.gain.cancelScheduledValues(now);
+        nodes.gain.gain.setValueAtTime(nodes.gain.gain.value, now);
+        nodes.gain.gain.linearRampToValueAtTime(1, now + REVERSE_SWAP_FADE_SEC);
+      }
+      reverseRef.current = null;
     }
 
     /**
@@ -1587,7 +1884,9 @@ export function DualDeckStage() {
       if (loopRef.current) return;
       const el = deckEl(deckId);
       if (!el || !Number.isFinite(el.duration) || el.duration <= 0) return;
-      const startSec = snapToBeatGrid(currentTimeSec, analysis.beatGridOffsetSec, analysis.bpm);
+      const startSec = useStore.getState().quantizeEnabled
+        ? snapToBeatGrid(currentTimeSec, analysis.beatGridOffsetSec, analysis.bpm)
+        : currentTimeSec;
       const effectiveBpm = analysis.bpm > 0 ? analysis.bpm : 120;
       const endSec = startSec + (barsCount * 4 * 60) / effectiveBpm;
       if (endSec >= el.duration - 1) return;
@@ -1609,6 +1908,52 @@ export function DualDeckStage() {
         }
       }, TICK_INTERVAL_MS);
       loopRef.current = loop;
+    }
+
+    /** Starts (or restarts, if one's already running) a real, indefinite Loop In/Out on `deckId` between `startSec`/`endSec` — held until releaseManualLoop() is called, unlike startBeatLoop's fixed repeat count above. Used both by the manual Loop In/Out controls and by the "loop-hold" transition dispatch below. */
+    function startManualLoop(deckId: DeckId, startSec: number, endSec: number) {
+      releaseManualLoop();
+      const loop: ActiveManualLoop = { deckId, startSec, endSec, tickIntervalId: null };
+      loop.tickIntervalId = setInterval(() => {
+        const l = manualLoopRef.current;
+        if (!l) return;
+        const el = deckEl(l.deckId);
+        if (!el) return;
+        if (el.currentTime >= l.endSec) el.currentTime = l.startSec;
+      }, TICK_INTERVAL_MS);
+      manualLoopRef.current = loop;
+      useStore.getState().setManualLoopState(true, startSec, endSec);
+    }
+
+    /** Manual "Loop In" — captures the live playhead as the loop's start point (quantized to the beat grid if Quantize is on) without activating anything yet, mirroring a real CDJ's Loop In button. Loop Out (below) is what actually starts the loop. */
+    function setLoopIn(deckId: DeckId) {
+      const el = deckEl(deckId);
+      const trackId = useStore.getState().currentTrack?.source === "local" ? useStore.getState().currentTrack!.id : null;
+      if (!el || !trackId) return;
+      const analysis = getAnalysis(trackId);
+      const raw = el.currentTime;
+      const snapped =
+        useStore.getState().quantizeEnabled && analysis.bpm > 0
+          ? snapToBeatGrid(raw, analysis.beatGridOffsetSec, analysis.bpm)
+          : raw;
+      useStore.getState().setManualLoopState(false, snapped, null);
+    }
+
+    /** Manual "Loop Out" — captures the live playhead as the end point and activates the loop (same quantize treatment as Loop In). No-ops if Loop In was never set, or if the captured range is empty/inverted. */
+    function setLoopOut(deckId: DeckId) {
+      const el = deckEl(deckId);
+      const inSec = useStore.getState().manualLoopInSec;
+      if (!el || inSec == null) return;
+      const trackId = useStore.getState().currentTrack?.source === "local" ? useStore.getState().currentTrack!.id : null;
+      if (!trackId) return;
+      const analysis = getAnalysis(trackId);
+      const raw = el.currentTime;
+      const snapped =
+        useStore.getState().quantizeEnabled && analysis.bpm > 0
+          ? snapToBeatGrid(raw, analysis.beatGridOffsetSec, analysis.bpm)
+          : raw;
+      if (snapped <= inSec) return;
+      startManualLoop(deckId, inSec, snapped);
     }
 
     /**
@@ -1786,7 +2131,8 @@ export function DualDeckStage() {
           if (mashupPlanCacheRef.current?.pairKey !== pairKey) {
             const plan = planMashup(
               { track, analysis: currentAnalysis },
-              { track: nextTrack, analysis: getAnalysis(nextTrack.id) }
+              { track: nextTrack, analysis: getAnalysis(nextTrack.id) },
+              state.quantizeEnabled
             );
             mashupPlanCacheRef.current = { pairKey, plan };
           }
@@ -1813,6 +2159,7 @@ export function DualDeckStage() {
           : [...state.rerolledTransitionIds, "vocal-layering"],
         varietyBias: state.djVarietyBias,
         categoryWeights: useDjWeights.getState().categoryWeights,
+        quantize: state.quantizeEnabled,
       });
       const clampedWindow = Math.min(
         plan.windowSec,
@@ -1923,6 +2270,81 @@ export function DualDeckStage() {
     }, 500);
 
     const unsubscribe = useStore.subscribe((state, prevState) => {
+      // Beat Jump — an instant, no-restart nudge on the active deck. Only
+      // meaningful for a real, currently-analyzed local track; silently
+      // no-ops otherwise (matches loop-roll's own "untrustworthy data just
+      // skips it" posture for a live control that can't ask before firing).
+      if (
+        state.beatJumpForwardRequestId !== prevState.beatJumpForwardRequestId ||
+        state.beatJumpBackRequestId !== prevState.beatJumpBackRequestId
+      ) {
+        const direction = state.beatJumpForwardRequestId !== prevState.beatJumpForwardRequestId ? 1 : -1;
+        const el = deckEl(activeDeckRef.current);
+        const trackId = state.currentTrack?.source === "local" ? state.currentTrack.id : null;
+        const busy =
+          transitionRef.current || mashupRef.current || loopRef.current || backspinRef.current ||
+          tempoRampRef.current || reverseRef.current;
+        if (el && trackId && !busy) {
+          const analysis = getAnalysis(trackId);
+          if (analysis.bpm > 0 && Number.isFinite(el.duration) && el.duration > 0) {
+            const target = jumpBeats(el.currentTime, analysis.bpm, direction * BEAT_JUMP_COUNT, el.duration);
+            el.currentTime = state.quantizeEnabled
+              ? snapToBeatGrid(target, analysis.beatGridOffsetSec, analysis.bpm)
+              : target;
+          }
+        }
+      }
+
+      // Vinyl Brake Stop, manually triggered — same mechanism the ambience
+      // system already uses opportunistically, just exposed as a direct cue.
+      if (
+        state.backspinRequestId !== prevState.backspinRequestId &&
+        state.currentTrack?.source === "local" &&
+        !transitionRef.current &&
+        !mashupRef.current &&
+        !loopRef.current &&
+        !tempoRampRef.current &&
+        !reverseRef.current
+      ) {
+        triggerBackspin(activeDeckRef.current, MANUAL_BACKSPIN_WINDOW_SEC);
+      }
+
+      // Reverse Playback, manually triggered.
+      if (
+        state.reverseRequestId !== prevState.reverseRequestId &&
+        state.currentTrack?.source === "local" &&
+        !transitionRef.current &&
+        !mashupRef.current &&
+        !loopRef.current &&
+        !backspinRef.current &&
+        !tempoRampRef.current &&
+        !reverseRef.current
+      ) {
+        void startReversePlayback(activeDeckRef.current, MANUAL_REVERSE_WINDOW_SEC);
+      }
+
+      // Manual Loop In/Out — real, indefinite loop control (not the
+      // fixed-repeat Beat Repeat stutter). Loop In/Out both no-op while any
+      // other mechanism (including an already-active manual loop) is
+      // driving the deck; Exit Loop only needs a loop to actually release.
+      const loopBusy =
+        transitionRef.current ||
+        mashupRef.current ||
+        loopRef.current ||
+        backspinRef.current ||
+        tempoRampRef.current ||
+        reverseRef.current ||
+        manualLoopRef.current;
+      if (state.loopInRequestId !== prevState.loopInRequestId && state.currentTrack?.source === "local" && !loopBusy) {
+        setLoopIn(activeDeckRef.current);
+      }
+      if (state.loopOutRequestId !== prevState.loopOutRequestId && state.currentTrack?.source === "local" && !loopBusy) {
+        setLoopOut(activeDeckRef.current);
+      }
+      if (state.loopExitRequestId !== prevState.loopExitRequestId) {
+        releaseManualLoop();
+      }
+
       if (state.mixNowRequestId === prevState.mixNowRequestId) return;
       if (transitionRef.current || mashupRef.current) return;
       const track = state.currentTrack;
@@ -1948,6 +2370,7 @@ export function DualDeckStage() {
           : [...state.rerolledTransitionIds, "vocal-layering"],
         varietyBias: state.djVarietyBias,
         categoryWeights: useDjWeights.getState().categoryWeights,
+        quantize: state.quantizeEnabled,
       });
       applyLearningNudge(track, nextTrack, state, activeEl?.currentTime ?? null, plan);
       startTransition(nextTrack, plan);
@@ -1994,6 +2417,16 @@ export function DualDeckStage() {
         // Already stopped — harmless.
       }
       tempoRampRef.current = null;
+      try {
+        reverseRef.current?.source.stop();
+      } catch {
+        // Already stopped — harmless.
+      }
+      reverseRef.current = null;
+      if (manualLoopRef.current?.tickIntervalId != null) {
+        clearInterval(manualLoopRef.current.tickIntervalId);
+      }
+      manualLoopRef.current = null;
       if (crossSourceFadeTimeoutRef.current != null) {
         clearTimeout(crossSourceFadeTimeoutRef.current);
         crossSourceFadeTimeoutRef.current = null;
@@ -2001,7 +2434,7 @@ export function DualDeckStage() {
       elA?.removeEventListener("ended", onEndedA);
       elB?.removeEventListener("ended", onEndedB);
     };
-  }, [cancelLoop, cancelTempoRamp, deckEl, resetDeckNodes, stopOverlayNodes]);
+  }, [cancelLoop, cancelTempoRamp, deckEl, resetDeckNodes, stopOverlayNodes, releaseManualLoop]);
 
   // External track changes (library/queue click, next/previous, playlist
   // play) land here. Transitions we drive ourselves already have the new
@@ -2024,6 +2457,8 @@ export function DualDeckStage() {
       cancelLoop();
       cancelBackspin();
       cancelTempoRamp();
+      cancelReversePlayback();
+      releaseManualLoop();
       (["A", "B"] as DeckId[]).forEach((id) => deckEl(id)?.pause());
       loadedTrackId.current = { A: null, B: null };
       return;
@@ -2035,6 +2470,8 @@ export function DualDeckStage() {
     cancelLoop();
     cancelBackspin();
     cancelTempoRamp();
+    cancelReversePlayback();
+    releaseManualLoop();
 
     const idleId: DeckId = activeDeck === "A" ? "B" : "A";
     const idleEl = deckEl(idleId);
@@ -2076,6 +2513,8 @@ export function DualDeckStage() {
     cancelLoop,
     cancelMashup,
     cancelTempoRamp,
+    cancelReversePlayback,
+    releaseManualLoop,
     cancelTransition,
     deckEl,
     resetDeckNodes,
@@ -2169,6 +2608,8 @@ export function DualDeckStage() {
     cancelLoop();
     cancelBackspin();
     cancelTempoRamp();
+    cancelReversePlayback();
+    releaseManualLoop();
     const activeEl = deckEl(activeDeck);
     if (activeEl) activeEl.currentTime = seekRequest;
     clearSeekRequest();
@@ -2180,6 +2621,8 @@ export function DualDeckStage() {
     cancelLoop,
     cancelMashup,
     cancelTempoRamp,
+    cancelReversePlayback,
+    releaseManualLoop,
     clearSeekRequest,
     cancelTransition,
     deckEl,
