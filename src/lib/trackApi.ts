@@ -53,6 +53,7 @@ export function toTrackApiResponse(track: PrismaTrack): TrackApiResponse {
     thumbnailUrl: track.thumbnailUrl ?? undefined,
     playPreference: isPlayPreference(track.playPreference) ? track.playPreference : undefined,
     hotCueOverrides: track.hotCueOverridesJson ? JSON.parse(track.hotCueOverridesJson) : undefined,
+    tags: track.tagsJson ? JSON.parse(track.tagsJson) : undefined,
     analysis,
     lyricalFingerprint,
   };

@@ -55,6 +55,9 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
     }
     if (Array.isArray(a.waveformPeaks)) data.waveformPeaksJson = JSON.stringify(a.waveformPeaks);
   }
+  if (Array.isArray(body.tags)) {
+    data.tagsJson = JSON.stringify(body.tags.filter((t: unknown): t is string => typeof t === "string" && t.trim().length > 0));
+  }
   if (body.hotCueOverrides && typeof body.hotCueOverrides === "object") {
     const sanitized: Record<string, number> = {};
     for (const [cueNumber, atSec] of Object.entries(body.hotCueOverrides)) {

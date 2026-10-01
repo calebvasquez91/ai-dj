@@ -10,6 +10,8 @@ interface TrackBase {
   playPreference?: "must" | "do-not";
   /** Manually-set Hot Cue positions, keyed 1-8 (src/lib/hot-cues.ts) — sparse; a cue not present here falls back to the best-effort auto placement (or stays unset). The only source of hot cues for a YouTube track. */
   hotCueOverrides?: Record<number, number>;
+  /** User-set free-text tags, e.g. ["halloween","spooky"] — drives the Spooky Music system playlist's auto-membership. Empty/absent means untagged. */
+  tags?: string[];
 }
 
 /** A locally-uploaded file, played through the full Web Audio engine (real BPM/key/energy analysis, EQ, mashups, tempo ramps). */
@@ -39,6 +41,27 @@ export interface Playlist {
   name: string;
   tracks: Track[];
   createdAt: number;
+  /** Marks a system-curated playlist, e.g. "spooky" for the built-in Spooky Music playlist — undefined for a normal user-made playlist. */
+  theme?: string;
+}
+
+export type FxCategory = "transition" | "loop" | "effect" | "background" | "vocal";
+
+/** An uploaded FX/stinger sound — see prisma/schema.prisma's FxSound model for the storage-side shape this mirrors. */
+export interface FxSound {
+  id: string;
+  name: string;
+  fileName: string;
+  sourceUrl: string;
+  mimeType: string;
+  category: FxCategory;
+  durationSec: number;
+  bpm?: number;
+  key?: string;
+  tags: string[];
+  /** Themed playlists/modes this FX is eligible for, e.g. ["spooky","halloween"]. */
+  playlistAffinity: string[];
+  addedAt: number;
 }
 
 export type DeckId = "A" | "B";

@@ -29,5 +29,6 @@ export function toPlaylistApiResponse(playlist: NonNullable<PlaylistWithTracks>)
     name: playlist.name,
     createdAt: playlist.createdAt.getTime(),
     tracks: playlist.tracks.map((pt) => toTrackApiResponse(pt.track)),
+    theme: playlist.theme ?? undefined,
   };
 }

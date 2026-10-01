@@ -62,7 +62,7 @@ function PlaylistContent() {
           <div className="flex items-center gap-3">
             <button
               type="button"
-              onClick={() => playTrackList(playlist.tracks, 0)}
+              onClick={() => playTrackList(playlist.tracks, 0, playlist.theme)}
               className="btn self-start"
             >
               ▶ Play
@@ -84,10 +84,10 @@ function PlaylistContent() {
                 key={track.id}
                 role="button"
                 tabIndex={0}
-                onClick={() => playTrackList(playlist.tracks, index)}
+                onClick={() => playTrackList(playlist.tracks, index, playlist.theme)}
                 onKeyDown={(e) => {
                   if (e.key === "Enter" || e.key === " ")
-                    playTrackList(playlist.tracks, index);
+                    playTrackList(playlist.tracks, index, playlist.theme);
                 }}
                 className={`flex items-center gap-3 rounded-xl px-3 py-2 cursor-pointer border border-transparent hover:border-accent/40 hover:bg-surface-hover transition-colors ${
                   currentTrack?.id === track.id ? "bg-surface-hover border-accent/40" : ""
