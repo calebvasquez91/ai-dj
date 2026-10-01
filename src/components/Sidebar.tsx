@@ -27,8 +27,8 @@ function NavLink({
       onClick={onNavigate}
       className={`relative flex items-center gap-3 rounded-full pl-2.5 pr-3 py-2 text-sm font-semibold transition-colors ${
         active
-          ? "bg-gradient-to-r from-accent-teal/20 to-accent-purple/20 text-accent-purple"
-          : "text-muted hover:text-foreground hover:bg-surface-hover"
+          ? "bg-gradient-to-r from-accent-teal/20 to-accent-purple/20 text-accent-purple border border-accent-purple/25"
+          : "text-muted hover:text-foreground hover:bg-surface-hover border border-transparent"
       }`}
     >
       <span
@@ -69,7 +69,7 @@ export function Sidebar() {
         />
       )}
       <aside
-        className={`fixed inset-y-0 left-0 z-40 w-60 shrink-0 bg-surface/90 backdrop-blur-xl border-r border-border/10 shadow-elevate-right flex flex-col gap-4 p-3 overflow-y-auto md:static ${
+        className={`fixed inset-y-0 left-0 z-40 w-60 shrink-0 surface-glass border-r border-border/10 shadow-elevate-right flex flex-col gap-4 p-3 overflow-y-auto md:static ${
           sidebarOpen ? "" : "max-md:hidden"
         }`}
       >

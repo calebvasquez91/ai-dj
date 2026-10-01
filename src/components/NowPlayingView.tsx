@@ -74,7 +74,7 @@ export function NowPlayingView() {
         <button
           type="button"
           onClick={() => setExpanded(false)}
-          className="btn-icon absolute left-4 text-accent-purple hover:text-accent-pink"
+          className="btn-icon absolute left-4 text-2xl text-accent-purple hover:text-accent-pink"
           title="Back to browsing"
         >
           <ChevronDownIcon size={22} />
@@ -89,7 +89,7 @@ export function NowPlayingView() {
           </div>
 
           <div className="flex items-center gap-3 max-w-md min-w-0">
-            <Que size={30} />
+            <Que size={30} visible={expanded} />
             <div className="text-center flex-1 min-w-0">
               <p className="text-2xl font-bold truncate">{currentTrack.title}</p>
               <p className="text-base text-muted truncate">{currentTrack.artist}</p>
@@ -122,7 +122,7 @@ export function NowPlayingView() {
             <button
               type="button"
               onClick={previous}
-              className="btn-icon text-accent-purple hover:text-accent-pink"
+              className="btn-icon text-3xl text-accent-purple hover:text-accent-pink"
               title="Previous (←)"
             >
               <PreviousIcon size={28} />
@@ -138,7 +138,7 @@ export function NowPlayingView() {
             <button
               type="button"
               onClick={next}
-              className="btn-icon text-accent-purple hover:text-accent-pink"
+              className="btn-icon text-3xl text-accent-purple hover:text-accent-pink"
               title="Next (→)"
             >
               <NextIcon size={28} />

@@ -40,7 +40,11 @@ const TALK_FRAME_MS = 150;
  * animations (their transform-origins are in the SVG's own viewBox units,
  * unaffected by the rendered pixel size).
  */
-export function Que({ welcomeMessage, size = 32 }: { welcomeMessage?: string; size?: number } = {}) {
+export function Que({
+  welcomeMessage,
+  size = 32,
+  visible = true,
+}: { welcomeMessage?: string; size?: number; visible?: boolean } = {}) {
   const shortWhy = useStore((s) => s.activeTransitionShortWhy);
   const isPlaying = useStore((s) => s.isPlaying);
   const [reacting, setReacting] = useState(false);
@@ -68,6 +72,15 @@ export function Que({ welcomeMessage, size = 32 }: { welcomeMessage?: string; si
   }, []);
 
   useEffect(() => {
+    // Skip entirely while this instance isn't visible (e.g. NowPlayingView's
+    // copy of Que while the panel is still collapsed) — otherwise its pill
+    // auto-dismiss timer runs on a clock the user can't see, and the pill
+    // can already be gone by the time the panel opens. Deliberately doesn't
+    // update seenShortWhy here: the moment `visible` flips true, this effect
+    // re-runs (it's a dependency) and reacts fresh to whatever shortWhy is
+    // current then, rather than treating a reason it never actually showed
+    // as "already seen."
+    if (!visible) return;
     if (!shortWhy) {
       seenShortWhy.current = null;
       return;
@@ -84,7 +97,7 @@ export function Que({ welcomeMessage, size = 32 }: { welcomeMessage?: string; si
     autoDismissTimer.current = setTimeout(() => setPillDismissed(true), PILL_AUTO_DISMISS_MS);
 
     return () => clearTimeout(bounceTimer);
-  }, [shortWhy]);
+  }, [shortWhy, visible]);
 
   useEffect(() => {
     return () => {

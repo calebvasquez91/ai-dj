@@ -23,6 +23,28 @@ const BARS = Array.from({ length: BAR_COUNT }, (_, i) => ({
   peak: 28 + ((i * 37) % 55),
 }));
 
+// Built once at module load, not per-render/per-mount: none of these values
+// depend on isPlaying (only the wrapper div's className does), so there's
+// no reason to re-map BARS into fresh <span>/style objects on every
+// play/pause toggle — isPlaying is exactly what this component subscribes
+// to, so it re-renders on every one.
+const BAR_ELEMENTS = BARS.map((bar, i) => (
+  <span
+    key={i}
+    className="music-wave-bar"
+    style={
+      {
+        left: `${bar.left}%`,
+        "--wave-duration": `${bar.duration}s`,
+        "--wave-delay": `${bar.delay}s`,
+        // Unitless, not a percentage — globals.css's .music-wave-bar
+        // divides it in calc() to derive the resting scaleY ratio.
+        "--wave-peak": `${bar.peak}`,
+      } as React.CSSProperties
+    }
+  />
+));
+
 export function MusicWaveBackground() {
   const isPlaying = useStore((s) => s.isPlaying);
 
@@ -31,20 +53,7 @@ export function MusicWaveBackground() {
       className={`music-wave-bg${isPlaying ? " is-playing" : ""}`}
       aria-hidden="true"
     >
-      {BARS.map((bar, i) => (
-        <span
-          key={i}
-          className="music-wave-bar"
-          style={
-            {
-              left: `${bar.left}%`,
-              "--wave-duration": `${bar.duration}s`,
-              "--wave-delay": `${bar.delay}s`,
-              "--wave-peak": `${bar.peak}%`,
-            } as React.CSSProperties
-          }
-        />
-      ))}
+      {BAR_ELEMENTS}
     </div>
   );
 }

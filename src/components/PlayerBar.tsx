@@ -64,7 +64,7 @@ export function PlayerBar() {
 
   return (
     <footer
-      className="relative min-h-20 shrink-0 shadow-elevate-top bg-surface/85 backdrop-blur-xl border-t border-border/10 px-4 py-2 flex flex-wrap items-center gap-2 lg:gap-4"
+      className="relative min-h-20 shrink-0 shadow-elevate-top surface-glass border-t border-border/10 px-4 py-2 flex flex-wrap items-center gap-2 lg:gap-4"
       inert={nowPlayingExpanded ? true : undefined}
     >
       {currentTrack && (
