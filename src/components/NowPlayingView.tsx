@@ -4,6 +4,8 @@ import { useEffect } from "react";
 import Image from "next/image";
 import { useStore } from "@/lib/store";
 import { formatTime } from "@/lib/format";
+import { ChevronDownIcon, NextIcon, PauseIcon, PlayIcon, PreviousIcon } from "@/components/Icons";
+import { Que } from "@/components/Que";
 
 /**
  * Full-screen now-playing view, expanded from the compact PlayerBar footer
@@ -46,12 +48,28 @@ export function NowPlayingView() {
 
   return (
     <div
-      className={`now-playing-panel fixed inset-0 z-50 bg-background flex flex-col ${
+      className={`now-playing-panel fixed inset-0 z-50 bg-background flex flex-col overflow-hidden ${
         expanded ? "translate-y-0" : "translate-y-full"
       }`}
       aria-hidden={!expanded}
       inert={!expanded ? true : undefined}
     >
+      {/* Immersive blurred-artwork backdrop, Apple Music/Spotify full-screen
+          player style — the same cover art, scaled up and heavily blurred,
+          with a scrim of the page's own --background over it so text stays
+          readable regardless of how bright/dark the art is. Negative
+          z-index within this panel's own stacking context (it's `fixed` +
+          `z-50`, so it forms one) keeps it behind the normal-flow content
+          below without those elements needing z-index of their own. */}
+      {currentTrack?.thumbnailUrl && (
+        <div
+          className="absolute inset-0 -z-10 bg-cover bg-center opacity-50 blur-3xl scale-125"
+          style={{ backgroundImage: `url(${currentTrack.thumbnailUrl})` }}
+          aria-hidden="true"
+        />
+      )}
+      <div className="absolute inset-0 -z-10 bg-background/70" aria-hidden="true" />
+
       <div className="flex items-center justify-center p-4 shrink-0">
         <button
           type="button"
@@ -59,7 +77,7 @@ export function NowPlayingView() {
           className="btn-icon absolute left-4 text-2xl text-accent-purple hover:text-accent-pink"
           title="Back to browsing"
         >
-          ⌄
+          <ChevronDownIcon size={22} />
         </button>
         <span className="text-xs font-semibold uppercase tracking-wide text-muted">Now Playing</span>
       </div>
@@ -70,9 +88,12 @@ export function NowPlayingView() {
             <TrackThumbnailFill thumbnailUrl={currentTrack.thumbnailUrl} title={currentTrack.title} />
           </div>
 
-          <div className="text-center max-w-md">
-            <p className="text-2xl font-bold truncate">{currentTrack.title}</p>
-            <p className="text-base text-muted truncate">{currentTrack.artist}</p>
+          <div className="flex items-center gap-3 max-w-md min-w-0">
+            <Que size={30} visible={expanded} />
+            <div className="text-center flex-1 min-w-0">
+              <p className="text-2xl font-bold truncate">{currentTrack.title}</p>
+              <p className="text-base text-muted truncate">{currentTrack.artist}</p>
+            </div>
           </div>
 
           <div className="w-full max-w-md flex flex-col gap-2">
@@ -104,15 +125,15 @@ export function NowPlayingView() {
               className="btn-icon text-3xl text-accent-purple hover:text-accent-pink"
               title="Previous (←)"
             >
-              ⏮
+              <PreviousIcon size={28} />
             </button>
             <button
               type="button"
               onClick={togglePlay}
-              className="w-16 h-16 rounded-full bg-gradient-to-br from-accent-teal to-accent-purple text-white flex items-center justify-center text-2xl shadow-elevate-md"
+              className="w-16 h-16 rounded-full bg-gradient-to-br from-accent-teal to-accent-purple text-white flex items-center justify-center shadow-elevate-md transition-transform hover:scale-105 active:scale-95"
               title={isPlaying ? "Pause (Space)" : "Play (Space)"}
             >
-              {isPlaying ? "⏸" : "▶"}
+              {isPlaying ? <PauseIcon size={28} /> : <PlayIcon size={28} className="translate-x-0.5" />}
             </button>
             <button
               type="button"
@@ -120,7 +141,7 @@ export function NowPlayingView() {
               className="btn-icon text-3xl text-accent-purple hover:text-accent-pink"
               title="Next (→)"
             >
-              ⏭
+              <NextIcon size={28} />
             </button>
           </div>
         </div>

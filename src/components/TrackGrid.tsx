@@ -6,6 +6,7 @@ import { useNow } from "@/lib/useNow";
 import { AddToPlaylistButton } from "@/components/AddToPlaylistButton";
 import { SeparateStemsButton } from "@/components/SeparateStemsButton";
 import { TrackThumbnail } from "@/components/TrackThumbnail";
+import { CloseIcon, NoEntryIcon, PauseIcon, PlayIcon, StarIcon } from "@/components/Icons";
 import type { Track } from "@/types/music";
 
 /** Image-forward grid variant of TrackList, for the Library page's browsing view. Same actions (play, Must/Do-Not-Play, add to playlist, remove, select mode) as the row list — just laid out as tiles. */
@@ -22,6 +23,8 @@ export function TrackGrid({
 }) {
   const playTrackList = useStore((s) => s.playTrackList);
   const currentTrack = useStore((s) => s.currentTrack);
+  const isPlaying = useStore((s) => s.isPlaying);
+  const togglePlay = useStore((s) => s.togglePlay);
   const setTrackPlayPreference = useStore((s) => s.setTrackPlayPreference);
   const now = useNow();
   const selectMode = Boolean(onToggleSelect);
@@ -53,6 +56,20 @@ export function TrackGrid({
           >
             <div className="relative">
               <TrackThumbnail thumbnailUrl={track.thumbnailUrl} title={track.title} size={144} />
+              {!selectMode && (
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    if (isCurrent) togglePlay();
+                    else playTrackList(tracks, index);
+                  }}
+                  className="absolute bottom-2 right-2 w-10 h-10 rounded-full bg-gradient-to-br from-accent-teal to-accent-purple text-white flex items-center justify-center shadow-elevate-md opacity-0 translate-y-1 group-hover:opacity-100 group-hover:translate-y-0 focus:opacity-100 transition-all duration-200 hover:scale-105 active:scale-95"
+                  title={isCurrent && isPlaying ? "Pause" : "Play"}
+                >
+                  {isCurrent && isPlaying ? <PauseIcon size={16} /> : <PlayIcon size={16} className="translate-x-0.5" />}
+                </button>
+              )}
               {selectMode && (
                 <input
                   type="checkbox"
@@ -84,7 +101,7 @@ export function TrackGrid({
                     e.stopPropagation();
                     setTrackPlayPreference(track.id, track.playPreference === "must" ? undefined : "must");
                   }}
-                  className={`btn-icon text-sm leading-none ${
+                  className={`btn-icon ${
                     track.playPreference === "must" ? "text-accent-yellow" : "text-muted"
                   }`}
                   title={
@@ -93,7 +110,7 @@ export function TrackGrid({
                       : "Mark Must-Play (guaranteed + first in Shuffle Play)"
                   }
                 >
-                  ★
+                  <StarIcon size={14} filled={track.playPreference === "must"} />
                 </button>
                 <button
                   type="button"
@@ -101,7 +118,7 @@ export function TrackGrid({
                     e.stopPropagation();
                     setTrackPlayPreference(track.id, track.playPreference === "do-not" ? undefined : "do-not");
                   }}
-                  className={`btn-icon text-sm leading-none ${
+                  className={`btn-icon ${
                     track.playPreference === "do-not" ? "text-accent-pink" : "text-muted"
                   }`}
                   title={
@@ -110,7 +127,7 @@ export function TrackGrid({
                       : "Mark Do-Not-Play (excluded from Shuffle Play)"
                   }
                 >
-                  🚫
+                  <NoEntryIcon size={14} />
                 </button>
                 <AddToPlaylistButton track={track} />
                 <SeparateStemsButton track={track} />
@@ -121,10 +138,10 @@ export function TrackGrid({
                       e.stopPropagation();
                       onRemove(track.id);
                     }}
-                    className="btn-icon text-muted hover:text-accent-pink text-sm leading-none ml-auto"
+                    className="btn-icon text-muted hover:text-accent-pink ml-auto"
                     title="Remove from library"
                   >
-                    ✕
+                    <CloseIcon size={14} />
                   </button>
                 )}
               </div>

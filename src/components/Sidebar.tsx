@@ -5,15 +5,17 @@ import { usePathname, useRouter } from "next/navigation";
 import { useSession, signOut } from "next-auth/react";
 import { useStore } from "@/lib/store";
 import { ThemeToggle } from "@/components/ThemeToggle";
+import { HomeIcon, LibraryIcon, SparklesIcon } from "@/components/Icons";
+import type { ComponentType } from "react";
 
 function NavLink({
   href,
-  icon,
+  icon: Icon,
   label,
   onNavigate,
 }: {
   href: string;
-  icon: string;
+  icon: ComponentType<{ size?: number; className?: string }>;
   label: string;
   onNavigate: () => void;
 }) {
@@ -23,15 +25,17 @@ function NavLink({
     <Link
       href={href}
       onClick={onNavigate}
-      className={`flex items-center gap-3 rounded-full px-3 py-2 text-sm font-semibold transition-colors ${
+      className={`relative flex items-center gap-3 rounded-full pl-2.5 pr-3 py-2 text-sm font-semibold transition-colors ${
         active
-          ? "bg-gradient-to-r from-accent-teal/20 to-accent-purple/20 text-accent-purple border border-border"
-          : "text-muted hover:text-foreground hover:bg-surface-hover"
+          ? "bg-gradient-to-r from-accent-teal/20 to-accent-purple/20 text-accent-purple border border-accent-purple/25"
+          : "text-muted hover:text-foreground hover:bg-surface-hover border border-transparent"
       }`}
     >
-      <span className="text-base leading-none" aria-hidden="true">
-        {icon}
-      </span>
+      <span
+        className={`h-4 w-1 rounded-full shrink-0 transition-opacity ${active ? "bg-gradient-to-b from-accent-teal to-accent-purple opacity-100" : "opacity-0"}`}
+        aria-hidden="true"
+      />
+      <Icon size={18} />
       {label}
     </Link>
   );
@@ -65,7 +69,7 @@ export function Sidebar() {
         />
       )}
       <aside
-        className={`fixed inset-y-0 left-0 z-40 w-60 shrink-0 bg-surface shadow-elevate-right flex flex-col gap-4 p-3 overflow-y-auto md:static ${
+        className={`fixed inset-y-0 left-0 z-40 w-60 shrink-0 surface-glass border-r border-border/10 shadow-elevate-right flex flex-col gap-4 p-3 overflow-y-auto md:static ${
           sidebarOpen ? "" : "max-md:hidden"
         }`}
       >
@@ -75,9 +79,9 @@ export function Sidebar() {
         </div>
 
         <nav className="flex flex-col gap-1">
-          <NavLink href="/" icon="🏠" label="Home" onNavigate={closeOnMobile} />
-          <NavLink href="/library" icon="🎵" label="Music Library" onNavigate={closeOnMobile} />
-          <NavLink href="/inspiration" icon="✨" label="DJ Inspiration" onNavigate={closeOnMobile} />
+          <NavLink href="/" icon={HomeIcon} label="Home" onNavigate={closeOnMobile} />
+          <NavLink href="/library" icon={LibraryIcon} label="Music Library" onNavigate={closeOnMobile} />
+          <NavLink href="/inspiration" icon={SparklesIcon} label="DJ Inspiration" onNavigate={closeOnMobile} />
         </nav>
 
         <div className="flex items-center justify-between px-2 pt-2">

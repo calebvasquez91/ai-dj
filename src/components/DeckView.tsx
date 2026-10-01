@@ -15,6 +15,7 @@ import { JogWheel } from "@/components/JogWheel";
 import { transitions } from "@/data/transitions";
 import { genreFamilies } from "@/data/styles";
 import { CROSSFADE_PRESETS, DJ_MODES } from "@/components/PlayerBar";
+import { CloseIcon } from "@/components/Icons";
 import type { AmbienceFrequency } from "@/lib/ambience";
 import type { Track, DeckId } from "@/types/music";
 
@@ -452,7 +453,7 @@ export function DeckView() {
   return (
     <>
       <div className="fixed inset-0 z-40 bg-black/50" onClick={toggle} aria-hidden="true" />
-      <div className="fixed inset-x-4 bottom-32 md:bottom-24 z-50 mx-auto max-w-3xl max-h-[70vh] overflow-y-auto rounded-2xl bg-surface p-4 flex flex-col gap-3 shadow-elevate-lg">
+      <div className="fixed inset-x-4 bottom-32 md:bottom-24 z-50 mx-auto max-w-3xl max-h-[70vh] overflow-y-auto rounded-2xl bg-surface/95 backdrop-blur-xl p-4 flex flex-col gap-3 shadow-elevate-lg">
         <div className="flex flex-wrap items-center justify-between gap-2">
           <h2 className="text-sm heading">DJ Decks</h2>
           <div className="flex flex-wrap items-center gap-3">
@@ -521,10 +522,10 @@ export function DeckView() {
             <button
               type="button"
               onClick={toggle}
-              className="btn-icon text-accent-purple hover:text-accent-pink text-lg leading-none"
+              className="btn-icon text-accent-purple hover:text-accent-pink"
               title="Close"
             >
-              ✕
+              <CloseIcon />
             </button>
           </div>
         </div>

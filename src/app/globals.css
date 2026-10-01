@@ -141,6 +141,18 @@ body {
   box-shadow: 8px 0 24px color-mix(in srgb, var(--foreground) calc(7% * var(--shadow-boost)), transparent);
 }
 
+/* The app's persistent chrome (Sidebar, PlayerBar, QueuePanel, TopBar) all
+   want the same frosted-glass treatment — previously each wrote out its own
+   copy of the same two utilities and quietly drifted (85% vs 90% opacity,
+   blur vs blur-xl). One definition here, same spirit as .shadow-elevate-*
+   above; pair with a directional border-t/l/r border-border/10 at the call
+   site for the hairline edge each surface needs. */
+.surface-glass {
+  background: color-mix(in srgb, var(--surface) 90%, transparent);
+  backdrop-filter: blur(24px);
+  -webkit-backdrop-filter: blur(24px);
+}
+
 /* Bungee reserved for the wordmark only — everything else uses the sans. Keeps
    the one small gradient flourish the old .retro-heading gave every heading,
    now scoped to just the brand mark. */
@@ -371,6 +383,29 @@ body {
   96% { transform: scaleY(0.15); }
 }
 
+/* Bobbing along with the beat — applied whenever a track is actually
+   playing (Que.tsx's `playing` class), replacing the slow idle breathing
+   with a snappier, more energetic nod. Declared before .reacting below so
+   a transition's one-shot bounce still wins the cascade on the rare frame
+   both classes are present together. */
+.que-stage.playing .que-body {
+  animation: que-groove-bob 0.5s ease-in-out infinite;
+}
+
+.que-stage.playing .que-band {
+  animation: que-groove-band 0.5s ease-in-out infinite;
+}
+
+@keyframes que-groove-bob {
+  0%, 100% { transform: translateY(0) rotate(0deg) scale(1, 1); }
+  50% { transform: translateY(-4px) rotate(-3deg) scale(1.03, 0.97); }
+}
+
+@keyframes que-groove-band {
+  0%, 100% { transform: rotate(0deg); }
+  50% { transform: rotate(-6deg); }
+}
+
 .que-stage.reacting .que-body {
   animation: que-react-bounce 0.6s cubic-bezier(0.34, 1.7, 0.64, 1);
 }
@@ -406,6 +441,8 @@ body {
   .que-body,
   .que-band,
   .que-eye,
+  .que-stage.playing .que-body,
+  .que-stage.playing .que-band,
   .que-stage.reacting .que-body,
   .que-stage.reacting .que-band,
   .que-stage.reacting .que-ring {
@@ -629,6 +666,74 @@ body {
   font-weight: 700;
   color: white;
   opacity: 0.7;
+}
+
+/* ---- Ambient music-wave background (Part C) ----
+   A fixed equalizer wash behind every route, mounted once in the (app)
+   layout — see components/MusicWaveBackground.tsx for why the timing is
+   index-derived rather than random. Sits above the body's radial-gradient
+   wash but below the sidebar/content (z-index -1 — see the rule below for
+   why it has to be negative, not 0), and never intercepts input. */
+
+.music-wave-bg {
+  position: fixed;
+  inset: 0;
+  /* Negative, not 0: the app shell (Sidebar/TopBar/main) is an ordinary
+     non-positioned element, which paints ABOVE a positioned z-index:0
+     sibling in stacking order regardless of DOM order — only a negative
+     z-index reliably sits behind it without having to also opt every
+     surface into its own stacking context. */
+  z-index: -1;
+  overflow: hidden;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.6s ease;
+}
+
+.music-wave-bg.is-playing {
+  opacity: 1;
+}
+
+.music-wave-bar {
+  position: absolute;
+  bottom: 0;
+  width: 3px;
+  /* Fixed at each bar's own peak height; the "bob" is a transform scale
+     from the resting ratio up to 1, not an animated height — animating
+     height is layout-triggering and these 48 bars run continuously for as
+     long as something is playing, which would mean a forced layout/paint
+     on every frame for the whole life of playback. transform is
+     compositor-only, so the resting/peak math is done once here instead
+     (--wave-peak is a unitless number so it can be divided in calc()). */
+  height: calc(var(--wave-peak, 40) * 1%);
+  border-radius: 999px 999px 0 0;
+  transform-origin: bottom;
+  transform: scaleY(calc(6 / var(--wave-peak, 40)));
+  background: linear-gradient(
+    to top,
+    color-mix(in srgb, var(--accent-teal-bright) 55%, transparent),
+    color-mix(in srgb, var(--accent-purple) 45%, transparent) 60%,
+    color-mix(in srgb, var(--accent-pink) 35%, transparent)
+  );
+  opacity: 0.16;
+  animation: music-wave-bob var(--wave-duration, 1.4s) ease-in-out infinite;
+  animation-delay: var(--wave-delay, 0s);
+  animation-play-state: paused;
+}
+
+.music-wave-bg.is-playing .music-wave-bar {
+  animation-play-state: running;
+}
+
+@keyframes music-wave-bob {
+  0%, 100% { transform: scaleY(calc(6 / var(--wave-peak, 40))); opacity: 0.1; }
+  50% { transform: scaleY(1); opacity: 0.22; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .music-wave-bg {
+    display: none;
+  }
 }
 
 /* ---- Now Playing panel collapse ----

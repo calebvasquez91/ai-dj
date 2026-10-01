@@ -6,6 +6,7 @@ import { useNow } from "@/lib/useNow";
 import { AddToPlaylistButton } from "@/components/AddToPlaylistButton";
 import { SeparateStemsButton } from "@/components/SeparateStemsButton";
 import { TrackThumbnail } from "@/components/TrackThumbnail";
+import { CloseIcon, NoEntryIcon, PauseIcon, PlayIcon, StarIcon } from "@/components/Icons";
 import type { Track } from "@/types/music";
 
 export function TrackList({
@@ -22,6 +23,8 @@ export function TrackList({
 }) {
   const playTrackList = useStore((s) => s.playTrackList);
   const currentTrack = useStore((s) => s.currentTrack);
+  const isPlaying = useStore((s) => s.isPlaying);
+  const togglePlay = useStore((s) => s.togglePlay);
   const setTrackPlayPreference = useStore((s) => s.setTrackPlayPreference);
   const now = useNow();
   const selectMode = Boolean(onToggleSelect);
@@ -61,7 +64,27 @@ export function TrackList({
               className="w-4 h-4 shrink-0 accent-accent-purple"
             />
           )}
-          <TrackThumbnail thumbnailUrl={track.thumbnailUrl} title={track.title} size={40} />
+          <div className="relative shrink-0">
+            <TrackThumbnail thumbnailUrl={track.thumbnailUrl} title={track.title} size={40} />
+            {!selectMode && (
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  if (currentTrack?.id === track.id) togglePlay();
+                  else playTrackList(tracks, index);
+                }}
+                className="absolute inset-0 rounded-lg bg-black/40 text-white flex items-center justify-center opacity-0 group-hover:opacity-100 focus:opacity-100 transition-opacity"
+                title={currentTrack?.id === track.id && isPlaying ? "Pause" : "Play"}
+              >
+                {currentTrack?.id === track.id && isPlaying ? (
+                  <PauseIcon size={16} />
+                ) : (
+                  <PlayIcon size={16} className="translate-x-0.5" />
+                )}
+              </button>
+            )}
+          </div>
           <div className="min-w-0 flex-1">
             <p className="text-sm font-medium truncate flex items-center gap-2">
               <span className="truncate">{track.title}</span>
@@ -84,7 +107,7 @@ export function TrackList({
                   e.stopPropagation();
                   setTrackPlayPreference(track.id, track.playPreference === "must" ? undefined : "must");
                 }}
-                className={`btn-icon text-sm leading-none transition-opacity ${
+                className={`btn-icon transition-opacity ${
                   track.playPreference === "must"
                     ? "text-accent-yellow"
                     : "text-muted opacity-100 md:opacity-0 md:group-hover:opacity-100 focus:opacity-100"
@@ -95,7 +118,7 @@ export function TrackList({
                     : "Mark Must-Play (guaranteed + first in Shuffle Play)"
                 }
               >
-                ★
+                <StarIcon size={14} filled={track.playPreference === "must"} />
               </button>
               <button
                 type="button"
@@ -103,7 +126,7 @@ export function TrackList({
                   e.stopPropagation();
                   setTrackPlayPreference(track.id, track.playPreference === "do-not" ? undefined : "do-not");
                 }}
-                className={`btn-icon text-sm leading-none transition-opacity ${
+                className={`btn-icon transition-opacity ${
                   track.playPreference === "do-not"
                     ? "text-accent-pink"
                     : "text-muted opacity-100 md:opacity-0 md:group-hover:opacity-100 focus:opacity-100"
@@ -114,7 +137,7 @@ export function TrackList({
                     : "Mark Do-Not-Play (excluded from Shuffle Play)"
                 }
               >
-                🚫
+                <NoEntryIcon size={14} />
               </button>
               <AddToPlaylistButton track={track} />
               <SeparateStemsButton track={track} />
@@ -128,7 +151,7 @@ export function TrackList({
                   className="btn-icon text-muted hover:text-accent-pink opacity-100 md:opacity-0 md:group-hover:opacity-100 focus:opacity-100 transition-opacity"
                   title="Remove from library"
                 >
-                  ✕
+                  <CloseIcon size={14} />
                 </button>
               )}
             </>

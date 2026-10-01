@@ -9,6 +9,7 @@ import { Que } from "@/components/Que";
 import { genreFamilies } from "@/data/styles";
 import type { DjSetMode } from "@/lib/mix-engine";
 import { speakHypePhrase } from "@/lib/wordPlay";
+import { DecksIcon, MicIcon, MixerIcon, NextIcon, PauseIcon, PlayIcon, PreviousIcon, QueueIcon } from "@/components/Icons";
 
 export const CROSSFADE_PRESETS = [5, 10, 15, 20, 30];
 
@@ -63,7 +64,7 @@ export function PlayerBar() {
 
   return (
     <footer
-      className="relative min-h-20 shrink-0 shadow-elevate-top bg-surface px-4 py-2 flex flex-wrap items-center gap-2 lg:gap-4"
+      className="relative min-h-20 shrink-0 shadow-elevate-top surface-glass border-t border-border/10 px-4 py-2 flex flex-wrap items-center gap-2 lg:gap-4"
       inert={nowPlayingExpanded ? true : undefined}
     >
       {currentTrack && (
@@ -83,14 +84,16 @@ export function PlayerBar() {
               onKeyDown={(e) => {
                 if (e.key === "Enter" || e.key === " ") setNowPlayingExpanded(true);
               }}
-              className="flex items-center gap-3 min-w-0 cursor-pointer"
+              className="group flex items-center gap-3 min-w-0 cursor-pointer"
               title="Open full-screen now playing"
             >
-              <TrackThumbnail
-                thumbnailUrl={currentTrack.thumbnailUrl}
-                title={currentTrack.title}
-                size={48}
-              />
+              <div className="transition-transform duration-200 group-hover:scale-105">
+                <TrackThumbnail
+                  thumbnailUrl={currentTrack.thumbnailUrl}
+                  title={currentTrack.title}
+                  size={48}
+                />
+              </div>
               <div className="min-w-0">
                 <p className="text-sm font-medium truncate">{currentTrack.title}</p>
                 <p className="text-xs text-muted truncate">{currentTrack.artist}</p>
@@ -111,16 +114,16 @@ export function PlayerBar() {
             className="btn-icon text-accent-purple hover:text-accent-pink disabled:text-muted"
             title="Previous (←)"
           >
-            ⏮
+            <PreviousIcon />
           </button>
           <button
             type="button"
             onClick={togglePlay}
             disabled={!currentTrack}
-            className="w-9 h-9 rounded-full bg-gradient-to-br from-accent-teal to-accent-purple text-white flex items-center justify-center disabled:opacity-40 shadow-elevate-md"
+            className="w-10 h-10 rounded-full bg-gradient-to-br from-accent-teal to-accent-purple text-white flex items-center justify-center disabled:opacity-40 shadow-elevate-md transition-transform hover:scale-105 active:scale-95"
             title={isPlaying ? "Pause (Space)" : "Play (Space)"}
           >
-            {isPlaying ? "⏸" : "▶"}
+            {isPlaying ? <PauseIcon size={18} /> : <PlayIcon size={18} className="translate-x-0.5" />}
           </button>
           <button
             type="button"
@@ -129,7 +132,7 @@ export function PlayerBar() {
             className="btn-icon text-accent-purple hover:text-accent-pink disabled:text-muted"
             title="Next (→)"
           >
-            ⏭
+            <NextIcon />
           </button>
         </div>
         <div className="w-full flex items-center gap-2 text-xs text-muted">
@@ -162,7 +165,7 @@ export function PlayerBar() {
           className="btn-icon text-accent-purple hover:text-accent-pink"
           title="Word Play — speak a hype phrase now, DJ's call (uses your browser's text-to-speech; it plays independently of the music, not mixed through it)"
         >
-          🎤
+          <MicIcon />
         </button>
         <button
           type="button"
@@ -171,7 +174,7 @@ export function PlayerBar() {
           className="btn-icon text-accent-purple hover:text-accent-pink disabled:text-muted"
           title="Show the DJ decks — tempo, key, and what's lined up next"
         >
-          🎛
+          <DecksIcon />
         </button>
         <button
           type="button"
@@ -180,7 +183,7 @@ export function PlayerBar() {
           className="btn-icon text-accent-purple hover:text-accent-pink disabled:text-muted"
           title="Mixer — watch the AI's live crossfader, EQ, and filter"
         >
-          🎚
+          <MixerIcon />
         </button>
         <button
           type="button"
@@ -188,7 +191,7 @@ export function PlayerBar() {
           className="btn-icon relative text-accent-purple hover:text-accent-pink"
           title="Queue (Q)"
         >
-          ☰
+          <QueueIcon />
           {queue.length > 0 && (
             <span className="absolute -top-1 -right-1 text-[10px] leading-none bg-accent-pink text-white rounded-full w-4 h-4 flex items-center justify-center">
               {queue.length}

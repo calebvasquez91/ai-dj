@@ -38,7 +38,7 @@ export function TopBar() {
   }
 
   return (
-    <header className="h-16 shrink-0 flex items-center gap-4 px-4 sm:px-6 shadow-elevate-md bg-surface/90 backdrop-blur">
+    <header className="h-16 shrink-0 flex items-center gap-4 px-4 sm:px-6 shadow-elevate-md surface-glass">
       <button
         type="button"
         onClick={() => setSidebarOpen(!sidebarOpen)}
