@@ -1,14 +1,14 @@
 import { NextResponse } from "next/server";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
-import { loadUserPlaylists, toPlaylistApiResponse } from "@/lib/playlistApi";
+import { loadUserPlaylistsWithSpookyUnion } from "@/lib/playlistApi";
 
 export async function GET() {
   const session = await auth();
   if (!session) return new NextResponse(null, { status: 401 });
 
-  const playlists = await loadUserPlaylists(session.user.id);
-  return NextResponse.json(playlists.map(toPlaylistApiResponse));
+  const playlists = await loadUserPlaylistsWithSpookyUnion(session.user.id);
+  return NextResponse.json(playlists);
 }
 
 export async function POST(request: Request) {

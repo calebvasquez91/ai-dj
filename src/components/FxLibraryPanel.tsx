@@ -42,6 +42,8 @@ export function FxLibraryPanel() {
   // type a trailing comma/space without it being immediately re-split and
   // re-joined out from under their cursor. Cleared once persisted on blur.
   const [tagsDraft, setTagsDraft] = useState<Record<string, string>>({});
+  // Same shape as tagsDraft, for the playlistAffinity input.
+  const [affinityDraft, setAffinityDraft] = useState<Record<string, string>>({});
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -220,6 +222,29 @@ export function FxLibraryPanel() {
                   }}
                   placeholder="tags (comma-separated)"
                   className="flex-1 min-w-24 text-[10px] rounded bg-surface-hover border border-border/10 px-1.5 py-1 outline-none"
+                />
+                <input
+                  value={affinityDraft[fx.id] ?? fx.playlistAffinity.join(", ")}
+                  onChange={(e) => {
+                    setAffinityDraft((d) => ({ ...d, [fx.id]: e.target.value }));
+                    patchFxSoundLocal(fx.id, {
+                      playlistAffinity: e.target.value
+                        .split(",")
+                        .map((t) => t.trim())
+                        .filter(Boolean),
+                    });
+                  }}
+                  onBlur={() => {
+                    setAffinityDraft((d) => {
+                      const next = { ...d };
+                      delete next[fx.id];
+                      return next;
+                    });
+                    void persistFxSound(fx.id);
+                  }}
+                  title="Which themed playlists/modes this FX is eligible for — e.g. spooky, halloween. Drives AI transition-FX matching and the Spooky Music ambient layer while that playlist is active."
+                  placeholder="playlist affinity (e.g. spooky, halloween)"
+                  className="flex-1 min-w-32 text-[10px] rounded bg-surface-hover border border-border/10 px-1.5 py-1 outline-none"
                 />
               </div>
             </div>

@@ -228,6 +228,8 @@ interface PlayerState {
   setAmbienceFrequency: (frequency: AmbienceFrequency) => void;
   setMashupEnabled: (enabled: boolean) => void;
   setTrackPlayPreference: (trackId: string, preference: Track["playPreference"]) => void;
+  /** Manual tags (e.g. "halloween", "spooky") — drives the Spooky Music system playlist's auto-membership. */
+  setTrackTags: (trackId: string, tags: string[]) => void;
   setHotCueOverride: (trackId: string, cueNumber: number, atSec: number) => void;
 
   toggleMixerPanel: () => void;
@@ -257,7 +259,7 @@ interface PlayerState {
   uploadFxSound: (file: File, metadata: { name: string; category: FxSound["category"] }) => Promise<void>;
   updateFxSound: (fxId: string, patch: Partial<Pick<FxSound, "name" | "category" | "bpm" | "key" | "tags" | "playlistAffinity">>) => Promise<void>;
   /** Local-only patch (no network) for bpm/key/tags inputs — pair with persistFxSound on blur so typing doesn't fire a request per keystroke. */
-  patchFxSoundLocal: (fxId: string, patch: Partial<Pick<FxSound, "bpm" | "key" | "tags">>) => void;
+  patchFxSoundLocal: (fxId: string, patch: Partial<Pick<FxSound, "bpm" | "key" | "tags" | "playlistAffinity">>) => void;
   persistFxSound: (fxId: string) => Promise<void>;
   removeFxSound: (fxId: string) => Promise<void>;
 }
@@ -695,6 +697,22 @@ export const useStore = create<PlayerState>()(
           body: JSON.stringify({ playPreference: preference ?? null }),
         });
       },
+      setTrackTags: (trackId, tags) => {
+        set((s) => {
+          const patch = (t: Track) => (t.id === trackId ? { ...t, tags } : t);
+          return {
+            localLibrary: s.localLibrary.map(patch),
+            playlists: s.playlists.map((p) => ({ ...p, tracks: p.tracks.map(patch) })),
+            queue: s.queue.map(patch),
+            currentTrack: s.currentTrack ? patch(s.currentTrack) : s.currentTrack,
+          };
+        });
+        void fetch(`/api/tracks/${trackId}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ tags }),
+        });
+      },
       // Same shape as setTrackPlayPreference: patch every place the track
       // object lives, then persist the whole (merged) override map — not
       // just the one changed cue — since the PATCH route replaces
@@ -963,7 +981,7 @@ export const useStore = create<PlayerState>()(
         const res = await fetch(`/api/fx/${fxId}`, {
           method: "PATCH",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ bpm: fx.bpm ?? null, key: fx.key ?? null, tags: fx.tags }),
+          body: JSON.stringify({ bpm: fx.bpm ?? null, key: fx.key ?? null, tags: fx.tags, playlistAffinity: fx.playlistAffinity }),
         });
         if (res.ok) {
           const updated = (await res.json()) as FxSound;

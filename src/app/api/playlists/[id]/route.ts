@@ -31,6 +31,11 @@ export async function DELETE(request: Request, { params }: { params: Promise<{ i
   if (!existing || existing.userId !== session.user.id) {
     return new NextResponse(null, { status: 404 });
   }
+  if (existing.theme) {
+    // System playlists (e.g. Spooky Music) aren't user-deletable — the
+    // Spooky Music card on Home always needs somewhere to link to.
+    return NextResponse.json({ error: "This playlist can't be deleted." }, { status: 400 });
+  }
 
   await prisma.playlist.delete({ where: { id } });
   return new NextResponse(null, { status: 204 });

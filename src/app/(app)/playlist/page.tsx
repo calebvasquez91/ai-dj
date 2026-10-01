@@ -41,16 +41,18 @@ function PlaylistContent() {
           onBlur={() => persistPlaylistName(playlist.id)}
           className="text-2xl font-bold bg-transparent outline-none border-b-2 border-transparent focus:border-accent-purple flex-1"
         />
-        <button
-          type="button"
-          onClick={() => {
-            removePlaylist(playlist.id);
-            router.push("/");
-          }}
-          className="btn-outline !text-xs hover:!text-accent-pink shrink-0"
-        >
-          Delete playlist
-        </button>
+        {!playlist.theme && (
+          <button
+            type="button"
+            onClick={() => {
+              removePlaylist(playlist.id);
+              router.push("/");
+            }}
+            className="btn-outline !text-xs hover:!text-accent-pink shrink-0"
+          >
+            Delete playlist
+          </button>
+        )}
       </div>
 
       {playlist.tracks.length === 0 ? (
