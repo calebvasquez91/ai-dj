@@ -757,3 +757,119 @@ body {
   visibility: visible;
   transition: translate 300ms ease-in-out, transform 300ms ease-in-out, visibility 0ms linear 0ms;
 }
+
+/* ---- Halloween "Spooky Music" theme ----
+   Applied class-by-class wherever a component checks
+   store.activePlaylistTheme === "spooky" (Waveform, Que, NowPlayingView,
+   QueuePanel, the Home library card) — never a page-wide [data-theme]
+   switch, since only the Spooky Music playlist being *active* triggers
+   it, independent of light/dark mode. Most spooky-aware elements also
+   carry a plain `transition-colors duration-1000` Tailwind class at their
+   call site, so leaving the playlist reverts smoothly over 1s with no
+   extra JS (spec: "no abrupt switches"); the two continuously-@keyframed
+   pieces below (the waveform's color cycle, Que's one-shot transform) are
+   the exception — a CSS animation can't interpolate itself away on
+   removal, so those simply stop and the element's normal (non-spooky)
+   styling takes over immediately once the class is gone. */
+
+@keyframes spooky-bar-color-cycle {
+  0% { background-color: #ff6b00; }
+  33% { background-color: #8b00ff; }
+  66% { background-color: #00ff41; }
+  100% { background-color: #ff6b00; }
+}
+
+@keyframes spooky-bar-flicker {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.85; }
+}
+
+.spooky-bar-played {
+  animation-name: spooky-bar-color-cycle, spooky-bar-flicker;
+  animation-duration: 30s, 2.2s;
+  animation-timing-function: linear, ease-in-out;
+  animation-iteration-count: infinite, infinite;
+}
+
+/* Staggered flicker delays (not the color-cycle's, which stays in sync
+   across all bars) so adjacent bars don't pulse in lockstep — reads as
+   uneven candlelight rather than one pulsing block. */
+.spooky-bar-played:nth-child(3n) { animation-delay: 0s, 0.4s; }
+.spooky-bar-played:nth-child(3n+1) { animation-delay: 0s, 0.9s; }
+.spooky-bar-played:nth-child(3n+2) { animation-delay: 0s, 1.3s; }
+
+.spooky-bar-unplayed {
+  background-color: #2a0a2a;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .spooky-bar-played {
+    animation: none;
+    background-color: #ff6b00;
+  }
+}
+
+@keyframes que-halloween-shake {
+  0%, 100% { transform: translateX(0) scale(1); }
+  10% { transform: translateX(-4px) scale(1); }
+  20% { transform: translateX(4px) scale(1); }
+  30% { transform: translateX(-4px) scale(1); }
+  40% { transform: translateX(3px) scale(1.3); }
+  65% { transform: translateX(0) scale(0.9); }
+  100% { transform: translateX(0) scale(1); }
+}
+
+@keyframes que-halloween-tint {
+  0%, 100% { background-color: var(--surface); }
+  20%, 60% { background-color: #ff6b00; }
+  40%, 80% { background-color: #8b00ff; }
+}
+
+/* One-shot entrance when Que crosses from the default theme into spooky — see Que.tsx's `theme` prop. */
+.que-stage.halloween-transform {
+  animation: que-halloween-shake 0.6s cubic-bezier(0.34, 1.56, 0.64, 1), que-halloween-tint 0.6s ease-out;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .que-stage.halloween-transform {
+    animation: none;
+  }
+}
+
+/* Floating particles drifting up behind the Now Playing album art while
+   Spooky Music is active — see NowPlayingView.tsx's particle emitter. */
+@keyframes spooky-particle-drift {
+  0% { transform: translateY(0) rotate(0deg); opacity: 0; }
+  12% { opacity: 0.9; }
+  100% { transform: translateY(-140px) rotate(25deg); opacity: 0; }
+}
+
+.spooky-particle {
+  position: absolute;
+  bottom: 10%;
+  font-size: 1.25rem;
+  pointer-events: none;
+  animation: spooky-particle-drift 4s ease-out forwards;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .spooky-particle {
+    display: none;
+  }
+}
+
+/* Home page's Spooky Music library card — a subtle pulsing orange border. */
+@keyframes spooky-card-pulse-border {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(255, 107, 0, 0), 0 2px 10px color-mix(in srgb, var(--foreground) calc(6% * var(--shadow-boost)), transparent); }
+  50% { box-shadow: 0 0 0 3px rgba(255, 107, 0, 0.35), 0 2px 10px color-mix(in srgb, var(--foreground) calc(6% * var(--shadow-boost)), transparent); }
+}
+
+.spooky-card-pulse {
+  animation: spooky-card-pulse-border 2.5s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .spooky-card-pulse {
+    animation: none;
+  }
+}

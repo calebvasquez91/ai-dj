@@ -1,11 +1,23 @@
 "use client";
 
-import { useEffect } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import Image from "next/image";
 import { useStore } from "@/lib/store";
 import { formatTime } from "@/lib/format";
 import { ChevronDownIcon, NextIcon, PauseIcon, PlayIcon, PreviousIcon } from "@/components/Icons";
 import { Que } from "@/components/Que";
+
+// Spec #11's exact gradients — which of the two a track gets is derived
+// from its id (stable per track, no extra state) rather than reassigned
+// randomly on every render.
+const HALLOWEEN_GRADIENTS: [string, string][] = [
+  ["#1a0500", "#2d0a00"],
+  ["#0d0020", "#1a0040"],
+];
+const PARTICLE_EMOJIS = ["🍂", "🕸️", "⚡"];
+const PARTICLE_LIFETIME_MS = 4000;
+const PARTICLE_MIN_INTERVAL_MS = 2000;
+const PARTICLE_MAX_INTERVAL_MS = 3000;
 
 /**
  * Full-screen now-playing view, expanded from the compact PlayerBar footer
@@ -28,6 +40,7 @@ export function NowPlayingView() {
   const previous = useStore((s) => s.previous);
   const queue = useStore((s) => s.queue);
   const isTransitioning = useStore((s) => s.isTransitioning);
+  const spooky = useStore((s) => s.activePlaylistTheme === "spooky");
 
   // Nothing left to show full-screen (track ended, nothing queued) — drop
   // back to whatever the user was browsing rather than leaving an empty
@@ -35,6 +48,40 @@ export function NowPlayingView() {
   useEffect(() => {
     if (expanded && !currentTrack) setExpanded(false);
   }, [expanded, currentTrack, setExpanded]);
+
+  const spookyGradient = useMemo(() => {
+    if (!currentTrack) return HALLOWEEN_GRADIENTS[0];
+    let hash = 0;
+    for (const ch of currentTrack.id) hash += ch.charCodeAt(0);
+    return HALLOWEEN_GRADIENTS[hash % HALLOWEEN_GRADIENTS.length];
+  }, [currentTrack]);
+
+  // Floating particles drifting up behind the album art (spec #11) — a
+  // self-rescheduling timer (not setInterval) so the 2-3s gap between
+  // spawns jitters instead of ticking on a fixed grid. Each particle
+  // removes itself after its own CSS animation's lifetime.
+  const [particles, setParticles] = useState<{ id: number; leftPercent: number; emoji: string }[]>([]);
+  const nextParticleIdRef = useRef(0);
+  useEffect(() => {
+    if (!spooky) {
+      // Resets immediately on exit, same "not derivable at render time"
+      // reasoning as Que.tsx's own talkFrame reset.
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setParticles([]);
+      return;
+    }
+    let timeoutId: ReturnType<typeof setTimeout>;
+    const spawn = () => {
+      const id = nextParticleIdRef.current++;
+      const emoji = PARTICLE_EMOJIS[Math.floor(Math.random() * PARTICLE_EMOJIS.length)];
+      const leftPercent = 15 + Math.random() * 70;
+      setParticles((prev) => [...prev, { id, leftPercent, emoji }]);
+      setTimeout(() => setParticles((prev) => prev.filter((p) => p.id !== id)), PARTICLE_LIFETIME_MS);
+      timeoutId = setTimeout(spawn, PARTICLE_MIN_INTERVAL_MS + Math.random() * (PARTICLE_MAX_INTERVAL_MS - PARTICLE_MIN_INTERVAL_MS));
+    };
+    timeoutId = setTimeout(spawn, PARTICLE_MIN_INTERVAL_MS + Math.random() * (PARTICLE_MAX_INTERVAL_MS - PARTICLE_MIN_INTERVAL_MS));
+    return () => clearTimeout(timeoutId);
+  }, [spooky]);
 
   const durationSec = currentTrack?.durationSec ?? 0;
   const progressPercent = durationSec > 0 ? Math.min(100, (currentTimeSec / durationSec) * 100) : 0;
@@ -69,8 +116,25 @@ export function NowPlayingView() {
         />
       )}
       <div className="absolute inset-0 -z-10 bg-background/70" aria-hidden="true" />
+      {/* Halloween gradient backdrop (spec #11) — painted above the normal
+          blurred-artwork layer (later in DOM order, same -z-10 context) and
+          faded in/out over 1s via opacity alone, so leaving Spooky Music
+          reverts smoothly instead of snapping back to the plain scrim. */}
+      <div
+        className="absolute inset-0 -z-10 transition-opacity duration-1000"
+        style={{
+          opacity: spooky ? 1 : 0,
+          background: `radial-gradient(circle at 50% 30%, ${spookyGradient[0]}, ${spookyGradient[1]} 70%)`,
+        }}
+        aria-hidden="true"
+      />
 
       <div className="flex items-center justify-center p-4 shrink-0">
+        {spooky && (
+          <span className="absolute right-4 text-xs font-semibold flex items-center gap-1" style={{ color: "#ff8a3d" }}>
+            🎃 Spooky Mode
+          </span>
+        )}
         <button
           type="button"
           onClick={() => setExpanded(false)}
@@ -84,8 +148,18 @@ export function NowPlayingView() {
 
       {currentTrack && (
         <div className="flex-1 flex flex-col items-center justify-center gap-8 px-6 pb-10 min-h-0">
-          <div className="w-[min(100%,24rem,45vh)] aspect-square">
+          <div className="relative w-[min(100%,24rem,45vh)] aspect-square">
             <TrackThumbnailFill thumbnailUrl={currentTrack.thumbnailUrl} title={currentTrack.title} />
+            {particles.map((p) => (
+              <span
+                key={p.id}
+                className="spooky-particle"
+                style={{ left: `${p.leftPercent}%` }}
+                aria-hidden="true"
+              >
+                {p.emoji}
+              </span>
+            ))}
           </div>
 
           <div className="flex items-center gap-3 max-w-md min-w-0">
