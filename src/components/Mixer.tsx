@@ -3,6 +3,7 @@
 import { useStore } from "@/lib/store";
 import { ChannelStrip } from "@/components/ChannelStrip";
 import { Crossfader } from "@/components/Crossfader";
+import { CloseIcon, MicIcon } from "@/components/Icons";
 
 /**
  * A live, read-only view of the AI's own mixing — the low-EQ cut, filter
@@ -21,16 +22,16 @@ export function Mixer() {
   return (
     <>
       <div className="fixed inset-0 z-40 bg-black/50" onClick={toggle} aria-hidden="true" />
-      <div className="fixed inset-x-4 bottom-32 md:bottom-24 z-50 mx-auto max-w-3xl max-h-[70vh] overflow-y-auto rounded-2xl bg-surface p-4 flex flex-col gap-4 shadow-elevate-lg">
+      <div className="fixed inset-x-4 bottom-32 md:bottom-24 z-50 mx-auto max-w-3xl max-h-[70vh] overflow-y-auto rounded-2xl bg-surface/95 backdrop-blur-xl p-4 flex flex-col gap-4 shadow-elevate-lg">
         <div className="flex items-center justify-between">
           <h2 className="text-sm heading">Mixer</h2>
           <button
             type="button"
             onClick={toggle}
-            className="btn-icon text-accent-purple hover:text-accent-pink text-lg leading-none"
+            className="btn-icon text-accent-purple hover:text-accent-pink"
             title="Close"
           >
-            ✕
+            <CloseIcon />
           </button>
         </div>
         <p className="text-xs text-muted -mt-2">
@@ -44,7 +45,7 @@ export function Mixer() {
         <Crossfader />
         {vocalLayerVoiceLevel > 0 && (
           <div className="flex items-center gap-2 text-xs text-muted">
-            <span>🎤 Vocals</span>
+            <span className="flex items-center gap-1"><MicIcon size={14} /> Vocals</span>
             <div className="flex-1 h-1.5 rounded-full bg-surface-hover overflow-hidden">
               <div
                 className="h-full bg-accent-purple transition-[width] duration-75"

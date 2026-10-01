@@ -8,6 +8,7 @@ import { TrackGrid } from "@/components/TrackGrid";
 import { AddSelectedToPlaylistButton } from "@/components/AddSelectedToPlaylistButton";
 import { ConnectYouTubeButton } from "@/components/ConnectYouTubeButton";
 import { YouTubeImportModal } from "@/components/YouTubeImportModal";
+import { CloseIcon, PlusIcon, ShuffleIcon } from "@/components/Icons";
 
 type SourceFilter = "all" | "local" | "youtube";
 
@@ -93,8 +94,8 @@ function LibraryContent() {
             className="btn-outline"
             title="Play these tracks ordered by tempo/key/energy/theme compatibility — skips Do-Not-Play tracks, puts Must-Play tracks first"
           >
-            <span className="sm:hidden" aria-hidden="true">🔀</span>
-            <span className="hidden sm:inline">🔀 Shuffle Play</span>
+            <ShuffleIcon size={15} />
+            <span className="hidden sm:inline">Shuffle Play</span>
           </button>
           <button
             type="button"
@@ -104,8 +105,8 @@ function LibraryContent() {
             className="btn-outline"
             title="Select tracks to add to a playlist — they stay in your library too"
           >
-            <span className="sm:hidden" aria-hidden="true">{selectMode ? "✕" : "☑"}</span>
-            <span className="hidden sm:inline">{selectMode ? "Cancel" : "☑ Select"}</span>
+            {selectMode ? <CloseIcon size={15} /> : <span className="w-[15px] h-[15px] rounded-[4px] border-2 border-current shrink-0" aria-hidden="true" />}
+            <span className="hidden sm:inline">{selectMode ? "Cancel" : "Select"}</span>
           </button>
           <button
             type="button"
@@ -113,8 +114,8 @@ function LibraryContent() {
             disabled={loading}
             className="btn"
           >
-            <span className="sm:hidden" aria-hidden="true">{loading ? "…" : "+"}</span>
-            <span className="hidden sm:inline">{loading ? "Adding…" : "+ Add Files"}</span>
+            {loading ? <span aria-hidden="true">…</span> : <PlusIcon size={15} />}
+            <span className="hidden sm:inline">{loading ? "Adding…" : "Add Files"}</span>
           </button>
           <ConnectYouTubeButton onReady={() => setYoutubeModalOpen(true)} />
         </div>
