@@ -32,6 +32,7 @@ import { reverseSamples } from "@/lib/reverse-audio";
 import { resolveHotCues, upcomingDropCueAtSec } from "@/lib/hot-cues";
 import { createTimeStretchVoice, type TimeStretchVoice } from "@/lib/time-stretch";
 import { filterStateToKnobPos } from "@/lib/mixer-controls";
+import { MAX_FX_VOLUME_MULTIPLIER } from "@/lib/ai-fx";
 import type { LocalTrack, Track } from "@/types/music";
 
 type DeckId = "A" | "B";
@@ -56,6 +57,8 @@ interface ActiveTransition {
   category: TransitionPlan["category"];
   tickIntervalId: ReturnType<typeof setInterval> | null;
   overlayNodes: OverlayNodes | null;
+  /** The AI-matched FX sound (lib/ai-fx.ts) for this transition, if one was picked and its buffer was decoded in time — fully independent of overlayNodes above (the mix-engine's own synthesized/vocal-stem effect), since a user-uploaded FX is a separate, optional layer on top of whichever effect this transition already has. */
+  fxOverlayNodes: OverlayNodes | null;
 }
 
 /**
@@ -263,6 +266,8 @@ export function DualDeckStage() {
   const lyricsFetchingRef = useRef<Set<string>>(new Set());
   const stemCheckingRef = useRef<Set<string>>(new Set());
   const aiPickRequestedForRef = useRef<string | null>(null);
+  /** Keyed "currentTrackId:nextTrackId" so a new pick is requested exactly once per upcoming-transition pairing — a plain nextTrack.id key would miss a reorder back to a pairing already requested for a different currentTrack. */
+  const aiFxPickRequestedForRef = useRef<string | null>(null);
   const mashupRef = useRef<ActiveMashup | null>(null);
   // True synchronously as soon as a mashup decode kicks off, before mashupRef
   // itself is populated — guards against the tick loop starting a second
@@ -310,6 +315,8 @@ export function DualDeckStage() {
   const queue = useStore((s) => s.queue);
   const shuffleSession = useStore((s) => s.shuffleSession);
   const stemAvailability = useStore((s) => s.stemAvailability);
+  const aiFxPickId = useStore((s) => s.aiFxPickId);
+  const fxLibrary = useStore((s) => s.fxLibrary);
   const isPlaying = useStore((s) => s.isPlaying);
   const volume = useStore((s) => s.volume);
   const seekRequest = useStore((s) => s.seekRequest);
@@ -393,6 +400,7 @@ export function DualDeckStage() {
     const fromEl = deckEl(t.fromDeckId);
     if (fromEl) fromEl.playbackRate = 1;
     stopOverlayNodes(t.overlayNodes);
+    stopOverlayNodes(t.fxOverlayNodes);
     if (t.effect === "word-play") cancelHypePhrase();
     if (t.effect === "loop-roll") cancelLoop();
     if (t.effect === "loop-hold") releaseManualLoop();
@@ -606,6 +614,42 @@ export function DualDeckStage() {
         // Left uncached — startTransition's cache read just comes up empty and skips the overlay.
       });
   }, [queue, stemAvailability]);
+
+  // AI-matched transition FX (lib/ai-fx.ts via store.ts's requestAiFxPick):
+  // once per new (currentTrack, queue[0]) pairing, ask Claude to pick the
+  // best FX sound from the user's library for the upcoming transition.
+  // Unlike the AI next-track pick above, this isn't gated on an active
+  // shuffle session — any transition (shuffle or plain queue) can carry a
+  // matched FX. Same ref-guard shape, keyed on both track ids since either
+  // one changing means a different upcoming transition.
+  useEffect(() => {
+    const nextTrack = queue[0];
+    if (!currentTrack || !nextTrack) return;
+    const key = `${currentTrack.id}:${nextTrack.id}`;
+    if (aiFxPickRequestedForRef.current === key) return;
+    aiFxPickRequestedForRef.current = key;
+    void useStore.getState().requestAiFxPick();
+  }, [currentTrack, queue]);
+
+  // Once the AI FX pick resolves to a real fxId, eagerly fetch+decode its
+  // audio into an AudioBuffer — same fire-and-forget, shared-cache pattern
+  // as the vocal-stem prefetch above. startTransition reads straight from
+  // the cache and simply skips the FX overlay if this hasn't resolved yet.
+  useEffect(() => {
+    const fx = aiFxPickId ? fxLibrary.find((f) => f.id === aiFxPickId) : null;
+    const url = fx?.sourceUrl ?? null;
+    const ctx = audioCtxRef.current;
+    if (!url || !ctx || mashupBufferCacheRef.current[url]) return;
+    fetch(url)
+      .then((res) => res.arrayBuffer())
+      .then((arrayBuffer) => ctx.decodeAudioData(arrayBuffer))
+      .then((buffer) => {
+        mashupBufferCacheRef.current[url] = buffer;
+      })
+      .catch(() => {
+        // Left uncached — startTransition's cache read just comes up empty and skips the FX overlay.
+      });
+  }, [aiFxPickId, fxLibrary]);
 
   // Build the Web Audio graph once per <audio> element pair, ever. Each
   // deck: <audio> -> MediaElementSource -> BiquadFilter (neutral "allpass"
@@ -993,6 +1037,35 @@ export function DualDeckStage() {
       return { source, filter, gain, analyser };
     }
 
+    /** Plays a user-uploaded FX sound (lib/ai-fx.ts's AI pick) as a one-shot overlay during a transition's crossfade — a real audio file, not a synthesized stand-in. startOffsetSec delays it relative to the crossfade's own start (Claude's call on when it should land within the window); volumeMultiplier is already capped by the caller (store.ts mirrors ai-fx.ts's MAX_FX_VOLUME_MULTIPLIER), capped again here as a last line of defense since it crossed a client request/response round trip. Plays to the buffer's own natural end — most FX are short one-shots that finish well inside the crossfade window on their own. */
+    function startFxOverlayLayer(
+      ctx: AudioContext,
+      buffer: AudioBuffer,
+      startOffsetSec: number,
+      volumeMultiplier: number
+    ): OverlayNodes | null {
+      const masterGain = masterGainRef.current;
+      if (!masterGain) return null;
+      const source = ctx.createBufferSource();
+      source.buffer = buffer;
+      const filter = ctx.createBiquadFilter();
+      filter.type = "allpass"; // no EQ shaping — OverlayNodes' shape just always includes a filter node in the chain
+      const gain = ctx.createGain();
+
+      source.connect(filter);
+      filter.connect(gain);
+      gain.connect(masterGain);
+
+      const safeVolume = Math.min(Math.max(volumeMultiplier, 0), MAX_FX_VOLUME_MULTIPLIER);
+      const now = ctx.currentTime;
+      const delaySec = Math.max(0, startOffsetSec);
+      gain.gain.setValueAtTime(safeVolume, now + delaySec);
+
+      source.start(now + delaySec);
+
+      return { source, filter, gain };
+    }
+
     /**
      * Reverse Tail transition overlay: reverses the outgoing deck's own
      * last windowSec of audio (up to fromEl's current playhead) and plays
@@ -1130,6 +1203,23 @@ export function DualDeckStage() {
                       return buf ? startReverseTailLayer(ctx, plan.windowSec, buf, fromEl) : null;
                     })()
                   : null;
+
+      // Independent of the mix-engine's own effect overlay above: an
+      // AI-matched user-uploaded FX sound (lib/ai-fx.ts) can play alongside
+      // ANY transition effect, not just a specific one. Graceful degradation
+      // matches the vocal-layer/reverse-out pattern — if no pick resolved
+      // yet, or its buffer hasn't finished decoding, the transition simply
+      // has no FX layer.
+      const fxOverlayNodes = (() => {
+        const { aiFxPickId, aiFxPickStartOffsetSec, aiFxPickVolumeMultiplier, fxLibrary } = useStore.getState();
+        if (!aiFxPickId) return null;
+        const fx = fxLibrary.find((f) => f.id === aiFxPickId);
+        const buf = fx ? mashupBufferCacheRef.current[fx.sourceUrl] : null;
+        return buf
+          ? startFxOverlayLayer(ctx, buf, aiFxPickStartOffsetSec ?? 0, aiFxPickVolumeMultiplier ?? 0.5)
+          : null;
+      })();
+
       if (plan.effect === "word-play") {
         // Fire-and-forget: SpeechSynthesis doesn't route through this
         // component's Web Audio graph, so it can't be volume-matched or
@@ -1174,6 +1264,7 @@ export function DualDeckStage() {
         category: plan.category,
         tickIntervalId: null,
         overlayNodes,
+        fxOverlayNodes,
       };
       transitionRef.current = transition;
       useStore.getState().setIsTransitioning(true);
@@ -2406,6 +2497,7 @@ export function DualDeckStage() {
         clearInterval(transitionRef.current.tickIntervalId);
       }
       stopOverlayNodes(transitionRef.current?.overlayNodes ?? null);
+      stopOverlayNodes(transitionRef.current?.fxOverlayNodes ?? null);
       transitionRef.current = null;
       if (mashupRef.current?.tickIntervalId != null) {
         clearInterval(mashupRef.current.tickIntervalId);

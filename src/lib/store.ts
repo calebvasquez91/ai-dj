@@ -22,6 +22,7 @@ import {
   pickByBpmProximity,
   type AiNextTrackCandidate,
 } from "@/lib/ai-dj";
+import { pickFallbackTransitionFx, type AiFxCandidate, type AiFxTrackProfile } from "@/lib/ai-fx";
 
 const MAX_HISTORY = 50;
 
@@ -46,6 +47,12 @@ interface PlayerState {
   /** Claude's recommended crossfade length for the upcoming mix into aiNextPickTrackId, seconds — informational only, never auto-applied to crossfadeOverrideSec (that field stays exclusively user-controlled). */
   aiNextPickRecommendedCrossfadeSec: number | null;
   aiNextPickLoading: boolean;
+  /** id of the FX sound requestAiFxPick last chose for the upcoming transition into queue[0] — null whenever no pick is active (no FX library, request hasn't resolved, or it resolved to "play nothing"). See lib/ai-fx.ts. */
+  aiFxPickId: string | null;
+  aiFxPickStartOffsetSec: number | null;
+  aiFxPickVolumeMultiplier: number | null;
+  aiFxPickReason: string | null;
+  aiFxPickLoading: boolean;
   currentTrack: Track | null;
   isPlaying: boolean;
   volume: number; // 0-1
@@ -154,6 +161,15 @@ interface PlayerState {
    * DualDeckStage.tsx that calls this once per new currentTrack.
    */
   requestAiNextPick: () => Promise<void>;
+  /**
+   * Asks the Anthropic API (via /api/dj/next-fx) to pick the best transition
+   * FX from the user's FX library for the upcoming transition from
+   * currentTrack into queue[0]. No-ops without both tracks known. Falls back
+   * to a local category+BPM pick (lib/ai-fx.ts's pickFallbackTransitionFx)
+   * if the request fails outright. See the effect in DualDeckStage.tsx that
+   * calls this once per new (currentTrack, queue[0]) pair.
+   */
+  requestAiFxPick: () => Promise<void>;
   togglePlay: () => void;
   setVolume: (volume: number) => void;
   setAutoDj: (enabled: boolean) => void;
@@ -256,6 +272,11 @@ export const useStore = create<PlayerState>()(
       aiNextPickTransitionNote: null,
       aiNextPickRecommendedCrossfadeSec: null,
       aiNextPickLoading: false,
+      aiFxPickId: null,
+      aiFxPickStartOffsetSec: null,
+      aiFxPickVolumeMultiplier: null,
+      aiFxPickReason: null,
+      aiFxPickLoading: false,
       activePlaylistTheme: null,
       currentTrack: null,
       isPlaying: false,
@@ -340,6 +361,14 @@ export const useStore = create<PlayerState>()(
           aiNextPickTrackId: null,
           aiNextPickTransitionNote: null,
           aiNextPickRecommendedCrossfadeSec: null,
+          // Stale from whatever was queued up before — a fresh pick gets
+          // requested for the new (currentTrack, queue[0]) pairing, but
+          // clear the old one now so a transition started before that
+          // resolves can't play an FX matched to a different pairing.
+          aiFxPickId: null,
+          aiFxPickStartOffsetSec: null,
+          aiFxPickVolumeMultiplier: null,
+          aiFxPickReason: null,
           activePlaylistTheme: sourcePlaylistTheme,
         });
       },
@@ -469,6 +498,79 @@ export const useStore = create<PlayerState>()(
         // validates it against the candidates it was sent) — leave the
         // queue untouched rather than risk dropping the current one.
         set({ aiNextPickLoading: false });
+      },
+
+      requestAiFxPick: async () => {
+        const { currentTrack, queue, trackAnalysis, fxLibrary, djMode, crossfadeOverrideSec, activePlaylistTheme } =
+          get();
+        const nextTrack = queue[0];
+        if (!currentTrack || !nextTrack) return;
+
+        const toProfile = (t: Track): AiFxTrackProfile => {
+          const analysis = trackAnalysis[t.id];
+          return {
+            title: t.title,
+            bpm: analysis?.bpm ?? (t.source === "local" ? t.bpm ?? null : null),
+            camelotKey: analysis?.camelotKey ?? null,
+            energy: analysis ? meanEnergy(analysis.waveformPeaks) : null,
+          };
+        };
+
+        // While the Spooky Music playlist is active, only halloween-affinied
+        // FX are eligible — see DualDeckStage.tsx's 3-layer Halloween audio
+        // system. Elsewhere, the whole library is in play.
+        const isSpooky = activePlaylistTheme === "spooky";
+        const eligibleFx = isSpooky
+          ? fxLibrary.filter((fx) => fx.playlistAffinity.includes("spooky") || fx.playlistAffinity.includes("halloween"))
+          : fxLibrary;
+        const toCandidate = (fx: FxSound): AiFxCandidate => ({
+          id: fx.id,
+          name: fx.name,
+          category: fx.category,
+          bpm: fx.bpm ?? null,
+          key: fx.key ?? null,
+          tags: fx.tags,
+          durationSec: fx.durationSec,
+        });
+        const fxCandidates = eligibleFx.map(toCandidate);
+
+        const trackIdAtStart = currentTrack.id;
+        const nextTrackIdAtStart = nextTrack.id;
+        set({ aiFxPickLoading: true });
+
+        let picked: { fxId: string | null; startOffsetSeconds?: number; volumeMultiplier?: number; reason?: string };
+        try {
+          const res = await fetch("/api/dj/next-fx", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              currentTrack: toProfile(currentTrack),
+              nextTrack: toProfile(nextTrack),
+              fxLibrary: fxCandidates,
+              boardState: { mixMode: djMode, crossfadeSeconds: crossfadeOverrideSec },
+            }),
+          });
+          picked = res.ok ? await res.json() : pickFallbackTransitionFx(toProfile(currentTrack), fxCandidates);
+        } catch {
+          picked = pickFallbackTransitionFx(toProfile(currentTrack), fxCandidates);
+        }
+
+        // Same staleness guard as requestAiNextPick — bail if the upcoming
+        // transition this pick was computed for is no longer the one lined
+        // up (a manual skip, reorder, etc. while the request was in flight).
+        const state = get();
+        if (state.currentTrack?.id !== trackIdAtStart || state.queue[0]?.id !== nextTrackIdAtStart) {
+          set({ aiFxPickLoading: false });
+          return;
+        }
+
+        set({
+          aiFxPickId: picked.fxId,
+          aiFxPickStartOffsetSec: picked.startOffsetSeconds ?? 0,
+          aiFxPickVolumeMultiplier: picked.volumeMultiplier ?? null,
+          aiFxPickReason: picked.reason ?? null,
+          aiFxPickLoading: false,
+        });
       },
 
       togglePlay: () => set((s) => ({ isPlaying: !s.isPlaying })),
