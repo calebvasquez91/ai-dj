@@ -371,6 +371,29 @@ body {
   96% { transform: scaleY(0.15); }
 }
 
+/* Bobbing along with the beat — applied whenever a track is actually
+   playing (Que.tsx's `playing` class), replacing the slow idle breathing
+   with a snappier, more energetic nod. Declared before .reacting below so
+   a transition's one-shot bounce still wins the cascade on the rare frame
+   both classes are present together. */
+.que-stage.playing .que-body {
+  animation: que-groove-bob 0.5s ease-in-out infinite;
+}
+
+.que-stage.playing .que-band {
+  animation: que-groove-band 0.5s ease-in-out infinite;
+}
+
+@keyframes que-groove-bob {
+  0%, 100% { transform: translateY(0) rotate(0deg) scale(1, 1); }
+  50% { transform: translateY(-4px) rotate(-3deg) scale(1.03, 0.97); }
+}
+
+@keyframes que-groove-band {
+  0%, 100% { transform: rotate(0deg); }
+  50% { transform: rotate(-6deg); }
+}
+
 .que-stage.reacting .que-body {
   animation: que-react-bounce 0.6s cubic-bezier(0.34, 1.7, 0.64, 1);
 }
@@ -406,6 +429,8 @@ body {
   .que-body,
   .que-band,
   .que-eye,
+  .que-stage.playing .que-body,
+  .que-stage.playing .que-band,
   .que-stage.reacting .que-body,
   .que-stage.reacting .que-band,
   .que-stage.reacting .que-ring {
@@ -629,6 +654,67 @@ body {
   font-weight: 700;
   color: white;
   opacity: 0.7;
+}
+
+/* ---- Ambient music-wave background (Part C) ----
+   A fixed equalizer wash behind every route, mounted once in the (app)
+   layout — see components/MusicWaveBackground.tsx for why the timing is
+   index-derived rather than random. Sits above the body's radial-gradient
+   wash but below the sidebar/content (z-index 0, with the app shell's own
+   flex container implicitly stacking above it since it comes later in the
+   DOM), and never intercepts input. */
+
+.music-wave-bg {
+  position: fixed;
+  inset: 0;
+  /* Negative, not 0: the app shell (Sidebar/TopBar/main) is an ordinary
+     non-positioned element, which paints ABOVE a positioned z-index:0
+     sibling in stacking order regardless of DOM order — only a negative
+     z-index reliably sits behind it without having to also opt every
+     surface into its own stacking context. */
+  z-index: -1;
+  overflow: hidden;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.6s ease;
+}
+
+.music-wave-bg.is-playing {
+  opacity: 1;
+}
+
+.music-wave-bar {
+  position: absolute;
+  bottom: 0;
+  width: 3px;
+  height: 6%;
+  border-radius: 999px 999px 0 0;
+  transform: translateY(0);
+  background: linear-gradient(
+    to top,
+    color-mix(in srgb, var(--accent-teal-bright) 55%, transparent),
+    color-mix(in srgb, var(--accent-purple) 45%, transparent) 60%,
+    color-mix(in srgb, var(--accent-pink) 35%, transparent)
+  );
+  opacity: 0.16;
+  animation: music-wave-bob var(--wave-duration, 1.4s) ease-in-out infinite;
+  animation-delay: var(--wave-delay, 0s);
+  animation-play-state: paused;
+}
+
+.music-wave-bg.is-playing .music-wave-bar {
+  animation-play-state: running;
+}
+
+@keyframes music-wave-bob {
+  0%, 100% { height: 6%; opacity: 0.1; }
+  50% { height: var(--wave-peak, 40%); opacity: 0.22; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .music-wave-bg {
+    display: none;
+  }
 }
 
 /* ---- Now Playing panel collapse ----

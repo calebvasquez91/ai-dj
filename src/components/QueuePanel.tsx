@@ -3,6 +3,7 @@
 import { useStore } from "@/lib/store";
 import { formatTime } from "@/lib/format";
 import { TrackThumbnail } from "@/components/TrackThumbnail";
+import { CloseIcon } from "@/components/Icons";
 
 export function QueuePanel() {
   const open = useStore((s) => s.queuePanelOpen);
@@ -23,16 +24,16 @@ export function QueuePanel() {
         onClick={toggle}
         aria-hidden="true"
       />
-      <aside className="fixed inset-y-0 right-0 z-50 w-[85vw] max-w-80 bg-surface shadow-elevate-left flex flex-col">
+      <aside className="fixed inset-y-0 right-0 z-50 w-[85vw] max-w-80 bg-surface/90 backdrop-blur-xl border-l border-border/10 shadow-elevate-left flex flex-col">
         <div className="flex items-center justify-between px-4 h-16 shrink-0 border-b border-border/10">
           <h2 className="text-sm heading">Queue</h2>
           <button
             type="button"
             onClick={toggle}
-            className="btn-icon text-accent-purple hover:text-accent-pink text-lg leading-none"
+            className="btn-icon text-accent-purple hover:text-accent-pink"
             title="Close queue"
           >
-            ✕
+            <CloseIcon />
           </button>
         </div>
 
@@ -67,7 +68,7 @@ export function QueuePanel() {
                 {queue.map((track, index) => (
                   <div
                     key={`${track.id}-${index}`}
-                    className="flex items-center gap-3 rounded-md px-2 py-2 hover:bg-surface-hover"
+                    className="group flex items-center gap-3 rounded-md px-2 py-2 transition-colors hover:bg-surface-hover"
                   >
                     <TrackThumbnail
                       thumbnailUrl={track.thumbnailUrl}
@@ -100,7 +101,7 @@ export function QueuePanel() {
                       }
                       className="btn-icon text-muted hover:text-accent-pink"
                     >
-                      ✕
+                      <CloseIcon size={14} />
                     </button>
                   </div>
                 ))}

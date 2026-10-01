@@ -15,7 +15,8 @@ const TALK_FRAME_MS = 150;
  * reacts to the exact same explicit BPM/key/genre/persona/learned-weight
  * scoring that already picks every transition (mix-engine.ts, dj-weights.ts)
  * — Que is a face on that existing logic, not a new one. Idle, it just
- * breathes; the instant a transition is chosen, it bounces and a short
+ * breathes; while a track is actually playing it switches to a snappier
+ * head-bob (the `playing` class, independent of the reaction below); the instant a transition is chosen, it bounces and a short
  * "why" pill appears next to it, both driven by the same
  * activeTransitionShortWhy field DualDeckStage sets/clears alongside
  * DeckView's longer rationale (see mix-engine.ts's shortWhy).
@@ -41,6 +42,7 @@ const TALK_FRAME_MS = 150;
  */
 export function Que({ welcomeMessage, size = 32 }: { welcomeMessage?: string; size?: number } = {}) {
   const shortWhy = useStore((s) => s.activeTransitionShortWhy);
+  const isPlaying = useStore((s) => s.isPlaying);
   const [reacting, setReacting] = useState(false);
   const [pillText, setPillText] = useState<string | null>(welcomeMessage ?? null);
   const [pillDismissed, setPillDismissed] = useState(false);
@@ -121,7 +123,7 @@ export function Que({ welcomeMessage, size = 32 }: { welcomeMessage?: string; si
   return (
     <div className="flex items-start gap-2 flex-wrap">
       <div
-        className={`que-stage${reacting ? " reacting" : ""}${showPill ? " talking" : ""}`}
+        className={`que-stage${isPlaying ? " playing" : ""}${reacting ? " reacting" : ""}${showPill ? " talking" : ""}`}
         style={{ width: size + 8, height: size + 8 }}
         title="Que — the AI DJ"
       >
