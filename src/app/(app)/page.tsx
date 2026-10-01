@@ -7,6 +7,7 @@ import { useStore } from "@/lib/store";
 import { Que } from "@/components/Que";
 import { Shelf, ShelfCard } from "@/components/Shelf";
 import { TrackThumbnail } from "@/components/TrackThumbnail";
+import { ChevronDownIcon, PlusIcon, ShuffleIcon } from "@/components/Icons";
 import type { Track } from "@/types/music";
 
 function greetingForHour(hour: number) {
@@ -82,7 +83,7 @@ export default function Home() {
           disabled={shufflableCount < 2}
           className="btn home-hero-shuffle"
         >
-          🔀 Shuffle Play
+          <ShuffleIcon size={15} /> Shuffle Play
         </button>
         <button
           type="button"
@@ -91,7 +92,7 @@ export default function Home() {
           title="Scroll down"
           aria-label="Scroll down to Get started"
         >
-          ⌄
+          <ChevronDownIcon size={28} />
         </button>
       </section>
 
@@ -138,6 +139,7 @@ export default function Home() {
                   title={track.title}
                   subtitle={track.artist}
                   onClick={() => playTrackList(recentlyPlayed, index)}
+                  showPlayIcon
                 />
               )}
             />
@@ -165,7 +167,7 @@ export default function Home() {
                   onClick={handleBuildPlaylist}
                   className="card w-36 sm:w-40 h-[188px] flex flex-col items-center justify-center gap-2 text-accent-purple hover:-translate-y-0.5 transition-transform"
                 >
-                  <span className="text-3xl leading-none">+</span>
+                  <PlusIcon size={28} />
                   <span className="text-sm font-medium">New playlist</span>
                 </button>
               }
@@ -180,6 +182,7 @@ export default function Home() {
                   title={track.title}
                   subtitle={track.artist}
                   onClick={() => playTrackList(recentlyAdded, index)}
+                  showPlayIcon
                 />
               )}
             />
