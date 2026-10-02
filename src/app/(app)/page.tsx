@@ -61,6 +61,7 @@ export default function Home() {
 
   async function handleBuildPlaylist() {
     const id = await createPlaylist();
+    if (!id) return;
     router.push(`/playlist?id=${id}`);
   }
 

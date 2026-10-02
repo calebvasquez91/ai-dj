@@ -68,6 +68,7 @@ export function AddSelectedToPlaylistButton({
               type="button"
               onClick={async () => {
                 const id = await createPlaylist();
+                if (!id) return;
                 addAllTo(id);
               }}
               className="w-full px-3 py-2 text-sm text-left text-accent-purple font-semibold hover:bg-surface-hover"

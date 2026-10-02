@@ -105,11 +105,18 @@ describe("optimistic playlist mutations", () => {
     expect(useStore.getState().playlists[1].tracks).toHaveLength(1);
   });
 
-  it("createPlaylist throws and reports instead of pushing an error body into state", async () => {
+  it("createPlaylist resolves null and reports instead of pushing an error body into state", async () => {
     stubFetchStatus(401, { error: "Not signed in." });
-    await expect(useStore.getState().createPlaylist()).rejects.toThrow();
+    await expect(useStore.getState().createPlaylist()).resolves.toBeNull();
     expect(useStore.getState().playlists).toEqual([]);
     expect(useStore.getState().syncError).toMatch(/Not signed in/);
+  });
+
+  it("createPlaylist resolves null and reports when the network is down", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new TypeError("Failed to fetch")));
+    await expect(useStore.getState().createPlaylist()).resolves.toBeNull();
+    expect(useStore.getState().playlists).toEqual([]);
+    expect(useStore.getState().syncError).toMatch(/check your connection/);
   });
 
   it("createPlaylist appends the new playlist on success", async () => {

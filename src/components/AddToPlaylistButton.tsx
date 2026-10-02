@@ -62,6 +62,7 @@ export function AddToPlaylistButton({ track }: { track: Track }) {
               type="button"
               onClick={async () => {
                 const id = await createPlaylist();
+                if (!id) return;
                 addTrackToPlaylist(id, track);
                 setOpen(false);
               }}

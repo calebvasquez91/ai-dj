@@ -264,7 +264,8 @@ interface PlayerState {
   setStemAvailability: (trackId: string, vocalsUrl: string | null) => void;
 
   loadPlaylists: () => Promise<void>;
-  createPlaylist: () => Promise<string>;
+  /** Resolves to the new playlist's id, or null when it couldn't be created (the failure is already surfaced as a toast, so callers just stop). */
+  createPlaylist: () => Promise<string | null>;
   renamePlaylist: (playlistId: string, name: string) => void;
   persistPlaylistName: (playlistId: string) => void;
   removePlaylist: (playlistId: string) => void;
@@ -865,14 +866,14 @@ export const useStore = create<PlayerState>()(
           res = await fetch("/api/playlists", { method: "POST" });
         } catch {
           get().reportSyncError("Couldn't create the playlist — check your connection.");
-          throw new Error("Playlist creation failed (network).");
+          return null;
         }
         if (!res.ok) {
           // Previously the error body was parsed as a Playlist and pushed
           // into state (then crashed on playlist.id) — surface it instead.
           const body = (await res.json().catch(() => null)) as { error?: string } | null;
           get().reportSyncError(`Couldn't create the playlist: ${body?.error ?? `server error (${res.status})`}`);
-          throw new Error(`Playlist creation failed (${res.status}).`);
+          return null;
         }
         const playlist = (await res.json()) as Playlist;
         set((s) => ({ playlists: [...s.playlists, playlist] }));

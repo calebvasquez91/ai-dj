@@ -55,6 +55,7 @@ export function Sidebar() {
 
   async function handleCreatePlaylist() {
     const id = await createPlaylist();
+    if (!id) return;
     setSidebarOpen(false);
     router.push(`/playlist?id=${id}`);
   }
