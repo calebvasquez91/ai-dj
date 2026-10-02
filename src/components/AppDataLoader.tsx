@@ -12,6 +12,7 @@ export function AppDataLoader() {
     ran.current = true;
     void useStore.getState().loadLibrary();
     void useStore.getState().loadPlaylists();
+    void useStore.getState().loadFxLibrary();
   }, []);
 
   return null;

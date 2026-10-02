@@ -68,6 +68,10 @@ export default function Home() {
     () => [...localLibrary].sort((a, b) => b.addedAt - a.addedAt).slice(0, 12),
     [localLibrary]
   );
+  // Pulled out of "Your playlists" and given its own distinctly-themed card
+  // (spec #16) rather than blending into the generic playlist shelf.
+  const spookyPlaylist = useMemo(() => playlists.find((p) => p.theme === "spooky"), [playlists]);
+  const regularPlaylists = useMemo(() => playlists.filter((p) => p.theme !== "spooky"), [playlists]);
 
   return (
     <div className="flex flex-col">
@@ -129,6 +133,27 @@ export default function Home() {
           </section>
         ) : (
           <>
+            {spookyPlaylist && (
+              <section className="px-6">
+                <button
+                  type="button"
+                  onClick={() => router.push(`/playlist?id=${spookyPlaylist.id}`)}
+                  className="spooky-card-pulse w-full sm:w-64 rounded-2xl p-4 flex items-center gap-3 text-left text-white hover:-translate-y-0.5 transition-transform"
+                  style={{ background: "linear-gradient(135deg, #1a0500, #2d0a00)" }}
+                >
+                  <span className="text-3xl shrink-0" aria-hidden="true">
+                    🎃
+                  </span>
+                  <div className="min-w-0">
+                    <p className="font-semibold truncate">{spookyPlaylist.name}</p>
+                    <p className="text-xs text-white/70 truncate">
+                      {spookyPlaylist.tracks.length} track{spookyPlaylist.tracks.length === 1 ? "" : "s"}
+                    </p>
+                  </div>
+                </button>
+              </section>
+            )}
+
             <Shelf
               title="Jump back in"
               items={recentlyPlayed}
@@ -144,7 +169,7 @@ export default function Home() {
 
             <Shelf
               title="Your playlists"
-              items={playlists}
+              items={regularPlaylists}
               renderItem={(playlist) => (
                 <ShelfCard
                   art={

@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import type { DeckId, Playlist, Track } from "@/types/music";
+import type { DeckId, FxSound, Playlist, Track } from "@/types/music";
 import type { TrackAnalysis } from "@/lib/audio-analysis";
 import type { DjSetMode } from "@/lib/mix-engine";
 import type { AmbienceFrequency } from "@/lib/ambience";
@@ -22,6 +22,7 @@ import {
   pickByBpmProximity,
   type AiNextTrackCandidate,
 } from "@/lib/ai-dj";
+import { pickFallbackTransitionFx, type AiFxCandidate, type AiFxTrackProfile } from "@/lib/ai-fx";
 
 const MAX_HISTORY = 50;
 
@@ -46,6 +47,12 @@ interface PlayerState {
   /** Claude's recommended crossfade length for the upcoming mix into aiNextPickTrackId, seconds — informational only, never auto-applied to crossfadeOverrideSec (that field stays exclusively user-controlled). */
   aiNextPickRecommendedCrossfadeSec: number | null;
   aiNextPickLoading: boolean;
+  /** id of the FX sound requestAiFxPick last chose for the upcoming transition into queue[0] — null whenever no pick is active (no FX library, request hasn't resolved, or it resolved to "play nothing"). See lib/ai-fx.ts. */
+  aiFxPickId: string | null;
+  aiFxPickStartOffsetSec: number | null;
+  aiFxPickVolumeMultiplier: number | null;
+  aiFxPickReason: string | null;
+  aiFxPickLoading: boolean;
   currentTrack: Track | null;
   isPlaying: boolean;
   volume: number; // 0-1
@@ -126,6 +133,10 @@ interface PlayerState {
   playlists: Playlist[];
   playlistsLoaded: boolean;
   localLibrary: Track[];
+  fxLibrary: FxSound[];
+  fxLibraryLoaded: boolean;
+  /** The `theme` of whichever playlist the current queue was sourced from (playTrackList's `sourcePlaylistTheme` param) — e.g. "spooky" while playing the Spooky Music playlist, null otherwise. Drives all Halloween theming/audio. Cleared by any non-playlist playback (direct track click, Shuffle Play) the same way aiNextPickTrackId is. */
+  activePlaylistTheme: string | null;
   libraryLoaded: boolean;
 
   /** In-memory only (never persisted) — see lib/googleAuth.ts. Cleared on reload; the user reconnects via "Connect YouTube". */
@@ -136,7 +147,8 @@ interface PlayerState {
   setQueue: (tracks: Track[]) => void;
   enqueue: (track: Track) => void;
   removeFromQueue: (trackId: string) => void;
-  playTrackList: (tracks: Track[], startIndex: number) => void;
+  /** `sourcePlaylistTheme` is the playlist's `theme` field when playback was started from a themed playlist (e.g. "spooky"), omitted/null for any other playback — sets activePlaylistTheme so Halloween theming/audio knows to engage. */
+  playTrackList: (tracks: Track[], startIndex: number, sourcePlaylistTheme?: string | null) => void;
   /** Starts a true, DJ-driven shuffle session: queues an initial compatibility-aware, non-repeating batch and marks the session active so `next()` keeps extending it as it runs low. See lib/shuffle.ts. */
   startShuffle: (tracks: Track[]) => void;
   /**
@@ -149,6 +161,15 @@ interface PlayerState {
    * DualDeckStage.tsx that calls this once per new currentTrack.
    */
   requestAiNextPick: () => Promise<void>;
+  /**
+   * Asks the Anthropic API (via /api/dj/next-fx) to pick the best transition
+   * FX from the user's FX library for the upcoming transition from
+   * currentTrack into queue[0]. No-ops without both tracks known. Falls back
+   * to a local category+BPM pick (lib/ai-fx.ts's pickFallbackTransitionFx)
+   * if the request fails outright. See the effect in DualDeckStage.tsx that
+   * calls this once per new (currentTrack, queue[0]) pair.
+   */
+  requestAiFxPick: () => Promise<void>;
   togglePlay: () => void;
   setVolume: (volume: number) => void;
   setAutoDj: (enabled: boolean) => void;
@@ -207,6 +228,8 @@ interface PlayerState {
   setAmbienceFrequency: (frequency: AmbienceFrequency) => void;
   setMashupEnabled: (enabled: boolean) => void;
   setTrackPlayPreference: (trackId: string, preference: Track["playPreference"]) => void;
+  /** Manual tags (e.g. "halloween", "spooky") — drives the Spooky Music system playlist's auto-membership. */
+  setTrackTags: (trackId: string, tags: string[]) => void;
   setHotCueOverride: (trackId: string, cueNumber: number, atSec: number) => void;
 
   toggleMixerPanel: () => void;
@@ -231,6 +254,14 @@ interface PlayerState {
     index: number,
     direction: "up" | "down"
   ) => void;
+
+  loadFxLibrary: () => Promise<void>;
+  uploadFxSound: (file: File, metadata: { name: string; category: FxSound["category"] }) => Promise<void>;
+  updateFxSound: (fxId: string, patch: Partial<Pick<FxSound, "name" | "category" | "bpm" | "key" | "tags" | "playlistAffinity">>) => Promise<void>;
+  /** Local-only patch (no network) for bpm/key/tags inputs — pair with persistFxSound on blur so typing doesn't fire a request per keystroke. */
+  patchFxSoundLocal: (fxId: string, patch: Partial<Pick<FxSound, "bpm" | "key" | "tags" | "playlistAffinity">>) => void;
+  persistFxSound: (fxId: string) => Promise<void>;
+  removeFxSound: (fxId: string) => Promise<void>;
 }
 
 export const useStore = create<PlayerState>()(
@@ -243,6 +274,12 @@ export const useStore = create<PlayerState>()(
       aiNextPickTransitionNote: null,
       aiNextPickRecommendedCrossfadeSec: null,
       aiNextPickLoading: false,
+      aiFxPickId: null,
+      aiFxPickStartOffsetSec: null,
+      aiFxPickVolumeMultiplier: null,
+      aiFxPickReason: null,
+      aiFxPickLoading: false,
+      activePlaylistTheme: null,
       currentTrack: null,
       isPlaying: false,
       volume: 1,
@@ -294,6 +331,8 @@ export const useStore = create<PlayerState>()(
       playlists: [],
       playlistsLoaded: false,
       localLibrary: [],
+      fxLibrary: [],
+      fxLibraryLoaded: false,
       libraryLoaded: false,
 
       youtubeAccessToken: null,
@@ -305,7 +344,7 @@ export const useStore = create<PlayerState>()(
       removeFromQueue: (trackId) =>
         set((s) => ({ queue: s.queue.filter((t) => t.id !== trackId) })),
 
-      playTrackList: (tracks, startIndex) => {
+      playTrackList: (tracks, startIndex, sourcePlaylistTheme = null) => {
         const { currentTrack, history } = get();
         const nextHistory = currentTrack
           ? [...history, currentTrack].slice(-MAX_HISTORY)
@@ -324,6 +363,15 @@ export const useStore = create<PlayerState>()(
           aiNextPickTrackId: null,
           aiNextPickTransitionNote: null,
           aiNextPickRecommendedCrossfadeSec: null,
+          // Stale from whatever was queued up before — a fresh pick gets
+          // requested for the new (currentTrack, queue[0]) pairing, but
+          // clear the old one now so a transition started before that
+          // resolves can't play an FX matched to a different pairing.
+          aiFxPickId: null,
+          aiFxPickStartOffsetSec: null,
+          aiFxPickVolumeMultiplier: null,
+          aiFxPickReason: null,
+          activePlaylistTheme: sourcePlaylistTheme,
         });
       },
 
@@ -454,6 +502,79 @@ export const useStore = create<PlayerState>()(
         set({ aiNextPickLoading: false });
       },
 
+      requestAiFxPick: async () => {
+        const { currentTrack, queue, trackAnalysis, fxLibrary, djMode, crossfadeOverrideSec, activePlaylistTheme } =
+          get();
+        const nextTrack = queue[0];
+        if (!currentTrack || !nextTrack) return;
+
+        const toProfile = (t: Track): AiFxTrackProfile => {
+          const analysis = trackAnalysis[t.id];
+          return {
+            title: t.title,
+            bpm: analysis?.bpm ?? (t.source === "local" ? t.bpm ?? null : null),
+            camelotKey: analysis?.camelotKey ?? null,
+            energy: analysis ? meanEnergy(analysis.waveformPeaks) : null,
+          };
+        };
+
+        // While the Spooky Music playlist is active, only halloween-affinied
+        // FX are eligible — see DualDeckStage.tsx's 3-layer Halloween audio
+        // system. Elsewhere, the whole library is in play.
+        const isSpooky = activePlaylistTheme === "spooky";
+        const eligibleFx = isSpooky
+          ? fxLibrary.filter((fx) => fx.playlistAffinity.includes("spooky") || fx.playlistAffinity.includes("halloween"))
+          : fxLibrary;
+        const toCandidate = (fx: FxSound): AiFxCandidate => ({
+          id: fx.id,
+          name: fx.name,
+          category: fx.category,
+          bpm: fx.bpm ?? null,
+          key: fx.key ?? null,
+          tags: fx.tags,
+          durationSec: fx.durationSec,
+        });
+        const fxCandidates = eligibleFx.map(toCandidate);
+
+        const trackIdAtStart = currentTrack.id;
+        const nextTrackIdAtStart = nextTrack.id;
+        set({ aiFxPickLoading: true });
+
+        let picked: { fxId: string | null; startOffsetSeconds?: number; volumeMultiplier?: number; reason?: string };
+        try {
+          const res = await fetch("/api/dj/next-fx", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              currentTrack: toProfile(currentTrack),
+              nextTrack: toProfile(nextTrack),
+              fxLibrary: fxCandidates,
+              boardState: { mixMode: djMode, crossfadeSeconds: crossfadeOverrideSec },
+            }),
+          });
+          picked = res.ok ? await res.json() : pickFallbackTransitionFx(toProfile(currentTrack), fxCandidates);
+        } catch {
+          picked = pickFallbackTransitionFx(toProfile(currentTrack), fxCandidates);
+        }
+
+        // Same staleness guard as requestAiNextPick — bail if the upcoming
+        // transition this pick was computed for is no longer the one lined
+        // up (a manual skip, reorder, etc. while the request was in flight).
+        const state = get();
+        if (state.currentTrack?.id !== trackIdAtStart || state.queue[0]?.id !== nextTrackIdAtStart) {
+          set({ aiFxPickLoading: false });
+          return;
+        }
+
+        set({
+          aiFxPickId: picked.fxId,
+          aiFxPickStartOffsetSec: picked.startOffsetSeconds ?? 0,
+          aiFxPickVolumeMultiplier: picked.volumeMultiplier ?? null,
+          aiFxPickReason: picked.reason ?? null,
+          aiFxPickLoading: false,
+        });
+      },
+
       togglePlay: () => set((s) => ({ isPlaying: !s.isPlaying })),
       setVolume: (volume) => set({ volume }),
       setAutoDj: (enabled) => set({ autoDjEnabled: enabled }),
@@ -574,6 +695,22 @@ export const useStore = create<PlayerState>()(
           method: "PATCH",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ playPreference: preference ?? null }),
+        });
+      },
+      setTrackTags: (trackId, tags) => {
+        set((s) => {
+          const patch = (t: Track) => (t.id === trackId ? { ...t, tags } : t);
+          return {
+            localLibrary: s.localLibrary.map(patch),
+            playlists: s.playlists.map((p) => ({ ...p, tracks: p.tracks.map(patch) })),
+            queue: s.queue.map(patch),
+            currentTrack: s.currentTrack ? patch(s.currentTrack) : s.currentTrack,
+          };
+        });
+        void fetch(`/api/tracks/${trackId}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ tags }),
         });
       },
       // Same shape as setTrackPlayPreference: patch every place the track
@@ -781,6 +918,81 @@ export const useStore = create<PlayerState>()(
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ trackIds: tracks.map((t) => t.id) }),
         });
+      },
+
+      loadFxLibrary: async () => {
+        try {
+          const res = await fetch("/api/fx");
+          if (!res.ok) return;
+          const fxLibrary = (await res.json()) as FxSound[];
+          set({ fxLibrary });
+        } finally {
+          set({ fxLibraryLoaded: true });
+        }
+      },
+
+      uploadFxSound: async (file, metadata) => {
+        const { uploadFx } = await import("@/lib/fxUpload");
+        const durationSec = await new Promise<number>((resolve) => {
+          const audio = new Audio();
+          const url = URL.createObjectURL(file);
+          audio.preload = "metadata";
+          audio.addEventListener("loadedmetadata", () => {
+            URL.revokeObjectURL(url);
+            resolve(audio.duration || 0);
+          }, { once: true });
+          audio.addEventListener("error", () => {
+            URL.revokeObjectURL(url);
+            resolve(0);
+          }, { once: true });
+          audio.src = url;
+        });
+        const fx = await uploadFx(file, { ...metadata, durationSec });
+        set((s) => ({ fxLibrary: [...s.fxLibrary, fx] }));
+      },
+
+      updateFxSound: async (fxId, patch) => {
+        set((s) => ({
+          fxLibrary: s.fxLibrary.map((fx) => (fx.id === fxId ? { ...fx, ...patch } : fx)),
+        }));
+        const res = await fetch(`/api/fx/${fxId}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(patch),
+        });
+        if (res.ok) {
+          const fx = (await res.json()) as FxSound;
+          set((s) => ({ fxLibrary: s.fxLibrary.map((f) => (f.id === fxId ? fx : f)) }));
+        }
+      },
+
+      // Local-only counterpart to updateFxSound, for free-typing fields
+      // (bpm/key/tags) so every keystroke doesn't fire a PATCH — same split
+      // renamePlaylist/persistPlaylistName already uses for playlist names.
+      // Call persistFxSound (on blur) to actually save.
+      patchFxSoundLocal: (fxId, patch) =>
+        set((s) => ({
+          fxLibrary: s.fxLibrary.map((fx) => (fx.id === fxId ? { ...fx, ...patch } : fx)),
+        })),
+
+      persistFxSound: async (fxId) => {
+        const fx = get().fxLibrary.find((f) => f.id === fxId);
+        if (!fx) return;
+        const res = await fetch(`/api/fx/${fxId}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ bpm: fx.bpm ?? null, key: fx.key ?? null, tags: fx.tags, playlistAffinity: fx.playlistAffinity }),
+        });
+        if (res.ok) {
+          const updated = (await res.json()) as FxSound;
+          set((s) => ({ fxLibrary: s.fxLibrary.map((f) => (f.id === fxId ? updated : f)) }));
+        }
+      },
+
+      removeFxSound: async (fxId) => {
+        const res = await fetch(`/api/fx/${fxId}`, { method: "DELETE" });
+        if (!res.ok && res.status !== 404) return; // keep it in the UI if the server didn't actually remove it
+        set((s) => ({ fxLibrary: s.fxLibrary.filter((fx) => fx.id !== fxId) }));
       },
     })
 );

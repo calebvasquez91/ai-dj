@@ -1,5 +1,6 @@
 "use client";
 
+import { useState } from "react";
 import { useStore } from "@/lib/store";
 import { formatRelativeTime, isRecentlyAdded } from "@/lib/format";
 import { useNow } from "@/lib/useNow";
@@ -26,8 +27,11 @@ export function TrackGrid({
   const isPlaying = useStore((s) => s.isPlaying);
   const togglePlay = useStore((s) => s.togglePlay);
   const setTrackPlayPreference = useStore((s) => s.setTrackPlayPreference);
+  const setTrackTags = useStore((s) => s.setTrackTags);
   const now = useNow();
   const selectMode = Boolean(onToggleSelect);
+  const [editingTagsId, setEditingTagsId] = useState<string | null>(null);
+  const [tagsDraft, setTagsDraft] = useState("");
 
   return (
     <div className="flex flex-wrap gap-4">
@@ -129,6 +133,20 @@ export function TrackGrid({
                 >
                   <NoEntryIcon size={14} />
                 </button>
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setTagsDraft((track.tags ?? []).join(", "));
+                    setEditingTagsId(track.id);
+                  }}
+                  className={`btn-icon text-[11px] font-semibold ${
+                    track.tags && track.tags.length > 0 ? "text-accent-purple" : "text-muted"
+                  }`}
+                  title={track.tags?.length ? `Tags: ${track.tags.join(", ")}` : "Add tags (e.g. halloween, spooky)"}
+                >
+                  #
+                </button>
                 <AddToPlaylistButton track={track} />
                 <SeparateStemsButton track={track} />
                 {onRemove && (
@@ -145,6 +163,30 @@ export function TrackGrid({
                   </button>
                 )}
               </div>
+            )}
+
+            {editingTagsId === track.id && (
+              <input
+                autoFocus
+                value={tagsDraft}
+                onClick={(e) => e.stopPropagation()}
+                onChange={(e) => setTagsDraft(e.target.value)}
+                onBlur={() => {
+                  setTrackTags(
+                    track.id,
+                    tagsDraft
+                      .split(",")
+                      .map((t) => t.trim())
+                      .filter(Boolean)
+                  );
+                  setEditingTagsId(null);
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") e.currentTarget.blur();
+                }}
+                placeholder="tags, comma-separated"
+                className="mt-1 w-full text-[10px] rounded bg-surface-hover border border-border/10 px-1.5 py-1 outline-none"
+              />
             )}
           </div>
         );

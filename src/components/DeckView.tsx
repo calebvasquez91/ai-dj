@@ -35,10 +35,13 @@ function Waveform({
   peaks,
   progressRatio,
   markerRatio,
+  spooky = false,
 }: {
   peaks: number[];
   progressRatio?: number;
   markerRatio?: number;
+  /** Halloween waveform theme (spec #10) — true while the Spooky Music playlist is active (store.activePlaylistTheme === "spooky"). */
+  spooky?: boolean;
 }) {
   if (peaks.length === 0) {
     return (
@@ -55,8 +58,14 @@ function Waveform({
         return (
           <div
             key={i}
-            className={`flex-1 rounded-sm ${
-              played ? "bg-gradient-to-t from-accent-teal to-accent-purple" : "bg-border/40"
+            className={`flex-1 rounded-sm transition-colors duration-1000 ${
+              played
+                ? spooky
+                  ? "spooky-bar-played"
+                  : "bg-gradient-to-t from-accent-teal to-accent-purple"
+                : spooky
+                  ? "spooky-bar-unplayed"
+                  : "bg-border/40"
             }`}
             style={{ height: `${Math.max(8, p * 100)}%` }}
           />
@@ -100,6 +109,8 @@ function DeckCard({
   hotCues?: HotCueSlot[];
   currentTimeSec?: number;
 }) {
+  const spooky = useStore((s) => s.activePlaylistTheme === "spooky");
+
   if (!track) {
     return (
       <div className="card p-3 flex flex-col gap-2 flex-1 min-w-0">
@@ -141,7 +152,7 @@ function DeckCard({
         )}
       </div>
       {track.source === "youtube" && <TapTempoControl key={track.id} trackId={track.id} />}
-      <Waveform peaks={analysis?.waveformPeaks ?? []} progressRatio={progressRatio} markerRatio={markerRatio} />
+      <Waveform peaks={analysis?.waveformPeaks ?? []} progressRatio={progressRatio} markerRatio={markerRatio} spooky={spooky} />
       {hotCues && currentTimeSec != null && (
         <HotCuePads trackId={track.id} slots={hotCues} currentTimeSec={currentTimeSec} />
       )}

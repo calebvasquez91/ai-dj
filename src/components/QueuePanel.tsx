@@ -1,9 +1,13 @@
 "use client";
 
+import { useState } from "react";
 import { useStore } from "@/lib/store";
 import { formatTime } from "@/lib/format";
 import { TrackThumbnail } from "@/components/TrackThumbnail";
 import { CloseIcon } from "@/components/Icons";
+import { FxLibraryPanel } from "@/components/FxLibraryPanel";
+
+type PanelTab = "queue" | "fx";
 
 export function QueuePanel() {
   const open = useStore((s) => s.queuePanelOpen);
@@ -14,8 +18,12 @@ export function QueuePanel() {
   const isTransitioning = useStore((s) => s.isTransitioning);
   const aiNextPickTrackId = useStore((s) => s.aiNextPickTrackId);
   const aiNextPickTransitionNote = useStore((s) => s.aiNextPickTransitionNote);
+  const activePlaylistTheme = useStore((s) => s.activePlaylistTheme);
+  const [tab, setTab] = useState<PanelTab>("queue");
 
   if (!open) return null;
+
+  const isSpooky = activePlaylistTheme === "spooky";
 
   return (
     <>
@@ -25,8 +33,11 @@ export function QueuePanel() {
         aria-hidden="true"
       />
       <aside className="fixed inset-y-0 right-0 z-50 w-[85vw] max-w-80 surface-glass border-l border-border/10 shadow-elevate-left flex flex-col">
-        <div className="flex items-center justify-between px-4 h-16 shrink-0 border-b border-border/10">
-          <h2 className="text-sm heading">Queue</h2>
+        <div
+          className="flex items-center justify-between px-4 h-16 shrink-0 border-b border-border/10 transition-colors duration-1000"
+          style={isSpooky ? { backgroundColor: "rgba(255, 80, 0, 0.08)" } : undefined}
+        >
+          <h2 className="text-sm heading">{isSpooky ? "🎃 Spooky Mode" : "Queue"}</h2>
           <button
             type="button"
             onClick={toggle}
@@ -37,6 +48,30 @@ export function QueuePanel() {
           </button>
         </div>
 
+        <div className="flex gap-1 px-3 pt-3 shrink-0">
+          <button
+            type="button"
+            onClick={() => setTab("queue")}
+            className={`flex-1 text-xs font-medium px-3 py-1.5 rounded-full transition-colors ${
+              tab === "queue" ? "bg-accent-purple/20 text-accent-purple" : "text-muted hover:text-foreground"
+            }`}
+          >
+            Queue
+          </button>
+          <button
+            type="button"
+            onClick={() => setTab("fx")}
+            className={`flex-1 text-xs font-medium px-3 py-1.5 rounded-full transition-colors ${
+              tab === "fx" ? "bg-accent-purple/20 text-accent-purple" : "text-muted hover:text-foreground"
+            }`}
+          >
+            FX Library
+          </button>
+        </div>
+
+        {tab === "fx" ? (
+          <FxLibraryPanel />
+        ) : (
         <div className="flex-1 overflow-y-auto p-3 flex flex-col gap-4">
           {currentTrack && (
             <div>
@@ -109,6 +144,7 @@ export function QueuePanel() {
             )}
           </div>
         </div>
+        )}
       </aside>
     </>
   );

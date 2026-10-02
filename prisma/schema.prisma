@@ -24,6 +24,7 @@ model User {
   createdAt    DateTime   @default(now())
   tracks       Track[]
   playlists    Playlist[]
+  fxSounds     FxSound[]
 }
 
 model Track {
@@ -79,6 +80,14 @@ model Track {
   // The only source of hot cues for a YouTube track, which has no
   // waveform to auto-analyze at all.
   hotCueOverridesJson String?
+
+  // JSON.stringify'd string array, e.g. ["halloween","spooky"] — user-set,
+  // manually editable in the library UI. Drives the Spooky Music system
+  // playlist's auto-membership (any track tagged halloween/spooky/horror/
+  // dark/eerie) alongside its explicit PlaylistTrack rows. null/absent means
+  // untagged, same "not looked up / not set" convention as the other
+  // optional *Json columns on this model.
+  tagsJson String?
 
   playlistTracks PlaylistTrack[]
   stemJobs       StemSeparationJob[]
@@ -141,7 +150,19 @@ model Playlist {
   createdAt DateTime        @default(now())
   tracks    PlaylistTrack[]
 
+  // Marks a system-curated playlist (e.g. "spooky" for the built-in Spooky
+  // Music playlist) — null for a normal user-made playlist. Used to key
+  // Halloween-mode UI/audio off one flag rather than name-matching "Spooky
+  // Music" as a string. Enforced in app code, not a DB enum.
+  theme String?
+
   @@index([userId])
+  // Lets ensureSpookyPlaylist (lib/playlistApi.ts) use a single atomic
+  // upsert instead of a findFirst-then-create race — two concurrent calls
+  // (e.g. two open tabs) can no longer create two "Spooky Music" rows for
+  // the same user. Postgres treats NULL as distinct from NULL in a unique
+  // index, so this still allows unlimited normal (theme=null) playlists.
+  @@unique([userId, theme])
 }
 
 model PlaylistTrack {
@@ -153,4 +174,41 @@ model PlaylistTrack {
   position   Int
 
   @@unique([playlistId, trackId])
+}
+
+/**
+ * A user-uploaded FX/stinger sound (riser, scratch, ambient loop, vocal
+ * drop, etc.) available to be played as an overlay layer during a
+ * transition or, for category="background", looped continuously under a
+ * themed playlist. Same storage/mimeType/JSON-column conventions as Track
+ * above — storageKey is a local file id or a Vercel Blob URL depending on
+ * the active storage backend (see src/lib/storage.ts), *Json columns are
+ * plain Strings (not Prisma Json) for the same reason Track's are.
+ */
+model FxSound {
+  id       String @id @default(cuid())
+  userId   String
+  user     User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  name     String
+  fileName String
+  storageKey String
+  mimeType   String @default("audio/mpeg")
+
+  /** "transition" | "loop" | "effect" | "background" | "vocal" — enforced in app code, matching Track.source's own convention, not a DB enum. */
+  category String
+
+  durationSec Float
+  /** User-entered, optional — most FX don't have a meaningful tempo/key, unlike a Track these are never auto-analyzed. */
+  bpm Float?
+  key String?
+
+  /** JSON.stringify'd string array — free-text search/filter tags. */
+  tagsJson String @default("[]")
+  /** JSON.stringify'd string array, e.g. ["spooky","halloween"] — which themed playlists/modes this FX is eligible for. Checked by the Spooky Music system (requirement: Halloween mode pulls transition FX and background loops exclusively from here) and sent to the AI FX-matching call as part of each candidate's profile. */
+  playlistAffinityJson String @default("[]")
+
+  createdAt DateTime @default(now())
+
+  @@index([userId])
+  @@index([category])
 }
