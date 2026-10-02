@@ -16,11 +16,13 @@ function hasSpookyTag(track: Pick<PrismaTrack, "tagsJson">): boolean {
   }
 }
 
-/** Finds the current user's system "Spooky Music" playlist (identified by theme="spooky", not by name), creating it on first use. Idempotent — safe to call on every /api/playlists GET. */
+/** Finds the current user's system "Spooky Music" playlist (identified by theme="spooky", not by name), creating it on first use. Idempotent — safe to call on every /api/playlists GET. An upsert (not findFirst-then-create) so two concurrent calls — e.g. the app open in two tabs — can't race into two separate "Spooky Music" rows for the same user; relies on the @@unique([userId, theme]) constraint, which Postgres still allows multiple normal (theme=null) playlists under since NULL is never equal to NULL in a unique index. */
 export async function ensureSpookyPlaylist(userId: string) {
-  const existing = await prisma.playlist.findFirst({ where: { userId, theme: "spooky" } });
-  if (existing) return existing;
-  return prisma.playlist.create({ data: { userId, name: "Spooky Music", theme: "spooky" } });
+  return prisma.playlist.upsert({
+    where: { userId_theme: { userId, theme: "spooky" } },
+    update: {},
+    create: { userId, name: "Spooky Music", theme: "spooky" },
+  });
 }
 
 const playlistWithTracks = {
@@ -54,20 +56,20 @@ export function toPlaylistApiResponse(playlist: NonNullable<PlaylistWithTracks>)
   };
 }
 
-/** loadUserPlaylists + toPlaylistApiResponse, but also ensures the Spooky Music system playlist exists and unions in every spooky-tagged track the user hasn't explicitly added to it. The one extra read (all of the user's tracks) only happens here, not on every playlist load elsewhere in the app. */
+/** loadUserPlaylists + toPlaylistApiResponse, but also ensures the Spooky Music system playlist exists and unions in every spooky-tagged track the user hasn't explicitly added to it. The one extra read (all of the user's *tagged* tracks — `tagsJson: { not: null }` filters the untagged majority out at the DB level) only happens here, not on every playlist load elsewhere in the app. Auto-unioned tracks are also listed separately in `autoIncludedTrackIds`, since they have no backing PlaylistTrack row — a plain "remove from playlist" on one of them would silently no-op server-side and have it reappear on the next load; the client uses this list to not offer that action for them in the first place. */
 export async function loadUserPlaylistsWithSpookyUnion(userId: string): Promise<Playlist[]> {
   await ensureSpookyPlaylist(userId);
-  const [playlists, allTracks] = await Promise.all([
+  const [playlists, taggedTracks] = await Promise.all([
     loadUserPlaylists(userId),
-    prisma.track.findMany({ where: { userId } }),
+    prisma.track.findMany({ where: { userId, tagsJson: { not: null } } }),
   ]);
-  const spookyAutoTracks = allTracks.filter(hasSpookyTag);
+  const spookyAutoTracks = taggedTracks.filter(hasSpookyTag);
 
   return playlists.map((playlist) => {
     const base = toPlaylistApiResponse(playlist);
     if (playlist.theme !== "spooky") return base;
     const explicitIds = new Set(base.tracks.map((t) => t.id));
     const autoTracks = spookyAutoTracks.filter((t) => !explicitIds.has(t.id)).map(toTrackApiResponse);
-    return { ...base, tracks: [...base.tracks, ...autoTracks] };
+    return { ...base, tracks: [...base.tracks, ...autoTracks], autoIncludedTrackIds: autoTracks.map((t) => t.id) };
   });
 }

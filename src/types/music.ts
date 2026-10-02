@@ -43,6 +43,8 @@ export interface Playlist {
   createdAt: number;
   /** Marks a system-curated playlist, e.g. "spooky" for the built-in Spooky Music playlist — undefined for a normal user-made playlist. */
   theme?: string;
+  /** ids (a subset of `tracks`) present only because they matched a tag-based auto-membership rule (e.g. the Spooky Music playlist's halloween/spooky tag union) — they have no backing PlaylistTrack row, so "remove from playlist" can't actually remove them; the track's own tags would need to change instead. Undefined for a playlist with no such rule. */
+  autoIncludedTrackIds?: string[];
 }
 
 export type FxCategory = "transition" | "loop" | "effect" | "background" | "vocal";

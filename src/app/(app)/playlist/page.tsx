@@ -81,7 +81,13 @@ function PlaylistContent() {
           </div>
 
           <div className="flex flex-col gap-1">
-            {playlist.tracks.map((track, index) => (
+            {playlist.tracks.map((track, index) => {
+              // Auto-included via a tag-matching rule (e.g. Spooky Music's
+              // halloween/spooky union) — there's no PlaylistTrack row to
+              // reorder or remove, so offering those controls would silently
+              // no-op and the track would just reappear on the next load.
+              const autoIncluded = playlist.autoIncludedTrackIds?.includes(track.id) ?? false;
+              return (
               <div
                 key={track.id}
                 role="button"
@@ -146,35 +152,47 @@ function PlaylistContent() {
                   >
                     🚫
                   </button>
-                  <button
-                    type="button"
-                    onClick={() => moveTrackInPlaylist(playlist.id, index, "up")}
-                    disabled={index === 0}
-                    className="btn-icon text-muted hover:text-foreground"
-                    title="Move up"
-                  >
-                    ↑
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => moveTrackInPlaylist(playlist.id, index, "down")}
-                    disabled={index === playlist.tracks.length - 1}
-                    className="btn-icon text-muted hover:text-foreground"
-                    title="Move down"
-                  >
-                    ↓
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => removeTrackFromPlaylist(playlist.id, track.id)}
-                    className="btn-icon text-muted hover:text-accent-pink"
-                    title="Remove from playlist"
-                  >
-                    ✕
-                  </button>
+                  {autoIncluded ? (
+                    <span
+                      className="text-[10px] text-muted px-1.5 shrink-0"
+                      title="Added automatically because this track is tagged halloween/spooky — edit its tags in Music Library to remove it from here"
+                    >
+                      via tag
+                    </span>
+                  ) : (
+                    <>
+                      <button
+                        type="button"
+                        onClick={() => moveTrackInPlaylist(playlist.id, index, "up")}
+                        disabled={index === 0}
+                        className="btn-icon text-muted hover:text-foreground"
+                        title="Move up"
+                      >
+                        ↑
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => moveTrackInPlaylist(playlist.id, index, "down")}
+                        disabled={index === playlist.tracks.length - 1}
+                        className="btn-icon text-muted hover:text-foreground"
+                        title="Move down"
+                      >
+                        ↓
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => removeTrackFromPlaylist(playlist.id, track.id)}
+                        className="btn-icon text-muted hover:text-accent-pink"
+                        title="Remove from playlist"
+                      >
+                        ✕
+                      </button>
+                    </>
+                  )}
                 </div>
               </div>
-            ))}
+              );
+            })}
           </div>
         </>
       )}

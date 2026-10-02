@@ -57,6 +57,8 @@ const ANTHROPIC_TIMEOUT_MS = 8000;
 // through a client request/response round trip.
 export const MAX_FX_VOLUME_MULTIPLIER = 0.65;
 const DEFAULT_VOLUME_MULTIPLIER = 0.5;
+/** Generous sanity cap — no real crossfade window runs anywhere near this long (see mix-engine.ts's MAX_CROSSFADE_SEC). Just stops a wildly out-of-range AI response from scheduling the FX far outside any transition's actual lifetime. */
+const MAX_FX_START_OFFSET_SEC = 30;
 
 const SYSTEM_PROMPT =
   "You are an expert DJ and sound designer. Given two tracks and a library of FX sounds, select the single best transition FX to play during the crossfade. If the FX has no BPM or key data, infer compatibility from its name, tags, category, and duration relative to the crossfade window. For sounds with unknown key or BPM, reason about the mood and texture — a rising sweep works universally, a vocal stab needs key alignment. Return only JSON: { fxId: string, startOffsetSeconds: number, volumeMultiplier: number, reason: string }";
@@ -183,8 +185,18 @@ export async function pickTransitionFxWithAI(
       typeof parsed.volumeMultiplier === "number" && parsed.volumeMultiplier > 0
         ? Math.min(parsed.volumeMultiplier, MAX_FX_VOLUME_MULTIPLIER)
         : DEFAULT_VOLUME_MULTIPLIER;
+    // Upper-bounded the same way volumeMultiplier is above — a real
+    // crossfade window is a few seconds at most (see mix-engine.ts), so an
+    // unclamped value here (whether a hallucinated number or just a raw
+    // passthrough) could schedule the FX to start playing well after this
+    // transition — and the ones after it — have already finished, as a
+    // surprise sound with no visible connection to anything on screen.
+    // DualDeckStage.tsx clamps a second time against the transition's own
+    // actual windowSec, which isn't known here.
     const startOffsetSeconds =
-      typeof parsed.startOffsetSeconds === "number" && parsed.startOffsetSeconds >= 0 ? parsed.startOffsetSeconds : 0;
+      typeof parsed.startOffsetSeconds === "number" && parsed.startOffsetSeconds >= 0
+        ? Math.min(parsed.startOffsetSeconds, MAX_FX_START_OFFSET_SEC)
+        : 0;
 
     return {
       fxId,

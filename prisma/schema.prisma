@@ -157,6 +157,12 @@ model Playlist {
   theme String?
 
   @@index([userId])
+  // Lets ensureSpookyPlaylist (lib/playlistApi.ts) use a single atomic
+  // upsert instead of a findFirst-then-create race — two concurrent calls
+  // (e.g. two open tabs) can no longer create two "Spooky Music" rows for
+  // the same user. Postgres treats NULL as distinct from NULL in a unique
+  // index, so this still allows unlimited normal (theme=null) playlists.
+  @@unique([userId, theme])
 }
 
 model PlaylistTrack {

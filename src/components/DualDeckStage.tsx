@@ -294,6 +294,15 @@ export function DualDeckStage() {
   const ambientRunningRef = useRef(false);
   const ambientCrossfadingRef = useRef(false);
   const ambientCurrentFxIdRef = useRef<string | null>(null);
+  // Pending `el.pause()` timeouts scheduled by stopAmbientLayer/the
+  // crossfade-out below, keyed per slot — must be cancelled whenever that
+  // same slot is about to be (re)started, or a stale timeout can pause
+  // audio that was just restarted on it (e.g. Spooky Music toggling off
+  // then back on within the ~1.6s fade-out window).
+  const ambientPauseTimeoutsRef = useRef<{ A: ReturnType<typeof setTimeout> | null; B: ReturnType<typeof setTimeout> | null }>({
+    A: null,
+    B: null,
+  });
   const mashupRef = useRef<ActiveMashup | null>(null);
   // True synchronously as soon as a mashup decode kicks off, before mashupRef
   // itself is populated — guards against the tick loop starting a second
@@ -1063,12 +1072,13 @@ export function DualDeckStage() {
       return { source, filter, gain, analyser };
     }
 
-    /** Plays a user-uploaded FX sound (lib/ai-fx.ts's AI pick) as a one-shot overlay during a transition's crossfade — a real audio file, not a synthesized stand-in. startOffsetSec delays it relative to the crossfade's own start (Claude's call on when it should land within the window); volumeMultiplier is already capped by the caller (store.ts mirrors ai-fx.ts's MAX_FX_VOLUME_MULTIPLIER), capped again here as a last line of defense since it crossed a client request/response round trip. Plays to the buffer's own natural end — most FX are short one-shots that finish well inside the crossfade window on their own. */
+    /** Plays a user-uploaded FX sound (lib/ai-fx.ts's AI pick) as a one-shot overlay during a transition's crossfade — a real audio file, not a synthesized stand-in. startOffsetSec delays it relative to the crossfade's own start (Claude's call on when it should land within the window), clamped to windowSec — ai-fx.ts already caps it to a generous absolute ceiling, but only this call site knows the real (usually much shorter) window a stale/hallucinated value could otherwise schedule the FX well past, firing as a surprise sound disconnected from the transition it was picked for. volumeMultiplier is already capped by the caller (store.ts mirrors ai-fx.ts's MAX_FX_VOLUME_MULTIPLIER), capped again here as a last line of defense since it crossed a client request/response round trip. Plays to the buffer's own natural end (an explicit, bounded stop() — not just relying on the source's own implicit end-of-buffer stop — matching the sibling overlays above) — most FX are short one-shots that finish well inside the crossfade window on their own. */
     function startFxOverlayLayer(
       ctx: AudioContext,
       buffer: AudioBuffer,
       startOffsetSec: number,
-      volumeMultiplier: number
+      volumeMultiplier: number,
+      windowSec: number
     ): OverlayNodes | null {
       const masterGain = masterGainRef.current;
       if (!masterGain) return null;
@@ -1084,10 +1094,11 @@ export function DualDeckStage() {
 
       const safeVolume = Math.min(Math.max(volumeMultiplier, 0), MAX_FX_VOLUME_MULTIPLIER);
       const now = ctx.currentTime;
-      const delaySec = Math.max(0, startOffsetSec);
+      const delaySec = Math.min(Math.max(0, startOffsetSec), Math.max(0, windowSec));
       gain.gain.setValueAtTime(safeVolume, now + delaySec);
 
       source.start(now + delaySec);
+      source.stop(now + delaySec + buffer.duration + 0.05);
 
       return { source, filter, gain };
     }
@@ -1242,7 +1253,7 @@ export function DualDeckStage() {
         const fx = fxLibrary.find((f) => f.id === aiFxPickId);
         const buf = fx ? mashupBufferCacheRef.current[fx.sourceUrl] : null;
         return buf
-          ? startFxOverlayLayer(ctx, buf, aiFxPickStartOffsetSec ?? 0, aiFxPickVolumeMultiplier ?? 0.5)
+          ? startFxOverlayLayer(ctx, buf, aiFxPickStartOffsetSec ?? 0, aiFxPickVolumeMultiplier ?? 0.5, plan.windowSec)
           : null;
       })();
 
@@ -2198,12 +2209,32 @@ export function DualDeckStage() {
       return fallbackPool[Math.floor(Math.random() * fallbackPool.length)];
     }
 
+    /** Cancels a pending `el.pause()` scheduled for this slot (see ambientPauseTimeoutsRef's own comment) — call before playing/reusing that slot. */
+    function cancelAmbientPauseTimeout(slotKey: "A" | "B") {
+      const existing = ambientPauseTimeoutsRef.current[slotKey];
+      if (existing != null) {
+        clearTimeout(existing);
+        ambientPauseTimeoutsRef.current[slotKey] = null;
+      }
+    }
+
+    /** Schedules `el.pause()` for this slot after delayMs, replacing (not stacking on top of) any pause already pending for it. */
+    function scheduleAmbientPause(slotKey: "A" | "B", el: HTMLAudioElement, delayMs: number, onPaused?: () => void) {
+      cancelAmbientPauseTimeout(slotKey);
+      ambientPauseTimeoutsRef.current[slotKey] = setTimeout(() => {
+        ambientPauseTimeoutsRef.current[slotKey] = null;
+        el.pause();
+        onPaused?.();
+      }, delayMs);
+    }
+
     function startAmbientLayer() {
       if (ambientRunningRef.current) return;
       const fx = pickAmbientBackgroundFx();
       const slot = getOrCreateAmbientSlot("A");
       const ctx = audioCtxRef.current;
       if (!fx || !slot || !ctx) return; // no eligible background FX yet (or ctx not ready) — stays off until retried
+      cancelAmbientPauseTimeout("A");
       activeAmbientSlotRef.current = "A";
       ambientCurrentFxIdRef.current = fx.id;
       slot.el.src = fx.sourceUrl;
@@ -2229,8 +2260,7 @@ export function DualDeckStage() {
           slot.gain.gain.setValueAtTime(slot.gain.gain.value, ctx.currentTime);
           slot.gain.gain.linearRampToValueAtTime(0, ctx.currentTime + AMBIENT_FADE_SEC);
         }
-        const el = slot.el;
-        setTimeout(() => el.pause(), AMBIENT_FADE_SEC * 1000 + 100);
+        scheduleAmbientPause(key, slot.el, AMBIENT_FADE_SEC * 1000 + 100);
       });
     }
 
@@ -2261,6 +2291,7 @@ export function DualDeckStage() {
 
       ambientCrossfadingRef.current = true;
       const fadeSec = Math.max(0.2, remaining);
+      cancelAmbientPauseTimeout(nextKey);
       nextSlot.el.src = nextFx.sourceUrl;
       nextSlot.el.currentTime = 0;
       nextSlot.gain.gain.cancelScheduledValues(ctx.currentTime);
@@ -2273,11 +2304,9 @@ export function DualDeckStage() {
 
       activeAmbientSlotRef.current = nextKey;
       ambientCurrentFxIdRef.current = nextFx.id;
-      const outgoing = active;
-      setTimeout(() => {
-        outgoing.el.pause();
+      scheduleAmbientPause(activeKey, active.el, fadeSec * 1000 + 200, () => {
         ambientCrossfadingRef.current = false;
-      }, fadeSec * 1000 + 200);
+      });
     }
 
     /** Nothing queued to transition into — instead of an abrupt stop, fade the active deck's gain to 0 so it reaches silence right as the track naturally ends. Recomputing from the current gain value every tick (rather than a one-shot scheduled ramp) keeps this self-correcting if the check re-fires before the fade completes. */
@@ -2632,6 +2661,7 @@ export function DualDeckStage() {
     elA?.addEventListener("ended", onEndedA);
     elB?.addEventListener("ended", onEndedB);
     const ambientSlots = ambientSlotsRef.current;
+    const ambientPauseTimeouts = ambientPauseTimeoutsRef.current;
 
     return () => {
       clearInterval(interval);
@@ -2643,6 +2673,8 @@ export function DualDeckStage() {
       stopOverlayNodes(transitionRef.current?.fxOverlayNodes ?? null);
       transitionRef.current = null;
       (["A", "B"] as const).forEach((key) => {
+        const pending = ambientPauseTimeouts[key];
+        if (pending != null) clearTimeout(pending);
         try {
           ambientSlots[key]?.el.pause();
         } catch {
