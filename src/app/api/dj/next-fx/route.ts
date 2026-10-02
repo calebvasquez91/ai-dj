@@ -1,6 +1,9 @@
 import { NextResponse } from "next/server";
 import { auth } from "@/auth";
 import { pickTransitionFxWithAI, type AiFxBoardState, type AiFxCandidate, type AiFxTrackProfile } from "@/lib/ai-fx";
+import { apiHandler, unauthorized } from "@/lib/apiRoute";
+
+const MAX_FX_CANDIDATES = 200;
 
 interface NextFxRequestBody {
   currentTrack?: AiFxTrackProfile;
@@ -17,9 +20,9 @@ function isFxCandidate(value: unknown): value is AiFxCandidate {
   return typeof value === "object" && value !== null && typeof (value as { id?: unknown }).id === "string";
 }
 
-export async function POST(request: Request) {
+async function handlePOST(request: Request) {
   const session = await auth();
-  if (!session) return new NextResponse(null, { status: 401 });
+  if (!session) return unauthorized();
 
   const body = (await request.json().catch(() => null)) as NextFxRequestBody | null;
   if (
@@ -34,8 +37,11 @@ export async function POST(request: Request) {
       { status: 400 }
     );
   }
-  const fxLibrary = body.fxLibrary.filter(isFxCandidate);
+  // Bound the paid Claude prompt regardless of what the client sends.
+  const fxLibrary = body.fxLibrary.filter(isFxCandidate).slice(0, MAX_FX_CANDIDATES);
 
   const result = await pickTransitionFxWithAI(body.currentTrack, body.nextTrack, fxLibrary, body.boardState);
   return NextResponse.json(result);
 }
+
+export const POST = apiHandler(handlePOST);

@@ -2,6 +2,7 @@ import NextAuth from "next-auth";
 import Credentials from "next-auth/providers/credentials";
 import bcrypt from "bcryptjs";
 import { prisma } from "@/lib/prisma";
+import { normalizeEmail } from "@/lib/apiValidation";
 
 // Credentials-only auth (no OAuth), so sessions are JWT-based and there's no
 // need for the Prisma adapter — it exists to persist Account/Session rows
@@ -29,7 +30,10 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
         password: { label: "Password", type: "password" },
       },
       async authorize(credentials) {
-        const email = typeof credentials?.email === "string" ? credentials.email : undefined;
+        // Same normalization as /api/auth/register (trim + lowercase) — signup
+        // stores the lowercased address, so a login typed with any capital
+        // letter used to look up a different string and always fail.
+        const email = typeof credentials?.email === "string" ? normalizeEmail(credentials.email) || undefined : undefined;
         const password = typeof credentials?.password === "string" ? credentials.password : undefined;
         if (!email || !password) return null;
 

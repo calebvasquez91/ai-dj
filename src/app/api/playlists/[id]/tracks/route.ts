@@ -2,15 +2,16 @@ import { NextResponse } from "next/server";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { loadPlaylist, toPlaylistApiResponse } from "@/lib/playlistApi";
+import { apiHandler, notFound, unauthorized } from "@/lib/apiRoute";
 
-export async function POST(request: Request, { params }: { params: Promise<{ id: string }> }) {
+async function handlePOST(request: Request, { params }: { params: Promise<{ id: string }> }) {
   const session = await auth();
-  if (!session) return new NextResponse(null, { status: 401 });
+  if (!session) return unauthorized();
 
   const { id } = await params;
   const playlist = await prisma.playlist.findUnique({ where: { id } });
   if (!playlist || playlist.userId !== session.user.id) {
-    return new NextResponse(null, { status: 404 });
+    return notFound();
   }
 
   const body = await request.json().catch(() => null);
@@ -45,3 +46,5 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
   const updated = await loadPlaylist(id);
   return NextResponse.json(toPlaylistApiResponse(updated!), { status: 201 });
 }
+
+export const POST = apiHandler(handlePOST);

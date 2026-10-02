@@ -2,19 +2,21 @@ import { NextResponse } from "next/server";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { loadPlaylist, toPlaylistApiResponse } from "@/lib/playlistApi";
+import { apiHandler, notFound, unauthorized } from "@/lib/apiRoute";
+import { cleanText, MAX_NAME_LENGTH } from "@/lib/apiValidation";
 
-export async function PATCH(request: Request, { params }: { params: Promise<{ id: string }> }) {
+async function handlePATCH(request: Request, { params }: { params: Promise<{ id: string }> }) {
   const session = await auth();
-  if (!session) return new NextResponse(null, { status: 401 });
+  if (!session) return unauthorized();
 
   const { id } = await params;
   const existing = await prisma.playlist.findUnique({ where: { id } });
   if (!existing || existing.userId !== session.user.id) {
-    return new NextResponse(null, { status: 404 });
+    return notFound();
   }
 
   const body = await request.json().catch(() => null);
-  const name = typeof body?.name === "string" ? body.name.trim() : "";
+  const name = cleanText(body?.name, MAX_NAME_LENGTH);
   if (!name) return NextResponse.json({ error: "Name is required." }, { status: 400 });
 
   await prisma.playlist.update({ where: { id }, data: { name } });
@@ -22,14 +24,14 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
   return NextResponse.json(toPlaylistApiResponse(playlist!));
 }
 
-export async function DELETE(request: Request, { params }: { params: Promise<{ id: string }> }) {
+async function handleDELETE(request: Request, { params }: { params: Promise<{ id: string }> }) {
   const session = await auth();
-  if (!session) return new NextResponse(null, { status: 401 });
+  if (!session) return unauthorized();
 
   const { id } = await params;
   const existing = await prisma.playlist.findUnique({ where: { id } });
   if (!existing || existing.userId !== session.user.id) {
-    return new NextResponse(null, { status: 404 });
+    return notFound();
   }
   if (existing.theme) {
     // System playlists (e.g. Spooky Music) aren't user-deletable — the
@@ -40,3 +42,6 @@ export async function DELETE(request: Request, { params }: { params: Promise<{ i
   await prisma.playlist.delete({ where: { id } });
   return new NextResponse(null, { status: 204 });
 }
+
+export const PATCH = apiHandler(handlePATCH);
+export const DELETE = apiHandler(handleDELETE);

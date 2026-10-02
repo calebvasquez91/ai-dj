@@ -80,6 +80,9 @@ export async function deleteBlobFile(storageKey: string): Promise<void> {
  * never a browser upload.
  */
 export async function uploadBlobFile(pathname: string, data: Buffer, contentType: string): Promise<string> {
-  const blob = await put(pathname, data, { access: "public", contentType });
+  // allowOverwrite: concurrent stem polls may both finalize the same job; the
+  // second put() used to throw "blob already exists" (a 500) instead of
+  // harmlessly rewriting identical bytes at the same deterministic path.
+  const blob = await put(pathname, data, { access: "public", contentType, allowOverwrite: true });
   return blob.url;
 }

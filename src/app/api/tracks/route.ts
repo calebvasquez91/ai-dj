@@ -1,12 +1,14 @@
 import { NextResponse } from "next/server";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
-import { getStorageBackend, saveLocalFile, deleteLocalFile } from "@/lib/storage";
+import { getStorageBackend, saveLocalFile, deleteLocalFile, deleteBlobFile } from "@/lib/storage";
 import { toTrackApiResponse } from "@/lib/trackApi";
+import { apiHandler, jsonError, unauthorized } from "@/lib/apiRoute";
+import { cleanText, isAcceptableStorageUrl, isValidDuration, normalizeAudioMime } from "@/lib/apiValidation";
 
-export async function GET() {
+async function handleGET() {
   const session = await auth();
-  if (!session) return new NextResponse(null, { status: 401 });
+  if (!session) return unauthorized();
 
   const tracks = await prisma.track.findMany({
     where: { userId: session.user.id },
@@ -15,9 +17,13 @@ export async function GET() {
   return NextResponse.json(tracks.map(toTrackApiResponse));
 }
 
-export async function POST(request: Request) {
+function isUniqueViolation(err: unknown): boolean {
+  return typeof err === "object" && err !== null && (err as { code?: unknown }).code === "P2002";
+}
+
+async function handlePOST(request: Request) {
   const session = await auth();
-  if (!session) return new NextResponse(null, { status: 401 });
+  if (!session) return unauthorized();
 
   const contentType = request.headers.get("content-type") ?? "";
 
@@ -31,10 +37,10 @@ export async function POST(request: Request) {
 
     const formData = await request.formData();
     const file = formData.get("file");
-    const title = formData.get("title");
-    const artist = formData.get("artist");
+    const title = cleanText(formData.get("title"));
+    const artist = cleanText(formData.get("artist"));
     const durationSec = Number(formData.get("durationSec"));
-    if (!(file instanceof File) || typeof title !== "string" || typeof artist !== "string" || !Number.isFinite(durationSec)) {
+    if (!(file instanceof File) || !title || typeof formData.get("artist") !== "string" || !isValidDuration(durationSec)) {
       return NextResponse.json({ error: "Missing file or track metadata." }, { status: 400 });
     }
 
@@ -49,12 +55,12 @@ export async function POST(request: Request) {
           artist,
           durationSec,
           storageKey,
-          mimeType: file.type || "audio/mpeg",
+          mimeType: normalizeAudioMime(file.type),
         },
       });
       return NextResponse.json(toTrackApiResponse(track), { status: 201 });
     } catch (err) {
-      await deleteLocalFile(storageKey); // don't orphan the file if the DB write fails
+      await deleteLocalFile(storageKey).catch(() => {}); // don't orphan the file if the DB write fails
       throw err;
     }
   }
@@ -62,24 +68,41 @@ export async function POST(request: Request) {
   // JSON body: blob backend, bytes already uploaded client-side via
   // /api/tracks/upload-token — this call just records the metadata.
   const body = await request.json().catch(() => null);
-  const title = body?.title;
-  const artist = body?.artist;
+  const title = cleanText(body?.title);
+  const artist = cleanText(body?.artist);
   const durationSec = Number(body?.durationSec);
   const blobUrl = body?.blobUrl;
   const mimeType = body?.mimeType;
-  if (typeof title !== "string" || typeof artist !== "string" || typeof blobUrl !== "string" || !Number.isFinite(durationSec)) {
-    return NextResponse.json({ error: "Missing track metadata." }, { status: 400 });
+  const backend = getStorageBackend();
+  if (
+    !title ||
+    typeof body?.artist !== "string" ||
+    !isAcceptableStorageUrl(blobUrl, backend) ||
+    !isValidDuration(durationSec)
+  ) {
+    return NextResponse.json({ error: "Missing or invalid track metadata." }, { status: 400 });
   }
 
-  const track = await prisma.track.create({
-    data: {
-      userId: session.user.id,
-      title,
-      artist,
-      durationSec,
-      storageKey: blobUrl,
-      mimeType: typeof mimeType === "string" && mimeType ? mimeType : "audio/mpeg",
-    },
-  });
-  return NextResponse.json(toTrackApiResponse(track), { status: 201 });
+  try {
+    const track = await prisma.track.create({
+      data: {
+        userId: session.user.id,
+        title,
+        artist,
+        durationSec,
+        storageKey: blobUrl,
+        mimeType: normalizeAudioMime(typeof mimeType === "string" ? mimeType : ""),
+      },
+    });
+    return NextResponse.json(toTrackApiResponse(track), { status: 201 });
+  } catch (err) {
+    if (isUniqueViolation(err)) return jsonError(409, "That file is already in your library.");
+    // The bytes were already uploaded straight to Blob by the browser — if
+    // the DB write fails, nothing will ever reference them again.
+    if (backend === "blob") await deleteBlobFile(blobUrl).catch(() => {});
+    throw err;
+  }
 }
+
+export const GET = apiHandler(handleGET);
+export const POST = apiHandler(handlePOST);
