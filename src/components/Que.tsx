@@ -9,6 +9,10 @@ const REACT_DURATION_MS = 650;
 const PILL_AUTO_DISMISS_MS = 6000;
 /** N64-viseme-style mouth swap rate while Que is "talking" (the why pill is up). */
 const TALK_FRAME_MS = 150;
+/** Matches globals.css's .que-stage.halloween-transform animation duration. */
+const HALLOWEEN_TRANSFORM_DURATION_MS = 600;
+/** Spec #11's exact face set — one chosen at random on each track change while Spooky Music is active. */
+const HALLOWEEN_FACES = ["💀", "🎃", "👻", "🦇", "🕷️", "🐈‍⬛"];
 
 /**
  * Que — the AI DJ's visible presence. Not a trained model or an LLM: it
@@ -47,10 +51,16 @@ export function Que({
 }: { welcomeMessage?: string; size?: number; visible?: boolean } = {}) {
   const shortWhy = useStore((s) => s.activeTransitionShortWhy);
   const isPlaying = useStore((s) => s.isPlaying);
+  const activePlaylistTheme = useStore((s) => s.activePlaylistTheme);
+  const currentTrackId = useStore((s) => s.currentTrack?.id);
+  const spooky = activePlaylistTheme === "spooky";
   const [reacting, setReacting] = useState(false);
   const [pillText, setPillText] = useState<string | null>(welcomeMessage ?? null);
   const [pillDismissed, setPillDismissed] = useState(false);
   const [talkFrame, setTalkFrame] = useState(0);
+  const [halloweenFace, setHalloweenFace] = useState(() => HALLOWEEN_FACES[0]);
+  const [transforming, setTransforming] = useState(false);
+  const wasSpookyRef = useRef(false);
   const seenShortWhy = useRef<string | null>(null);
   const autoDismissTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   // PlayerBar and Home can both render Que on screen at once (a track can
@@ -105,6 +115,26 @@ export function Que({
     };
   }, []);
 
+  // Halloween avatar transformation (spec #11): a fresh random face each
+  // time the track changes while Spooky Music is active, plus a one-shot
+  // shake/tint-flash/scale-bounce entrance exactly when switching INTO
+  // spooky mode (not on every re-render while already spooky, and not
+  // replayed on every track change once already transformed).
+  useEffect(() => {
+    if (!spooky) {
+      wasSpookyRef.current = false;
+      return;
+    }
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setHalloweenFace(HALLOWEEN_FACES[Math.floor(Math.random() * HALLOWEEN_FACES.length)]);
+    if (!wasSpookyRef.current) {
+      wasSpookyRef.current = true;
+      setTransforming(true);
+      const timer = setTimeout(() => setTransforming(false), HALLOWEEN_TRANSFORM_DURATION_MS);
+      return () => clearTimeout(timer);
+    }
+  }, [spooky, currentTrackId]);
+
   const showPill = Boolean(pillText) && !pillDismissed;
 
   // "Talking" — the mouth swaps between two drawn shapes for as long as
@@ -136,10 +166,19 @@ export function Que({
   return (
     <div className="flex items-start gap-2 flex-wrap">
       <div
-        className={`que-stage${isPlaying ? " playing" : ""}${reacting ? " reacting" : ""}${showPill ? " talking" : ""}`}
+        className={`que-stage${isPlaying ? " playing" : ""}${reacting ? " reacting" : ""}${showPill ? " talking" : ""}${transforming ? " halloween-transform" : ""}`}
         style={{ width: size + 8, height: size + 8 }}
         title="Que — the AI DJ"
       >
+        {spooky ? (
+          <span
+            role="img"
+            aria-label="Que, dressed up for Spooky Music"
+            style={{ fontSize: size * 0.72, lineHeight: 1 }}
+          >
+            {halloweenFace}
+          </span>
+        ) : (
         <svg viewBox="0 0 84 84" width={size} height={size} fill="none" aria-hidden="true">
           <defs>
             <linearGradient id={bodyGradId} x1="14" y1="13" x2="70" y2="78" gradientUnits="userSpaceOnUse">
@@ -218,6 +257,7 @@ export function Que({
             )}
           </g>
         </svg>
+        )}
       </div>
       {showPill && (
         <button

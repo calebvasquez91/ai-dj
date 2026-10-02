@@ -32,6 +32,7 @@ import { reverseSamples } from "@/lib/reverse-audio";
 import { resolveHotCues, upcomingDropCueAtSec } from "@/lib/hot-cues";
 import { createTimeStretchVoice, type TimeStretchVoice } from "@/lib/time-stretch";
 import { filterStateToKnobPos } from "@/lib/mixer-controls";
+import { MAX_FX_VOLUME_MULTIPLIER } from "@/lib/ai-fx";
 import type { LocalTrack, Track } from "@/types/music";
 
 type DeckId = "A" | "B";
@@ -45,6 +46,13 @@ interface OverlayNodes {
   analyser?: AnalyserNode;
 }
 
+/** One of the two alternating Halloween ambient-background slots (layer 3) — a persistent HTMLAudioElement wired straight into the master Web Audio graph via its own GainNode, independent of both decks' own gain automation. */
+interface AmbientSlot {
+  el: HTMLAudioElement;
+  source: MediaElementAudioSourceNode;
+  gain: GainNode;
+}
+
 interface ActiveTransition {
   fromDeckId: DeckId;
   toDeckId: DeckId;
@@ -56,6 +64,8 @@ interface ActiveTransition {
   category: TransitionPlan["category"];
   tickIntervalId: ReturnType<typeof setInterval> | null;
   overlayNodes: OverlayNodes | null;
+  /** The AI-matched FX sound (lib/ai-fx.ts) for this transition, if one was picked and its buffer was decoded in time — fully independent of overlayNodes above (the mix-engine's own synthesized/vocal-stem effect), since a user-uploaded FX is a separate, optional layer on top of whichever effect this transition already has. */
+  fxOverlayNodes: OverlayNodes | null;
 }
 
 /**
@@ -231,6 +241,14 @@ const ECHO_DELAY_SEC = 0.22;
 const ECHO_FEEDBACK = 0.35;
 const ECHO_WET_LEVEL = 0.6;
 
+// Halloween 3-layer ambient background (spec: "low volume (0.2-0.3)",
+// "auto-crossfade into the next loop before they end"). Layer 3 of the
+// Spooky Music system — independent of both the deck crossfade (layer 1)
+// and the AI-matched transition FX (layer 2, see startFxOverlayLayer).
+const AMBIENT_VOLUME = 0.25;
+const AMBIENT_FADE_SEC = 1.5;
+const AMBIENT_CROSSFADE_LEAD_SEC = 2;
+
 export function DualDeckStage() {
   const audioARef = useRef<HTMLAudioElement>(null);
   const audioBRef = useRef<HTMLAudioElement>(null);
@@ -263,6 +281,28 @@ export function DualDeckStage() {
   const lyricsFetchingRef = useRef<Set<string>>(new Set());
   const stemCheckingRef = useRef<Set<string>>(new Set());
   const aiPickRequestedForRef = useRef<string | null>(null);
+  /** Keyed "currentTrackId:nextTrackId" so a new pick is requested exactly once per upcoming-transition pairing — a plain nextTrack.id key would miss a reorder back to a pairing already requested for a different currentTrack. */
+  const aiFxPickRequestedForRef = useRef<string | null>(null);
+  // Halloween ambient background layer (layer 3) — two alternating
+  // HTMLAudioElement/GainNode slots so one can crossfade into the other
+  // before the first ends, same two-slot-ping-pong shape a native loop
+  // player would use. Lazily created (createMediaElementSource can only
+  // ever be called once per element) and reused for the component's
+  // lifetime once built.
+  const ambientSlotsRef = useRef<{ A: AmbientSlot | null; B: AmbientSlot | null }>({ A: null, B: null });
+  const activeAmbientSlotRef = useRef<"A" | "B">("A");
+  const ambientRunningRef = useRef(false);
+  const ambientCrossfadingRef = useRef(false);
+  const ambientCurrentFxIdRef = useRef<string | null>(null);
+  // Pending `el.pause()` timeouts scheduled by stopAmbientLayer/the
+  // crossfade-out below, keyed per slot — must be cancelled whenever that
+  // same slot is about to be (re)started, or a stale timeout can pause
+  // audio that was just restarted on it (e.g. Spooky Music toggling off
+  // then back on within the ~1.6s fade-out window).
+  const ambientPauseTimeoutsRef = useRef<{ A: ReturnType<typeof setTimeout> | null; B: ReturnType<typeof setTimeout> | null }>({
+    A: null,
+    B: null,
+  });
   const mashupRef = useRef<ActiveMashup | null>(null);
   // True synchronously as soon as a mashup decode kicks off, before mashupRef
   // itself is populated — guards against the tick loop starting a second
@@ -310,6 +350,8 @@ export function DualDeckStage() {
   const queue = useStore((s) => s.queue);
   const shuffleSession = useStore((s) => s.shuffleSession);
   const stemAvailability = useStore((s) => s.stemAvailability);
+  const aiFxPickId = useStore((s) => s.aiFxPickId);
+  const fxLibrary = useStore((s) => s.fxLibrary);
   const isPlaying = useStore((s) => s.isPlaying);
   const volume = useStore((s) => s.volume);
   const seekRequest = useStore((s) => s.seekRequest);
@@ -393,6 +435,7 @@ export function DualDeckStage() {
     const fromEl = deckEl(t.fromDeckId);
     if (fromEl) fromEl.playbackRate = 1;
     stopOverlayNodes(t.overlayNodes);
+    stopOverlayNodes(t.fxOverlayNodes);
     if (t.effect === "word-play") cancelHypePhrase();
     if (t.effect === "loop-roll") cancelLoop();
     if (t.effect === "loop-hold") releaseManualLoop();
@@ -606,6 +649,42 @@ export function DualDeckStage() {
         // Left uncached — startTransition's cache read just comes up empty and skips the overlay.
       });
   }, [queue, stemAvailability]);
+
+  // AI-matched transition FX (lib/ai-fx.ts via store.ts's requestAiFxPick):
+  // once per new (currentTrack, queue[0]) pairing, ask Claude to pick the
+  // best FX sound from the user's library for the upcoming transition.
+  // Unlike the AI next-track pick above, this isn't gated on an active
+  // shuffle session — any transition (shuffle or plain queue) can carry a
+  // matched FX. Same ref-guard shape, keyed on both track ids since either
+  // one changing means a different upcoming transition.
+  useEffect(() => {
+    const nextTrack = queue[0];
+    if (!currentTrack || !nextTrack) return;
+    const key = `${currentTrack.id}:${nextTrack.id}`;
+    if (aiFxPickRequestedForRef.current === key) return;
+    aiFxPickRequestedForRef.current = key;
+    void useStore.getState().requestAiFxPick();
+  }, [currentTrack, queue]);
+
+  // Once the AI FX pick resolves to a real fxId, eagerly fetch+decode its
+  // audio into an AudioBuffer — same fire-and-forget, shared-cache pattern
+  // as the vocal-stem prefetch above. startTransition reads straight from
+  // the cache and simply skips the FX overlay if this hasn't resolved yet.
+  useEffect(() => {
+    const fx = aiFxPickId ? fxLibrary.find((f) => f.id === aiFxPickId) : null;
+    const url = fx?.sourceUrl ?? null;
+    const ctx = audioCtxRef.current;
+    if (!url || !ctx || mashupBufferCacheRef.current[url]) return;
+    fetch(url)
+      .then((res) => res.arrayBuffer())
+      .then((arrayBuffer) => ctx.decodeAudioData(arrayBuffer))
+      .then((buffer) => {
+        mashupBufferCacheRef.current[url] = buffer;
+      })
+      .catch(() => {
+        // Left uncached — startTransition's cache read just comes up empty and skips the FX overlay.
+      });
+  }, [aiFxPickId, fxLibrary]);
 
   // Build the Web Audio graph once per <audio> element pair, ever. Each
   // deck: <audio> -> MediaElementSource -> BiquadFilter (neutral "allpass"
@@ -993,6 +1072,37 @@ export function DualDeckStage() {
       return { source, filter, gain, analyser };
     }
 
+    /** Plays a user-uploaded FX sound (lib/ai-fx.ts's AI pick) as a one-shot overlay during a transition's crossfade — a real audio file, not a synthesized stand-in. startOffsetSec delays it relative to the crossfade's own start (Claude's call on when it should land within the window), clamped to windowSec — ai-fx.ts already caps it to a generous absolute ceiling, but only this call site knows the real (usually much shorter) window a stale/hallucinated value could otherwise schedule the FX well past, firing as a surprise sound disconnected from the transition it was picked for. volumeMultiplier is already capped by the caller (store.ts mirrors ai-fx.ts's MAX_FX_VOLUME_MULTIPLIER), capped again here as a last line of defense since it crossed a client request/response round trip. Plays to the buffer's own natural end (an explicit, bounded stop() — not just relying on the source's own implicit end-of-buffer stop — matching the sibling overlays above) — most FX are short one-shots that finish well inside the crossfade window on their own. */
+    function startFxOverlayLayer(
+      ctx: AudioContext,
+      buffer: AudioBuffer,
+      startOffsetSec: number,
+      volumeMultiplier: number,
+      windowSec: number
+    ): OverlayNodes | null {
+      const masterGain = masterGainRef.current;
+      if (!masterGain) return null;
+      const source = ctx.createBufferSource();
+      source.buffer = buffer;
+      const filter = ctx.createBiquadFilter();
+      filter.type = "allpass"; // no EQ shaping — OverlayNodes' shape just always includes a filter node in the chain
+      const gain = ctx.createGain();
+
+      source.connect(filter);
+      filter.connect(gain);
+      gain.connect(masterGain);
+
+      const safeVolume = Math.min(Math.max(volumeMultiplier, 0), MAX_FX_VOLUME_MULTIPLIER);
+      const now = ctx.currentTime;
+      const delaySec = Math.min(Math.max(0, startOffsetSec), Math.max(0, windowSec));
+      gain.gain.setValueAtTime(safeVolume, now + delaySec);
+
+      source.start(now + delaySec);
+      source.stop(now + delaySec + buffer.duration + 0.05);
+
+      return { source, filter, gain };
+    }
+
     /**
      * Reverse Tail transition overlay: reverses the outgoing deck's own
      * last windowSec of audio (up to fromEl's current playhead) and plays
@@ -1130,6 +1240,23 @@ export function DualDeckStage() {
                       return buf ? startReverseTailLayer(ctx, plan.windowSec, buf, fromEl) : null;
                     })()
                   : null;
+
+      // Independent of the mix-engine's own effect overlay above: an
+      // AI-matched user-uploaded FX sound (lib/ai-fx.ts) can play alongside
+      // ANY transition effect, not just a specific one. Graceful degradation
+      // matches the vocal-layer/reverse-out pattern — if no pick resolved
+      // yet, or its buffer hasn't finished decoding, the transition simply
+      // has no FX layer.
+      const fxOverlayNodes = (() => {
+        const { aiFxPickId, aiFxPickStartOffsetSec, aiFxPickVolumeMultiplier, fxLibrary } = useStore.getState();
+        if (!aiFxPickId) return null;
+        const fx = fxLibrary.find((f) => f.id === aiFxPickId);
+        const buf = fx ? mashupBufferCacheRef.current[fx.sourceUrl] : null;
+        return buf
+          ? startFxOverlayLayer(ctx, buf, aiFxPickStartOffsetSec ?? 0, aiFxPickVolumeMultiplier ?? 0.5, plan.windowSec)
+          : null;
+      })();
+
       if (plan.effect === "word-play") {
         // Fire-and-forget: SpeechSynthesis doesn't route through this
         // component's Web Audio graph, so it can't be volume-matched or
@@ -1174,6 +1301,7 @@ export function DualDeckStage() {
         category: plan.category,
         tickIntervalId: null,
         overlayNodes,
+        fxOverlayNodes,
       };
       transitionRef.current = transition;
       useStore.getState().setIsTransitioning(true);
@@ -2048,6 +2176,139 @@ export function DualDeckStage() {
       }
     }
 
+    /** Lazily builds (once) and returns one of the two ambient-background Web Audio slots, wired straight into the master graph. */
+    function getOrCreateAmbientSlot(slot: "A" | "B"): AmbientSlot | null {
+      const ctx = audioCtxRef.current;
+      const masterGain = masterGainRef.current;
+      if (!ctx || !masterGain) return null;
+      const existing = ambientSlotsRef.current[slot];
+      if (existing) return existing;
+      const el = new Audio();
+      el.preload = "auto";
+      const source = ctx.createMediaElementSource(el);
+      const gain = ctx.createGain();
+      gain.gain.value = 0;
+      source.connect(gain);
+      gain.connect(masterGain);
+      const created: AmbientSlot = { el, source, gain };
+      ambientSlotsRef.current[slot] = created;
+      return created;
+    }
+
+    /** A random halloween/spooky-affinied "background"-category FX, excluding one id (so back-to-back loops don't repeat the same clip) — null when the library has no eligible background FX, which is a graceful "no ambient layer" outcome, not an error. */
+    function pickAmbientBackgroundFx(excludeId?: string | null) {
+      const library = useStore.getState().fxLibrary;
+      const pool = library.filter(
+        (fx) =>
+          fx.category === "background" &&
+          (fx.playlistAffinity.includes("spooky") || fx.playlistAffinity.includes("halloween")) &&
+          fx.id !== excludeId
+      );
+      const fallbackPool = pool.length > 0 ? pool : library.filter((fx) => fx.category === "background");
+      if (fallbackPool.length === 0) return null;
+      return fallbackPool[Math.floor(Math.random() * fallbackPool.length)];
+    }
+
+    /** Cancels a pending `el.pause()` scheduled for this slot (see ambientPauseTimeoutsRef's own comment) — call before playing/reusing that slot. */
+    function cancelAmbientPauseTimeout(slotKey: "A" | "B") {
+      const existing = ambientPauseTimeoutsRef.current[slotKey];
+      if (existing != null) {
+        clearTimeout(existing);
+        ambientPauseTimeoutsRef.current[slotKey] = null;
+      }
+    }
+
+    /** Schedules `el.pause()` for this slot after delayMs, replacing (not stacking on top of) any pause already pending for it. */
+    function scheduleAmbientPause(slotKey: "A" | "B", el: HTMLAudioElement, delayMs: number, onPaused?: () => void) {
+      cancelAmbientPauseTimeout(slotKey);
+      ambientPauseTimeoutsRef.current[slotKey] = setTimeout(() => {
+        ambientPauseTimeoutsRef.current[slotKey] = null;
+        el.pause();
+        onPaused?.();
+      }, delayMs);
+    }
+
+    function startAmbientLayer() {
+      if (ambientRunningRef.current) return;
+      const fx = pickAmbientBackgroundFx();
+      const slot = getOrCreateAmbientSlot("A");
+      const ctx = audioCtxRef.current;
+      if (!fx || !slot || !ctx) return; // no eligible background FX yet (or ctx not ready) — stays off until retried
+      cancelAmbientPauseTimeout("A");
+      activeAmbientSlotRef.current = "A";
+      ambientCurrentFxIdRef.current = fx.id;
+      slot.el.src = fx.sourceUrl;
+      slot.el.currentTime = 0;
+      slot.gain.gain.cancelScheduledValues(ctx.currentTime);
+      slot.gain.gain.setValueAtTime(0, ctx.currentTime);
+      slot.gain.gain.linearRampToValueAtTime(AMBIENT_VOLUME, ctx.currentTime + AMBIENT_FADE_SEC);
+      slot.el.play().catch(() => {});
+      ambientRunningRef.current = true;
+    }
+
+    /** Fades both slots out (whichever is actually active, plus the other in case a crossfade was mid-flight) and stops them — the smooth "theme reset" this layer's half of, matching the 1s visual theme transition elsewhere. */
+    function stopAmbientLayer() {
+      if (!ambientRunningRef.current) return;
+      ambientRunningRef.current = false;
+      ambientCrossfadingRef.current = false;
+      const ctx = audioCtxRef.current;
+      (["A", "B"] as const).forEach((key) => {
+        const slot = ambientSlotsRef.current[key];
+        if (!slot) return;
+        if (ctx) {
+          slot.gain.gain.cancelScheduledValues(ctx.currentTime);
+          slot.gain.gain.setValueAtTime(slot.gain.gain.value, ctx.currentTime);
+          slot.gain.gain.linearRampToValueAtTime(0, ctx.currentTime + AMBIENT_FADE_SEC);
+        }
+        scheduleAmbientPause(key, slot.el, AMBIENT_FADE_SEC * 1000 + 100);
+      });
+    }
+
+    /** Called every tick (same 500ms cadence as tryAutoTransition/tryAmbience): starts the ambient layer when Spooky Music is active and it isn't running yet (e.g. the FX library was still loading when the playlist first activated), stops it when the playlist is no longer active, and crossfades into a fresh loop shortly before the current one ends. */
+    function tryHalloweenAmbientLayer() {
+      const isSpooky = useStore.getState().activePlaylistTheme === "spooky";
+      if (!isSpooky) {
+        stopAmbientLayer();
+        return;
+      }
+      if (!ambientRunningRef.current) {
+        startAmbientLayer();
+        return;
+      }
+      if (ambientCrossfadingRef.current) return;
+
+      const activeKey = activeAmbientSlotRef.current;
+      const active = ambientSlotsRef.current[activeKey];
+      const ctx = audioCtxRef.current;
+      if (!active || !ctx || !Number.isFinite(active.el.duration) || active.el.duration <= 0) return;
+      const remaining = active.el.duration - active.el.currentTime;
+      if (remaining > AMBIENT_CROSSFADE_LEAD_SEC) return;
+
+      const nextKey = activeKey === "A" ? "B" : "A";
+      const nextSlot = getOrCreateAmbientSlot(nextKey);
+      const nextFx = pickAmbientBackgroundFx(ambientCurrentFxIdRef.current);
+      if (!nextSlot || !nextFx) return; // nothing to crossfade into — current loop just plays out and stops naturally
+
+      ambientCrossfadingRef.current = true;
+      const fadeSec = Math.max(0.2, remaining);
+      cancelAmbientPauseTimeout(nextKey);
+      nextSlot.el.src = nextFx.sourceUrl;
+      nextSlot.el.currentTime = 0;
+      nextSlot.gain.gain.cancelScheduledValues(ctx.currentTime);
+      nextSlot.gain.gain.setValueAtTime(0, ctx.currentTime);
+      nextSlot.gain.gain.linearRampToValueAtTime(AMBIENT_VOLUME, ctx.currentTime + fadeSec);
+      nextSlot.el.play().catch(() => {});
+      active.gain.gain.cancelScheduledValues(ctx.currentTime);
+      active.gain.gain.setValueAtTime(AMBIENT_VOLUME, ctx.currentTime);
+      active.gain.gain.linearRampToValueAtTime(0, ctx.currentTime + fadeSec);
+
+      activeAmbientSlotRef.current = nextKey;
+      ambientCurrentFxIdRef.current = nextFx.id;
+      scheduleAmbientPause(activeKey, active.el, fadeSec * 1000 + 200, () => {
+        ambientCrossfadingRef.current = false;
+      });
+    }
+
     /** Nothing queued to transition into — instead of an abrupt stop, fade the active deck's gain to 0 so it reaches silence right as the track naturally ends. Recomputing from the current gain value every tick (rather than a one-shot scheduled ramp) keeps this self-correcting if the check re-fires before the fade completes. */
     function fadeOutIfEnding(activeEl: HTMLAudioElement, duration: number, currentTime: number) {
       const remaining = duration - currentTime;
@@ -2283,6 +2544,7 @@ export function DualDeckStage() {
       }
       tryAutoTransition();
       tryAmbience();
+      tryHalloweenAmbientLayer();
     }, 500);
 
     const unsubscribe = useStore.subscribe((state, prevState) => {
@@ -2398,6 +2660,8 @@ export function DualDeckStage() {
     const onEndedB = () => handleEnded("B");
     elA?.addEventListener("ended", onEndedA);
     elB?.addEventListener("ended", onEndedB);
+    const ambientSlots = ambientSlotsRef.current;
+    const ambientPauseTimeouts = ambientPauseTimeoutsRef.current;
 
     return () => {
       clearInterval(interval);
@@ -2406,7 +2670,18 @@ export function DualDeckStage() {
         clearInterval(transitionRef.current.tickIntervalId);
       }
       stopOverlayNodes(transitionRef.current?.overlayNodes ?? null);
+      stopOverlayNodes(transitionRef.current?.fxOverlayNodes ?? null);
       transitionRef.current = null;
+      (["A", "B"] as const).forEach((key) => {
+        const pending = ambientPauseTimeouts[key];
+        if (pending != null) clearTimeout(pending);
+        try {
+          ambientSlots[key]?.el.pause();
+        } catch {
+          // Already stopped — harmless.
+        }
+      });
+      ambientRunningRef.current = false;
       if (mashupRef.current?.tickIntervalId != null) {
         clearInterval(mashupRef.current.tickIntervalId);
       }
