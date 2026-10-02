@@ -159,6 +159,32 @@ const ResultRow = memo(function ResultRow({
   );
 });
 
+const SYNC_ERROR_VISIBLE_MS = 7000;
+
+/** Transient toast for a background save the server rejected (the store has already rolled the UI back) — see store.ts reportSyncError. */
+function SyncErrorToast() {
+  const message = useStore((s) => s.syncError);
+  const clear = useStore((s) => s.clearSyncError);
+  useEffect(() => {
+    if (!message) return;
+    const t = setTimeout(clear, SYNC_ERROR_VISIBLE_MS);
+    return () => clearTimeout(t);
+  }, [message, clear]);
+  if (!message) return null;
+  return createPortal(
+    <div
+      role="alert"
+      className="fixed right-4 top-[4.5rem] z-[70] w-[min(24rem,calc(100vw-2rem))] flex items-start gap-3 rounded-xl bg-surface shadow-elevate-md border border-accent-pink/40 px-4 py-3 text-sm"
+    >
+      <p className="flex-1 min-w-0 break-words text-accent-pink">{message}</p>
+      <button type="button" onClick={clear} aria-label="Dismiss" className="btn-icon text-muted shrink-0">
+        <CloseIcon size={14} />
+      </button>
+    </div>,
+    document.body
+  );
+}
+
 export function TopBar() {
   const router = useRouter();
   const pathname = usePathname();
@@ -443,6 +469,8 @@ export function TopBar() {
           </button>
         )}
       </div>
+
+      {mounted && <SyncErrorToast />}
 
       {showPanel &&
         rect &&

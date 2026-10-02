@@ -23,8 +23,22 @@ import {
   type AiNextTrackCandidate,
 } from "@/lib/ai-dj";
 import { pickFallbackTransitionFx, type AiFxCandidate, type AiFxTrackProfile } from "@/lib/ai-fx";
+import { jsonInit, syncRequest } from "@/lib/syncRequest";
 
 const MAX_HISTORY = 50;
+
+/** Maps a track over every place a Track object lives in the store (library, playlists, queue, current) — the one patch shape the optimistic curation setters and their rollbacks share. */
+function patchTrackEverywhere(s: PlayerState, trackId: string, fn: (t: Track) => Track) {
+  const patch = (t: Track) => (t.id === trackId ? fn(t) : t);
+  return {
+    localLibrary: s.localLibrary.map(patch),
+    playlists: s.playlists.map((p) => ({ ...p, tracks: p.tracks.map(patch) })),
+    queue: s.queue.map(patch),
+    currentTrack: s.currentTrack ? patch(s.currentTrack) : s.currentTrack,
+  };
+}
+
+const sameIds = (a: Track[], b: Track[]) => a.length === b.length && a.every((t, i) => t.id === b[i].id);
 
 /** An active self-extending Shuffle Play session — see startShuffle/extendShuffleQueue in lib/shuffle.ts. Null whenever the queue isn't currently DJ-driven (a manual track click, playlist, or direct queue clears it via playTrackList). */
 interface ShuffleSession {
@@ -138,6 +152,10 @@ interface PlayerState {
   /** The `theme` of whichever playlist the current queue was sourced from (playTrackList's `sourcePlaylistTheme` param) — e.g. "spooky" while playing the Spooky Music playlist, null otherwise. Drives all Halloween theming/audio. Cleared by any non-playlist playback (direct track click, Shuffle Play) the same way aiNextPickTrackId is. */
   activePlaylistTheme: string | null;
   libraryLoaded: boolean;
+  /** The most recent failed background save (an optimistic change that the server rejected and the store rolled back) — surfaced as a toast by TopBar. Null when there is nothing to report. */
+  syncError: string | null;
+  reportSyncError: (message: string) => void;
+  clearSyncError: () => void;
   /** Live text of the top search box — every keystroke lands here synchronously (see TopBar.tsx); the Library page and the quick-results dropdown both filter off it. In-memory only; the ?q= URL param on /library is a debounced mirror of it. */
   searchQuery: string;
   setSearchQuery: (query: string) => void;
@@ -337,6 +355,9 @@ export const useStore = create<PlayerState>()(
       fxLibrary: [],
       fxLibraryLoaded: false,
       libraryLoaded: false,
+      syncError: null,
+      reportSyncError: (message) => set({ syncError: message }),
+      clearSyncError: () => set({ syncError: null }),
       searchQuery: "",
       setSearchQuery: (query) => set({ searchQuery: query }),
 
@@ -628,6 +649,8 @@ export const useStore = create<PlayerState>()(
             trackAnalysis: { ...s.trackAnalysis, ...trackAnalysis },
             trackLyricalFingerprints: { ...s.trackLyricalFingerprints, ...trackLyricalFingerprints },
           }));
+        } catch (err) {
+          console.warn("Initial data load failed:", err);
         } finally {
           set({ libraryLoaded: true });
         }
@@ -635,8 +658,12 @@ export const useStore = create<PlayerState>()(
       addLocalTracks: (tracks) =>
         set((s) => ({ localLibrary: [...s.localLibrary, ...tracks] })),
       removeLocalTrack: async (trackId) => {
-        const res = await fetch(`/api/tracks/${trackId}`, { method: "DELETE" });
-        if (!res.ok && res.status !== 404) return; // keep it in the UI if the server didn't actually remove it
+        const res = await syncRequest(`/api/tracks/${trackId}`, { method: "DELETE" }, { okStatuses: [404] });
+        if (!res.ok) {
+          // keep it in the UI if the server didn't actually remove it
+          get().reportSyncError(`Couldn't remove the track: ${res.error}`);
+          return;
+        }
         set((s) => ({
           localLibrary: s.localLibrary.filter((t) => t.id !== trackId),
         }));
@@ -644,10 +671,9 @@ export const useStore = create<PlayerState>()(
       setTrackAnalysis: (trackId, analysis) => {
         set((s) => ({ trackAnalysis: { ...s.trackAnalysis, [trackId]: analysis } }));
         // Cache it server-side so it's never recomputed for this track again.
-        void fetch(`/api/tracks/${trackId}`, {
-          method: "PATCH",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ analysis }),
+        void syncRequest(`/api/tracks/${trackId}`, jsonInit("PATCH", { analysis })).then((r) => {
+          // Only a cache — the next session just recomputes it — so no toast.
+          if (!r.ok) console.warn("Couldn't cache track analysis:", r.error);
         });
       },
       setLyricalFingerprint: (trackId, fingerprint) => {
@@ -656,11 +682,11 @@ export const useStore = create<PlayerState>()(
         // it's never re-looked-up for this track again, even an empty
         // "found nothing" result — see the schema comment on
         // lyricalFingerprintJson for why that distinction matters.
-        void fetch(`/api/tracks/${trackId}`, {
-          method: "PATCH",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ lyricalFingerprint: serializeFingerprint(fingerprint) }),
-        });
+        void syncRequest(`/api/tracks/${trackId}`, jsonInit("PATCH", { lyricalFingerprint: serializeFingerprint(fingerprint) })).then(
+          (r) => {
+            if (!r.ok) console.warn("Couldn't cache lyrical fingerprint:", r.error);
+          }
+        );
       },
       startAnalyzing: (trackId) =>
         set((s) => ({ analyzingTrackIds: new Set(s.analyzingTrackIds).add(trackId) })),
@@ -687,35 +713,22 @@ export const useStore = create<PlayerState>()(
       // patch every place a matching track object might already live so a
       // badge shown elsewhere (queue, playlists, deck view) stays in sync.
       setTrackPlayPreference: (trackId, preference) => {
-        set((s) => {
-          const patch = (t: Track) => (t.id === trackId ? { ...t, playPreference: preference } : t);
-          return {
-            localLibrary: s.localLibrary.map(patch),
-            playlists: s.playlists.map((p) => ({ ...p, tracks: p.tracks.map(patch) })),
-            queue: s.queue.map(patch),
-            currentTrack: s.currentTrack ? patch(s.currentTrack) : s.currentTrack,
-          };
-        });
-        void fetch(`/api/tracks/${trackId}`, {
-          method: "PATCH",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ playPreference: preference ?? null }),
+        const previous = get().localLibrary.find((t) => t.id === trackId)?.playPreference;
+        set((s) => patchTrackEverywhere(s, trackId, (t) => ({ ...t, playPreference: preference })));
+        void syncRequest(`/api/tracks/${trackId}`, jsonInit("PATCH", { playPreference: preference ?? null })).then((r) => {
+          if (r.ok) return;
+          // Roll back — but only where the value is still ours, so a newer click isn't clobbered.
+          set((s) => patchTrackEverywhere(s, trackId, (t) => (t.playPreference === preference ? { ...t, playPreference: previous } : t)));
+          get().reportSyncError(`Couldn't save the play preference: ${r.error}`);
         });
       },
       setTrackTags: (trackId, tags) => {
-        set((s) => {
-          const patch = (t: Track) => (t.id === trackId ? { ...t, tags } : t);
-          return {
-            localLibrary: s.localLibrary.map(patch),
-            playlists: s.playlists.map((p) => ({ ...p, tracks: p.tracks.map(patch) })),
-            queue: s.queue.map(patch),
-            currentTrack: s.currentTrack ? patch(s.currentTrack) : s.currentTrack,
-          };
-        });
-        void fetch(`/api/tracks/${trackId}`, {
-          method: "PATCH",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ tags }),
+        const previous = get().localLibrary.find((t) => t.id === trackId)?.tags;
+        set((s) => patchTrackEverywhere(s, trackId, (t) => ({ ...t, tags })));
+        void syncRequest(`/api/tracks/${trackId}`, jsonInit("PATCH", { tags })).then((r) => {
+          if (r.ok) return;
+          set((s) => patchTrackEverywhere(s, trackId, (t) => (t.tags === tags ? { ...t, tags: previous } : t)));
+          get().reportSyncError(`Couldn't save the tags: ${r.error}`);
         });
       },
       // Same shape as setTrackPlayPreference: patch every place the track
@@ -723,22 +736,19 @@ export const useStore = create<PlayerState>()(
       // just the one changed cue — since the PATCH route replaces
       // hotCueOverridesJson wholesale rather than deep-merging it.
       setHotCueOverride: (trackId, cueNumber, atSec) => {
-        set((s) => {
-          const patch = (t: Track) =>
-            t.id === trackId ? { ...t, hotCueOverrides: { ...t.hotCueOverrides, [cueNumber]: atSec } } : t;
-          return {
-            localLibrary: s.localLibrary.map(patch),
-            playlists: s.playlists.map((p) => ({ ...p, tracks: p.tracks.map(patch) })),
-            queue: s.queue.map(patch),
-            currentTrack: s.currentTrack ? patch(s.currentTrack) : s.currentTrack,
-          };
-        });
+        const before = get().localLibrary.find((t) => t.id === trackId)?.hotCueOverrides;
+        set((s) => patchTrackEverywhere(s, trackId, (t) => ({ ...t, hotCueOverrides: { ...t.hotCueOverrides, [cueNumber]: atSec } })));
         const { currentTrack, localLibrary } = get();
         const updated = currentTrack?.id === trackId ? currentTrack : localLibrary.find((t) => t.id === trackId);
-        void fetch(`/api/tracks/${trackId}`, {
-          method: "PATCH",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ hotCueOverrides: updated?.hotCueOverrides ?? { [cueNumber]: atSec } }),
+        void syncRequest(
+          `/api/tracks/${trackId}`,
+          jsonInit("PATCH", { hotCueOverrides: updated?.hotCueOverrides ?? { [cueNumber]: atSec } })
+        ).then((r) => {
+          if (r.ok) return;
+          set((s) =>
+            patchTrackEverywhere(s, trackId, (t) => (t.hotCueOverrides?.[cueNumber] === atSec ? { ...t, hotCueOverrides: before } : t))
+          );
+          get().reportSyncError(`Couldn't save the hot cue: ${r.error}`);
         });
       },
       toggleMixerPanel: () => set((s) => ({ mixerPanelOpen: !s.mixerPanelOpen })),
@@ -766,10 +776,8 @@ export const useStore = create<PlayerState>()(
           };
         });
         if (persist) {
-          void fetch(`/api/tracks/${trackId}`, {
-            method: "PATCH",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ analysis, bpmSource }),
+          void syncRequest(`/api/tracks/${trackId}`, jsonInit("PATCH", { analysis, bpmSource })).then((r) => {
+            if (!r.ok) console.warn("Couldn't persist the YouTube BPM:", r.error);
           });
         }
       },
@@ -844,13 +852,28 @@ export const useStore = create<PlayerState>()(
           if (!res.ok) return;
           const playlists = (await res.json()) as Playlist[];
           set({ playlists });
+        } catch (err) {
+          console.warn("Initial data load failed:", err);
         } finally {
           set({ playlistsLoaded: true });
         }
       },
 
       createPlaylist: async () => {
-        const res = await fetch("/api/playlists", { method: "POST" });
+        let res: Response;
+        try {
+          res = await fetch("/api/playlists", { method: "POST" });
+        } catch {
+          get().reportSyncError("Couldn't create the playlist — check your connection.");
+          throw new Error("Playlist creation failed (network).");
+        }
+        if (!res.ok) {
+          // Previously the error body was parsed as a Playlist and pushed
+          // into state (then crashed on playlist.id) — surface it instead.
+          const body = (await res.json().catch(() => null)) as { error?: string } | null;
+          get().reportSyncError(`Couldn't create the playlist: ${body?.error ?? `server error (${res.status})`}`);
+          throw new Error(`Playlist creation failed (${res.status}).`);
+        }
         const playlist = (await res.json()) as Playlist;
         set((s) => ({ playlists: [...s.playlists, playlist] }));
         return playlist.id;
@@ -868,21 +891,35 @@ export const useStore = create<PlayerState>()(
       persistPlaylistName: (playlistId) => {
         const name = get().playlists.find((p) => p.id === playlistId)?.name;
         if (name === undefined) return;
-        void fetch(`/api/playlists/${playlistId}`, {
-          method: "PATCH",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ name }),
+        void syncRequest(`/api/playlists/${playlistId}`, jsonInit("PATCH", { name })).then((r) => {
+          if (r.ok) return;
+          // The typed name never saved (e.g. blank, or the playlist is gone) —
+          // pull the server's truth back rather than showing a name that
+          // will revert on the next reload.
+          void get().loadPlaylists();
+          get().reportSyncError(`Couldn't rename the playlist: ${r.error}`);
         });
       },
 
       removePlaylist: (playlistId) => {
+        const index = get().playlists.findIndex((p) => p.id === playlistId);
+        const removed = get().playlists[index];
         set((s) => ({
           playlists: s.playlists.filter((p) => p.id !== playlistId),
         }));
-        void fetch(`/api/playlists/${playlistId}`, { method: "DELETE" });
+        void syncRequest(`/api/playlists/${playlistId}`, { method: "DELETE" }, { okStatuses: [404] }).then((r) => {
+          if (r.ok || !removed) return;
+          set((s) =>
+            s.playlists.some((p) => p.id === playlistId)
+              ? s
+              : { playlists: [...s.playlists.slice(0, index), removed, ...s.playlists.slice(index)] }
+          );
+          get().reportSyncError(`Couldn't delete the playlist: ${r.error}`);
+        });
       },
 
       addTrackToPlaylist: (playlistId, track) => {
+        const wasPresent = get().playlists.find((p) => p.id === playlistId)?.tracks.some((t) => t.id === track.id) ?? true;
         set((s) => ({
           playlists: s.playlists.map((p) =>
             p.id === playlistId && !p.tracks.some((t) => t.id === track.id)
@@ -890,14 +927,23 @@ export const useStore = create<PlayerState>()(
               : p
           ),
         }));
-        void fetch(`/api/playlists/${playlistId}/tracks`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ trackId: track.id }),
+        void syncRequest(`/api/playlists/${playlistId}/tracks`, jsonInit("POST", { trackId: track.id })).then((r) => {
+          if (r.ok) return;
+          if (!wasPresent) {
+            set((s) => ({
+              playlists: s.playlists.map((p) =>
+                p.id === playlistId ? { ...p, tracks: p.tracks.filter((t) => t.id !== track.id) } : p
+              ),
+            }));
+          }
+          get().reportSyncError(`Couldn't add the track to the playlist: ${r.error}`);
         });
       },
 
       removeTrackFromPlaylist: (playlistId, trackId) => {
+        const before = get().playlists.find((p) => p.id === playlistId)?.tracks ?? [];
+        const removedIndex = before.findIndex((t) => t.id === trackId);
+        const removedTrack = before[removedIndex];
         set((s) => ({
           playlists: s.playlists.map((p) =>
             p.id === playlistId
@@ -905,7 +951,17 @@ export const useStore = create<PlayerState>()(
               : p
           ),
         }));
-        void fetch(`/api/playlists/${playlistId}/tracks/${trackId}`, { method: "DELETE" });
+        void syncRequest(`/api/playlists/${playlistId}/tracks/${trackId}`, { method: "DELETE" }, { okStatuses: [404] }).then((r) => {
+          if (r.ok || !removedTrack) return;
+          set((s) => ({
+            playlists: s.playlists.map((p) =>
+              p.id === playlistId && !p.tracks.some((t) => t.id === trackId)
+                ? { ...p, tracks: [...p.tracks.slice(0, removedIndex), removedTrack, ...p.tracks.slice(removedIndex)] }
+                : p
+            ),
+          }));
+          get().reportSyncError(`Couldn't remove the track from the playlist: ${r.error}`);
+        });
       },
 
       moveTrackInPlaylist: (playlistId, index, direction) => {
@@ -913,15 +969,23 @@ export const useStore = create<PlayerState>()(
         if (!playlist) return;
         const swapIndex = direction === "up" ? index - 1 : index + 1;
         if (swapIndex < 0 || swapIndex >= playlist.tracks.length) return;
+        const previousTracks = playlist.tracks;
         const tracks = [...playlist.tracks];
         [tracks[index], tracks[swapIndex]] = [tracks[swapIndex], tracks[index]];
         set((s) => ({
           playlists: s.playlists.map((p) => (p.id === playlistId ? { ...p, tracks } : p)),
         }));
-        void fetch(`/api/playlists/${playlistId}/tracks/reorder`, {
-          method: "PATCH",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ trackIds: tracks.map((t) => t.id) }),
+        void syncRequest(`/api/playlists/${playlistId}/tracks/reorder`, jsonInit("PATCH", { trackIds: tracks.map((t) => t.id) })).then((r) => {
+          if (r.ok) return;
+          const current = get().playlists.find((p) => p.id === playlistId);
+          if (current && sameIds(current.tracks, tracks)) {
+            // Nothing newer happened since — just undo this swap.
+            set((s) => ({ playlists: s.playlists.map((p) => (p.id === playlistId ? { ...p, tracks: previousTracks } : p)) }));
+          } else {
+            // Later edits are layered on top of this one; the server's order is the safe baseline.
+            void get().loadPlaylists();
+          }
+          get().reportSyncError(`Couldn't reorder the playlist: ${r.error}`);
         });
       },
 
@@ -931,6 +995,8 @@ export const useStore = create<PlayerState>()(
           if (!res.ok) return;
           const fxLibrary = (await res.json()) as FxSound[];
           set({ fxLibrary });
+        } catch (err) {
+          console.warn("Initial data load failed:", err);
         } finally {
           set({ fxLibraryLoaded: true });
         }
@@ -957,18 +1023,23 @@ export const useStore = create<PlayerState>()(
       },
 
       updateFxSound: async (fxId, patch) => {
+        const previous = get().fxLibrary.find((fx) => fx.id === fxId);
         set((s) => ({
           fxLibrary: s.fxLibrary.map((fx) => (fx.id === fxId ? { ...fx, ...patch } : fx)),
         }));
-        const res = await fetch(`/api/fx/${fxId}`, {
-          method: "PATCH",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(patch),
-        });
-        if (res.ok) {
+        let res: Response | null = null;
+        try {
+          res = await fetch(`/api/fx/${fxId}`, jsonInit("PATCH", patch));
+        } catch {
+          // fall through to the rollback below
+        }
+        if (res?.ok) {
           const fx = (await res.json()) as FxSound;
           set((s) => ({ fxLibrary: s.fxLibrary.map((f) => (f.id === fxId ? fx : f)) }));
+          return;
         }
+        if (previous) set((s) => ({ fxLibrary: s.fxLibrary.map((f) => (f.id === fxId ? previous : f)) }));
+        get().reportSyncError(`Couldn't save the FX change (${res ? res.status : "offline"}).`);
       },
 
       // Local-only counterpart to updateFxSound, for free-typing fields
@@ -983,20 +1054,32 @@ export const useStore = create<PlayerState>()(
       persistFxSound: async (fxId) => {
         const fx = get().fxLibrary.find((f) => f.id === fxId);
         if (!fx) return;
-        const res = await fetch(`/api/fx/${fxId}`, {
-          method: "PATCH",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ bpm: fx.bpm ?? null, key: fx.key ?? null, tags: fx.tags, playlistAffinity: fx.playlistAffinity }),
-        });
-        if (res.ok) {
+        let res: Response | null = null;
+        try {
+          res = await fetch(
+            `/api/fx/${fxId}`,
+            jsonInit("PATCH", { bpm: fx.bpm ?? null, key: fx.key ?? null, tags: fx.tags, playlistAffinity: fx.playlistAffinity })
+          );
+        } catch {
+          // fall through
+        }
+        if (res?.ok) {
           const updated = (await res.json()) as FxSound;
           set((s) => ({ fxLibrary: s.fxLibrary.map((f) => (f.id === fxId ? updated : f)) }));
+          return;
         }
+        // The edits typed into bpm/key/tags never saved — reload the server's copy so the panel doesn't show values that vanish on refresh.
+        void get().loadFxLibrary();
+        get().reportSyncError(`Couldn't save the FX details (${res ? res.status : "offline"}).`);
       },
 
       removeFxSound: async (fxId) => {
-        const res = await fetch(`/api/fx/${fxId}`, { method: "DELETE" });
-        if (!res.ok && res.status !== 404) return; // keep it in the UI if the server didn't actually remove it
+        const res = await syncRequest(`/api/fx/${fxId}`, { method: "DELETE" }, { okStatuses: [404] });
+        if (!res.ok) {
+          // keep it in the UI if the server didn't actually remove it
+          get().reportSyncError(`Couldn't delete the FX: ${res.error}`);
+          return;
+        }
         set((s) => ({ fxLibrary: s.fxLibrary.filter((fx) => fx.id !== fxId) }));
       },
     })
