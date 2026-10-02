@@ -25,7 +25,11 @@ export default async function AppLayout({ children }: { children: React.ReactNod
         <Sidebar />
         <div className="flex flex-1 flex-col min-w-0">
           <TopBar />
-          <main className="flex-1 overflow-y-auto">{children}</main>
+          {/* overflow-x-hidden: an overflow-y scroll container silently
+              becomes horizontally scrollable too, which is how one
+              too-wide child made whole pages slide sideways. Page
+              content is built to fit; this is the backstop. */}
+          <main className="flex-1 overflow-y-auto overflow-x-hidden">{children}</main>
         </div>
       </div>
       <PlayerBar />

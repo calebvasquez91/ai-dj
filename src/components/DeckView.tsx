@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useStore } from "@/lib/store";
 import { camelotCompatibility, planTransition, type DjSetMode } from "@/lib/mix-engine";
 import { fallbackAnalysis, type TrackAnalysis } from "@/lib/audio-analysis";
@@ -43,6 +43,30 @@ function Waveform({
   /** Halloween waveform theme (spec #10) — true while the Spooky Music playlist is active (store.activePlaylistTheme === "spooky"). */
   spooky?: boolean;
 }) {
+  const containerRef = useRef<HTMLDivElement>(null);
+  // How many bars physically fit: each needs ≥1px plus a 1px gap, so a
+  // fixed ~240-peak waveform overflowed (and clipped its right end) in any
+  // card narrower than ~250px. Resample down to what fits instead.
+  const [fitCount, setFitCount] = useState<number | null>(null);
+  const hasPeaks = peaks.length > 0;
+  useEffect(() => {
+    const el = containerRef.current;
+    if (!el) return;
+    const observer = new ResizeObserver(() => setFitCount(Math.max(24, Math.floor((el.clientWidth - 8) / 2))));
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [hasPeaks]);
+  const bars = useMemo(() => {
+    if (!fitCount || fitCount >= peaks.length) return peaks;
+    return Array.from({ length: fitCount }, (_, i) => {
+      const start = Math.floor((i * peaks.length) / fitCount);
+      const end = Math.max(start + 1, Math.floor(((i + 1) * peaks.length) / fitCount));
+      let max = 0;
+      for (let j = start; j < end; j++) max = Math.max(max, peaks[j]);
+      return max;
+    });
+  }, [peaks, fitCount]);
+
   if (peaks.length === 0) {
     return (
       <div className="h-12 rounded-md bg-surface-hover flex items-center justify-center text-[10px] text-muted">
@@ -51,9 +75,9 @@ function Waveform({
     );
   }
   return (
-    <div className="relative h-12 flex items-center gap-px overflow-hidden rounded-md bg-surface-hover px-1">
-      {peaks.map((p, i) => {
-        const barProgress = i / Math.max(1, peaks.length - 1);
+    <div ref={containerRef} className="relative h-12 flex items-center gap-px overflow-hidden rounded-md bg-surface-hover px-1">
+      {bars.map((p, i) => {
+        const barProgress = i / Math.max(1, bars.length - 1);
         const played = progressRatio != null && barProgress <= progressRatio;
         return (
           <div
@@ -464,7 +488,10 @@ export function DeckView() {
   return (
     <>
       <div className="fixed inset-0 z-40 bg-black/50" onClick={toggle} aria-hidden="true" />
-      <div className="fixed inset-x-4 bottom-32 md:bottom-24 z-50 mx-auto max-w-3xl max-h-[70vh] overflow-y-auto rounded-2xl bg-surface/95 backdrop-blur-xl p-4 flex flex-col gap-3 shadow-elevate-lg">
+      {/* max-h is "everything above the player bar, minus a margin" (bottom-32 /
+          md:bottom-24 + 1rem top), not a flat 70vh — 70vh + the bottom offset
+          overshoots short screens and pushes the title bar off the top. */}
+      <div className="fixed inset-x-4 bottom-32 md:bottom-24 z-50 mx-auto max-w-3xl max-h-[calc(100dvh-9rem)] md:max-h-[calc(100dvh-7rem)] overflow-y-auto overscroll-contain rounded-2xl bg-surface/95 backdrop-blur-xl p-4 flex flex-col gap-3 shadow-elevate-lg">
         <div className="flex flex-wrap items-center justify-between gap-2">
           <h2 className="text-sm heading">DJ Decks</h2>
           <div className="flex flex-wrap items-center gap-3">

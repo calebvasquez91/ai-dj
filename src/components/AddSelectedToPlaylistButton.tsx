@@ -1,7 +1,8 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useRef, useState } from "react";
 import { useStore } from "@/lib/store";
+import { AnchoredMenu } from "@/components/AnchoredMenu";
 import type { Track } from "@/types/music";
 
 /**
@@ -22,21 +23,11 @@ export function AddSelectedToPlaylistButton({
 }) {
   const [open, setOpen] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
+  const close = useCallback(() => setOpen(false), []);
 
   const playlists = useStore((s) => s.playlists);
   const createPlaylist = useStore((s) => s.createPlaylist);
   const addTrackToPlaylist = useStore((s) => s.addTrackToPlaylist);
-
-  useEffect(() => {
-    if (!open) return;
-    function handleOutsideClick(e: MouseEvent) {
-      if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
-        setOpen(false);
-      }
-    }
-    document.addEventListener("mousedown", handleOutsideClick);
-    return () => document.removeEventListener("mousedown", handleOutsideClick);
-  }, [open]);
 
   function addAllTo(playlistId: string) {
     for (const track of tracks) addTrackToPlaylist(playlistId, track);
@@ -56,7 +47,7 @@ export function AddSelectedToPlaylistButton({
         + Add to Playlist
       </button>
       {open && (
-        <div className="absolute left-0 z-10 mt-1 w-56 rounded-xl bg-surface shadow-elevate-lg py-1">
+        <AnchoredMenu anchorRef={containerRef} onClose={close} width={224} align="start" className="py-1">
           {playlists.length === 0 ? (
             <p className="px-3 py-2 text-xs text-muted">No playlists yet.</p>
           ) : (
@@ -65,7 +56,8 @@ export function AddSelectedToPlaylistButton({
                 key={playlist.id}
                 type="button"
                 onClick={() => addAllTo(playlist.id)}
-                className="w-full flex items-center px-3 py-2 text-sm text-left hover:bg-surface-hover truncate"
+                title={playlist.name}
+                className="w-full flex items-center px-3 py-2 text-sm text-left hover:bg-surface-hover break-words"
               >
                 {playlist.name}
               </button>
@@ -83,7 +75,7 @@ export function AddSelectedToPlaylistButton({
               + New playlist
             </button>
           </div>
-        </div>
+        </AnchoredMenu>
       )}
     </div>
   );

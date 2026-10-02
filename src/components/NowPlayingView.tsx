@@ -95,9 +95,9 @@ export function NowPlayingView() {
 
   return (
     <div
-      className={`now-playing-panel fixed inset-0 z-50 bg-background flex flex-col overflow-hidden ${
-        expanded ? "translate-y-0" : "translate-y-full"
-      }`}
+      className={`now-playing-panel fixed inset-x-0 top-0 h-dvh z-50 bg-background flex flex-col overflow-hidden transition-colors duration-1000 ${
+        spooky ? "spooky" : ""
+      } ${expanded ? "translate-y-0" : "translate-y-full"}`}
       aria-hidden={!expanded}
       inert={!expanded ? true : undefined}
     >
@@ -147,8 +147,12 @@ export function NowPlayingView() {
       </div>
 
       {currentTrack && (
-        <div className="flex-1 flex flex-col items-center justify-center gap-8 px-6 pb-10 min-h-0">
-          <div className="relative w-[min(100%,24rem,45vh)] aspect-square">
+        // Outer box scrolls, inner box centers: on a short or landscape
+        // screen the content scrolls instead of being clipped by this
+        // panel's overflow-hidden (centering alone would cut off the top).
+        <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain">
+        <div className="min-h-full flex flex-col items-center justify-center gap-4 sm:gap-8 px-4 sm:px-6 pb-[max(1.5rem,env(safe-area-inset-bottom))]">
+          <div className="relative w-[min(100%,24rem,38dvh)] aspect-square">
             <TrackThumbnailFill thumbnailUrl={currentTrack.thumbnailUrl} title={currentTrack.title} />
             {particles.map((p) => (
               <span
@@ -162,17 +166,21 @@ export function NowPlayingView() {
             ))}
           </div>
 
-          <div className="flex items-center gap-3 max-w-md min-w-0">
-            <Que size={30} visible={expanded} />
+          <div className="flex items-center gap-3 w-full max-w-md min-w-0">
+            <Que size={spooky ? 48 : 30} visible={expanded} />
             <div className="text-center flex-1 min-w-0">
-              <p className="text-2xl font-bold truncate">{currentTrack.title}</p>
-              <p className="text-base text-muted truncate">{currentTrack.artist}</p>
+              <p className="text-xl sm:text-2xl font-bold break-words line-clamp-2 transition-colors duration-1000">
+                {currentTrack.title}
+              </p>
+              <p className="text-base text-muted break-words line-clamp-2 transition-colors duration-1000">
+                {currentTrack.artist}
+              </p>
             </div>
           </div>
 
           <div className="w-full max-w-md flex flex-col gap-2">
             {isTransitioning && queue[0] ? (
-              <p className="text-center text-accent-pink font-semibold truncate">
+              <p className="text-center text-accent-pink font-semibold break-words line-clamp-2">
                 Mixing into &ldquo;{queue[0].title}&rdquo;
               </p>
             ) : (
@@ -218,6 +226,7 @@ export function NowPlayingView() {
               <NextIcon size={28} />
             </button>
           </div>
+        </div>
         </div>
       )}
     </div>

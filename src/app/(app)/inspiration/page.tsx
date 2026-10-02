@@ -16,7 +16,7 @@ export default function InspirationPage() {
   }
 
   return (
-    <div className="p-6 flex flex-col gap-6 max-w-2xl">
+    <div className="p-4 sm:p-6 flex flex-col gap-6 max-w-2xl">
       <div>
         <h1 className="text-2xl font-bold">DJ Style Advisor</h1>
         <p className="text-sm text-muted mt-1">
@@ -30,11 +30,13 @@ export default function InspirationPage() {
           value={input}
           onChange={(e) => setInput(e.target.value)}
           placeholder="e.g. techno, hip-hop block party, chill study session..."
-          className="flex-1 rounded-full bg-surface px-4 py-2 text-sm outline-none border border-border focus:border-accent placeholder:text-muted"
+          // min-w-0: an <input> has an intrinsic minimum width in a flex
+          // row, which is what pushed the button past the edge on phones.
+          className="flex-1 min-w-0 rounded-full bg-surface px-4 py-2 text-sm outline-none border border-border focus:border-accent placeholder:text-muted"
         />
         <button
           type="submit"
-          className="rounded-full bg-accent text-white text-sm font-semibold px-5 py-2 hover:bg-accent-strong shrink-0"
+          className="rounded-full bg-accent text-white text-sm font-semibold px-4 sm:px-5 py-2 hover:bg-accent-strong shrink-0 whitespace-nowrap"
         >
           Get Inspired
         </button>

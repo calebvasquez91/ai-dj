@@ -154,13 +154,22 @@ export function FxLibraryPanel() {
                   <PlayIcon size={14} />
                 </button>
                 <div className="min-w-0 flex-1">
-                  <p className="text-sm font-medium truncate">{fx.name}</p>
-                  <p className="text-xs text-muted truncate">{fx.fileName}</p>
+                  <p className="text-sm font-medium break-words line-clamp-2" title={fx.name}>
+                    {fx.name}
+                  </p>
+                  {/* Badge + length live under the name (not beside it) so a
+                      narrow panel gives the name the full row instead of
+                      squeezing it down to a few letters. */}
+                  <div className="flex items-center gap-1.5 flex-wrap">
+                    <span className="shrink-0 text-[10px] leading-none px-1.5 py-1 rounded-full bg-accent-teal/20 text-accent-teal font-medium capitalize">
+                      {fx.category}
+                    </span>
+                    <span className="text-xs text-muted shrink-0">{formatTime(fx.durationSec)}</span>
+                    <span className="text-xs text-muted break-all line-clamp-1 min-w-0" title={fx.fileName}>
+                      {fx.fileName}
+                    </span>
+                  </div>
                 </div>
-                <span className="shrink-0 text-[10px] leading-none px-1.5 py-1 rounded-full bg-accent-teal/20 text-accent-teal font-medium capitalize">
-                  {fx.category}
-                </span>
-                <span className="text-xs text-muted shrink-0">{formatTime(fx.durationSec)}</span>
                 <button
                   type="button"
                   onClick={() => void removeFxSound(fx.id)}
