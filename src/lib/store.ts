@@ -138,6 +138,9 @@ interface PlayerState {
   /** The `theme` of whichever playlist the current queue was sourced from (playTrackList's `sourcePlaylistTheme` param) — e.g. "spooky" while playing the Spooky Music playlist, null otherwise. Drives all Halloween theming/audio. Cleared by any non-playlist playback (direct track click, Shuffle Play) the same way aiNextPickTrackId is. */
   activePlaylistTheme: string | null;
   libraryLoaded: boolean;
+  /** Live text of the top search box — every keystroke lands here synchronously (see TopBar.tsx); the Library page and the quick-results dropdown both filter off it. In-memory only; the ?q= URL param on /library is a debounced mirror of it. */
+  searchQuery: string;
+  setSearchQuery: (query: string) => void;
 
   /** In-memory only (never persisted) — see lib/googleAuth.ts. Cleared on reload; the user reconnects via "Connect YouTube". */
   youtubeAccessToken: string | null;
@@ -334,6 +337,8 @@ export const useStore = create<PlayerState>()(
       fxLibrary: [],
       fxLibraryLoaded: false,
       libraryLoaded: false,
+      searchQuery: "",
+      setSearchQuery: (query) => set({ searchQuery: query }),
 
       youtubeAccessToken: null,
       youtubeTokenExpiresAt: null,
