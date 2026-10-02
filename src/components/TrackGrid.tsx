@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { memo, useCallback, useEffect, useRef, useState } from "react";
 import { useStore } from "@/lib/store";
 import { formatRelativeTime, isRecentlyAdded } from "@/lib/format";
 import { useNow } from "@/lib/useNow";
@@ -23,174 +23,231 @@ export function TrackGrid({
   onToggleSelect?: (trackId: string) => void;
 }) {
   const playTrackList = useStore((s) => s.playTrackList);
-  const currentTrack = useStore((s) => s.currentTrack);
+  const currentTrackId = useStore((s) => s.currentTrack?.id);
   const isPlaying = useStore((s) => s.isPlaying);
   const togglePlay = useStore((s) => s.togglePlay);
-  const setTrackPlayPreference = useStore((s) => s.setTrackPlayPreference);
-  const setTrackTags = useStore((s) => s.setTrackTags);
   const now = useNow();
   const selectMode = Boolean(onToggleSelect);
-  const [editingTagsId, setEditingTagsId] = useState<string | null>(null);
-  const [tagsDraft, setTagsDraft] = useState("");
+
+  // Cards are memoized so a search/filter change only mounts or unmounts the
+  // tiles that actually enter or leave the results — the ones that stay are
+  // left alone instead of re-rendering all N. That needs every prop to be
+  // referentially stable across a filter change, so the list a click plays
+  // from is read through a ref (it changes on every filter) rather than
+  // captured by the handler. Clicks always land after the effect has run.
+  const tracksRef = useRef(tracks);
+  useEffect(() => {
+    tracksRef.current = tracks;
+  }, [tracks]);
+
+  const handlePlay = useCallback(
+    (trackId: string) => {
+      const list = tracksRef.current;
+      const index = list.findIndex((t) => t.id === trackId);
+      if (index >= 0) playTrackList(list, index);
+    },
+    [playTrackList]
+  );
 
   return (
     <div className="flex flex-wrap gap-4">
-      {tracks.map((track, index) => {
-        const isNew = isRecentlyAdded(track.addedAt, now);
-        const isSelected = selectedIds?.has(track.id) ?? false;
-        const isCurrent = currentTrack?.id === track.id;
-        return (
-          <div
-            key={track.id}
-            role="button"
-            tabIndex={0}
-            onClick={() => (selectMode ? onToggleSelect!(track.id) : playTrackList(tracks, index))}
-            onKeyDown={(e) => {
-              if (e.key !== "Enter" && e.key !== " ") return;
-              if (selectMode) onToggleSelect!(track.id);
-              else playTrackList(tracks, index);
-            }}
-            className={`group relative w-36 sm:w-40 rounded-xl p-2 cursor-pointer transition-all ${
-              isSelected
-                ? "bg-accent-purple/10 shadow-elevate-sm"
-                : isCurrent
-                  ? "bg-surface-hover shadow-elevate-sm"
-                  : "hover:bg-surface-hover hover:shadow-elevate-sm"
-            }`}
-          >
-            <div className="relative">
-              <TrackThumbnail thumbnailUrl={track.thumbnailUrl} title={track.title} size={144} />
-              {!selectMode && (
-                <button
-                  type="button"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    if (isCurrent) togglePlay();
-                    else playTrackList(tracks, index);
-                  }}
-                  className="absolute bottom-2 right-2 w-10 h-10 rounded-full bg-gradient-to-br from-accent-teal to-accent-purple text-white flex items-center justify-center shadow-elevate-md opacity-0 translate-y-1 group-hover:opacity-100 group-hover:translate-y-0 focus:opacity-100 transition-all duration-200 hover:scale-105 active:scale-95"
-                  title={isCurrent && isPlaying ? "Pause" : "Play"}
-                >
-                  {isCurrent && isPlaying ? <PauseIcon size={16} /> : <PlayIcon size={16} className="translate-x-0.5" />}
-                </button>
-              )}
-              {selectMode && (
-                <input
-                  type="checkbox"
-                  checked={isSelected}
-                  onChange={() => onToggleSelect!(track.id)}
-                  onClick={(e) => e.stopPropagation()}
-                  className="absolute top-1.5 left-1.5 w-4 h-4 accent-accent-purple"
-                />
-              )}
-              {isNew && (
-                <span className="absolute top-1.5 right-1.5 text-[10px] font-bold uppercase tracking-wide text-white bg-accent-teal rounded-full px-1.5 py-0.5">
-                  New
-                </span>
-              )}
-            </div>
-
-            <p className="mt-2 text-sm font-medium truncate" title={track.title}>
-              {track.title}
-            </p>
-            <p className="text-xs text-muted truncate">
-              {track.artist} · {formatRelativeTime(track.addedAt, now)}
-            </p>
-
-            {!selectMode && (
-              <div className="mt-1 flex items-center gap-0.5 opacity-100 md:opacity-0 md:group-hover:opacity-100 focus-within:opacity-100 transition-opacity">
-                <button
-                  type="button"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    setTrackPlayPreference(track.id, track.playPreference === "must" ? undefined : "must");
-                  }}
-                  className={`btn-icon ${
-                    track.playPreference === "must" ? "text-accent-yellow" : "text-muted"
-                  }`}
-                  title={
-                    track.playPreference === "must"
-                      ? "Must-Play — click to clear"
-                      : "Mark Must-Play (guaranteed + first in Shuffle Play)"
-                  }
-                >
-                  <StarIcon size={14} filled={track.playPreference === "must"} />
-                </button>
-                <button
-                  type="button"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    setTrackPlayPreference(track.id, track.playPreference === "do-not" ? undefined : "do-not");
-                  }}
-                  className={`btn-icon ${
-                    track.playPreference === "do-not" ? "text-accent-pink" : "text-muted"
-                  }`}
-                  title={
-                    track.playPreference === "do-not"
-                      ? "Do-Not-Play — excluded from Shuffle Play (click to clear). A direct click here still plays it."
-                      : "Mark Do-Not-Play (excluded from Shuffle Play)"
-                  }
-                >
-                  <NoEntryIcon size={14} />
-                </button>
-                <button
-                  type="button"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    setTagsDraft((track.tags ?? []).join(", "));
-                    setEditingTagsId(track.id);
-                  }}
-                  className={`btn-icon text-[11px] font-semibold ${
-                    track.tags && track.tags.length > 0 ? "text-accent-purple" : "text-muted"
-                  }`}
-                  title={track.tags?.length ? `Tags: ${track.tags.join(", ")}` : "Add tags (e.g. halloween, spooky)"}
-                >
-                  #
-                </button>
-                <AddToPlaylistButton track={track} />
-                <SeparateStemsButton track={track} />
-                {onRemove && (
-                  <button
-                    type="button"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      onRemove(track.id);
-                    }}
-                    className="btn-icon text-muted hover:text-accent-pink ml-auto"
-                    title="Remove from library"
-                  >
-                    <CloseIcon size={14} />
-                  </button>
-                )}
-              </div>
-            )}
-
-            {editingTagsId === track.id && (
-              <input
-                autoFocus
-                value={tagsDraft}
-                onClick={(e) => e.stopPropagation()}
-                onChange={(e) => setTagsDraft(e.target.value)}
-                onBlur={() => {
-                  setTrackTags(
-                    track.id,
-                    tagsDraft
-                      .split(",")
-                      .map((t) => t.trim())
-                      .filter(Boolean)
-                  );
-                  setEditingTagsId(null);
-                }}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter") e.currentTarget.blur();
-                }}
-                placeholder="tags, comma-separated"
-                className="mt-1 w-full text-[10px] rounded bg-surface-hover border border-border/10 px-1.5 py-1 outline-none"
-              />
-            )}
-          </div>
-        );
-      })}
+      {tracks.map((track) => (
+        <TrackCard
+          key={track.id}
+          track={track}
+          now={now}
+          selectMode={selectMode}
+          isSelected={selectedIds?.has(track.id) ?? false}
+          isCurrent={currentTrackId === track.id}
+          isPlaying={currentTrackId === track.id && isPlaying}
+          onPlay={handlePlay}
+          onTogglePlay={togglePlay}
+          onToggleSelect={onToggleSelect}
+          onRemove={onRemove}
+        />
+      ))}
     </div>
   );
 }
+
+const TrackCard = memo(function TrackCard({
+  track,
+  now,
+  selectMode,
+  isSelected,
+  isCurrent,
+  isPlaying,
+  onPlay,
+  onTogglePlay,
+  onToggleSelect,
+  onRemove,
+}: {
+  track: Track;
+  now: number;
+  selectMode: boolean;
+  isSelected: boolean;
+  isCurrent: boolean;
+  /** True only for the current track while it is actually playing. */
+  isPlaying: boolean;
+  onPlay: (trackId: string) => void;
+  onTogglePlay: () => void;
+  onToggleSelect?: (trackId: string) => void;
+  onRemove?: (trackId: string) => void;
+}) {
+  const setTrackPlayPreference = useStore((s) => s.setTrackPlayPreference);
+  const setTrackTags = useStore((s) => s.setTrackTags);
+  const [editingTags, setEditingTags] = useState(false);
+  const [tagsDraft, setTagsDraft] = useState("");
+  const isNew = isRecentlyAdded(track.addedAt, now);
+
+  return (
+    <div
+      role="button"
+      tabIndex={0}
+      onClick={() => (selectMode ? onToggleSelect?.(track.id) : onPlay(track.id))}
+      onKeyDown={(e) => {
+        if (e.key !== "Enter" && e.key !== " ") return;
+        if (selectMode) onToggleSelect?.(track.id);
+        else onPlay(track.id);
+      }}
+      className={`group relative w-36 sm:w-40 rounded-xl p-2 cursor-pointer transition-all ${
+        isSelected
+          ? "bg-accent-purple/10 shadow-elevate-sm"
+          : isCurrent
+            ? "bg-surface-hover shadow-elevate-sm"
+            : "hover:bg-surface-hover hover:shadow-elevate-sm"
+      }`}
+    >
+      <div className="relative">
+        <TrackThumbnail thumbnailUrl={track.thumbnailUrl} title={track.title} size={144} />
+        {!selectMode && (
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              if (isCurrent) onTogglePlay();
+              else onPlay(track.id);
+            }}
+            className="absolute bottom-2 right-2 w-10 h-10 rounded-full bg-gradient-to-br from-accent-teal to-accent-purple text-white flex items-center justify-center shadow-elevate-md opacity-0 translate-y-1 group-hover:opacity-100 group-hover:translate-y-0 focus:opacity-100 transition-all duration-200 hover:scale-105 active:scale-95"
+            title={isPlaying ? "Pause" : "Play"}
+          >
+            {isPlaying ? <PauseIcon size={16} /> : <PlayIcon size={16} className="translate-x-0.5" />}
+          </button>
+        )}
+        {selectMode && (
+          <input
+            type="checkbox"
+            checked={isSelected}
+            onChange={() => onToggleSelect?.(track.id)}
+            onClick={(e) => e.stopPropagation()}
+            className="absolute top-1.5 left-1.5 w-4 h-4 accent-accent-purple"
+          />
+        )}
+        {isNew && (
+          <span className="absolute top-1.5 right-1.5 text-[10px] font-bold uppercase tracking-wide text-white bg-accent-teal rounded-full px-1.5 py-0.5">
+            New
+          </span>
+        )}
+      </div>
+
+      <p className="mt-2 text-sm font-medium truncate" title={track.title}>
+        {track.title}
+      </p>
+      <p className="text-xs text-muted truncate">
+        {track.artist} · {formatRelativeTime(track.addedAt, now)}
+      </p>
+
+      {!selectMode && (
+        <div className="mt-1 flex items-center gap-0.5 opacity-100 md:opacity-0 md:group-hover:opacity-100 focus-within:opacity-100 transition-opacity">
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              setTrackPlayPreference(track.id, track.playPreference === "must" ? undefined : "must");
+            }}
+            className={`btn-icon ${
+              track.playPreference === "must" ? "text-accent-yellow" : "text-muted"
+            }`}
+            title={
+              track.playPreference === "must"
+                ? "Must-Play — click to clear"
+                : "Mark Must-Play (guaranteed + first in Shuffle Play)"
+            }
+          >
+            <StarIcon size={14} filled={track.playPreference === "must"} />
+          </button>
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              setTrackPlayPreference(track.id, track.playPreference === "do-not" ? undefined : "do-not");
+            }}
+            className={`btn-icon ${
+              track.playPreference === "do-not" ? "text-accent-pink" : "text-muted"
+            }`}
+            title={
+              track.playPreference === "do-not"
+                ? "Do-Not-Play — excluded from Shuffle Play (click to clear). A direct click here still plays it."
+                : "Mark Do-Not-Play (excluded from Shuffle Play)"
+            }
+          >
+            <NoEntryIcon size={14} />
+          </button>
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              setTagsDraft((track.tags ?? []).join(", "));
+              setEditingTags(true);
+            }}
+            className={`btn-icon text-[11px] font-semibold ${
+              track.tags && track.tags.length > 0 ? "text-accent-purple" : "text-muted"
+            }`}
+            title={track.tags?.length ? `Tags: ${track.tags.join(", ")}` : "Add tags (e.g. halloween, spooky)"}
+          >
+            #
+          </button>
+          <AddToPlaylistButton track={track} />
+          <SeparateStemsButton track={track} />
+          {onRemove && (
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                onRemove(track.id);
+              }}
+              className="btn-icon text-muted hover:text-accent-pink ml-auto"
+              title="Remove from library"
+            >
+              <CloseIcon size={14} />
+            </button>
+          )}
+        </div>
+      )}
+
+      {editingTags && (
+        <input
+          autoFocus
+          value={tagsDraft}
+          onClick={(e) => e.stopPropagation()}
+          onChange={(e) => setTagsDraft(e.target.value)}
+          onBlur={() => {
+            setTrackTags(
+              track.id,
+              tagsDraft
+                .split(",")
+                .map((t) => t.trim())
+                .filter(Boolean)
+            );
+            setEditingTags(false);
+          }}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") e.currentTarget.blur();
+          }}
+          placeholder="tags, comma-separated"
+          className="mt-1 w-full text-[10px] rounded bg-surface-hover border border-border/10 px-1.5 py-1 outline-none"
+        />
+      )}
+    </div>
+  );
+});

@@ -59,7 +59,7 @@ export function YouTubeImportModal({ onClose }: { onClose: () => void }) {
       <div
         role="dialog"
         aria-modal="true"
-        className="bg-surface shadow-elevate-lg rounded-2xl p-6 max-w-md w-full max-h-[80vh] flex flex-col gap-4"
+        className="bg-surface shadow-elevate-lg rounded-2xl p-6 max-w-md w-full max-h-[calc(100dvh-2rem)] overflow-y-auto flex flex-col gap-4"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-center justify-between">

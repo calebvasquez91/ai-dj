@@ -21,6 +21,7 @@ import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { getStorageBackend, uploadBlobFile } from "@/lib/storage";
 import { trackSourceUrl } from "@/lib/trackApi";
+import { apiHandler, notFound, unauthorized } from "@/lib/apiRoute";
 
 /**
  * ryan5453/demucs's currently-deployed version, pinned explicitly rather
@@ -49,6 +50,9 @@ const REPLICATE_MODEL_VERSION = "5a7041cc9b82e5a558fea6b3d7b12dea89625e89da33f04
  */
 const COST_PER_SECOND_USD = 0.027 / 24;
 
+/** How long a "pending" (claimed, Replicate not yet called) job may sit before POST treats it as dead. */
+const PENDING_STALE_MS = 2 * 60 * 1000;
+
 type StemName = "vocals" | "drums" | "bass" | "other";
 const STEM_NAMES: readonly StemName[] = ["vocals", "drums", "bass", "other"];
 
@@ -68,13 +72,13 @@ function latestJob(trackId: string) {
   return prisma.stemSeparationJob.findFirst({ where: { trackId }, orderBy: { createdAt: "desc" } });
 }
 
-export async function POST(request: Request, { params }: { params: Promise<{ id: string }> }) {
+async function handlePOST(request: Request, { params }: { params: Promise<{ id: string }> }) {
   const session = await auth();
-  if (!session) return new NextResponse(null, { status: 401 });
+  if (!session) return unauthorized();
 
   const { id } = await params;
   const track = await loadOwnedTrack(id, session.user.id);
-  if (!track) return new NextResponse(null, { status: 404 });
+  if (!track) return notFound();
 
   if (track.source !== "local") {
     return NextResponse.json(
@@ -91,10 +95,31 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
 
   // Idempotent: an in-flight or already-finished job is returned as-is
   // rather than double-submitted; a failed one is retried as a fresh row.
-  const existing = await latestJob(id);
-  if (existing && existing.status !== "failed") {
-    return NextResponse.json(existing);
-  }
+  // The check and the claim (a "pending" row) happen under a per-track
+  // advisory lock BEFORE the paid Replicate call — previously two concurrent
+  // POSTs (double click, two tabs) both saw "no job" and each started (and
+  // were billed for) their own prediction. A "pending" row older than
+  // PENDING_STALE_MS means the process that claimed it died before reaching
+  // Replicate; it is treated as failed so the track is not stuck forever.
+  const claim = await prisma.$transaction(async (tx) => {
+    await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${"stems:" + id}))`;
+    const existing = await tx.stemSeparationJob.findFirst({ where: { trackId: id }, orderBy: { createdAt: "desc" } });
+    if (existing) {
+      const stalePending = existing.status === "pending" && Date.now() - existing.createdAt.getTime() > PENDING_STALE_MS;
+      if (stalePending) {
+        await tx.stemSeparationJob.update({
+          where: { id: existing.id },
+          data: { status: "failed", errorMessage: "Never reached Replicate.", completedAt: new Date() },
+        });
+      } else if (existing.status !== "failed") {
+        return { existing };
+      }
+    }
+    const job = await tx.stemSeparationJob.create({ data: { trackId: id, status: "pending", replicatePredictionId: "" } });
+    return { job };
+  });
+  if (claim.existing) return NextResponse.json(claim.existing);
+  const claimed = claim.job;
 
   let prediction;
   try {
@@ -104,28 +129,27 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
       input: { audio: trackSourceUrl(track), output_format: "wav" },
     });
   } catch (err) {
+    await prisma.stemSeparationJob
+      .update({ where: { id: claimed.id }, data: { status: "failed", errorMessage: String(err), completedAt: new Date() } })
+      .catch(() => {});
     return NextResponse.json({ error: `Failed to start Replicate prediction: ${String(err)}` }, { status: 502 });
   }
 
-  const job = await prisma.stemSeparationJob.create({
-    data: {
-      trackId: id,
-      status: "processing",
-      replicatePredictionId: prediction.id,
-      replicateModelVersion: prediction.version,
-    },
+  const job = await prisma.stemSeparationJob.update({
+    where: { id: claimed.id },
+    data: { status: "processing", replicatePredictionId: prediction.id, replicateModelVersion: prediction.version },
   });
 
   return NextResponse.json(job, { status: 201 });
 }
 
-export async function GET(request: Request, { params }: { params: Promise<{ id: string }> }) {
+async function handleGET(request: Request, { params }: { params: Promise<{ id: string }> }) {
   const session = await auth();
-  if (!session) return new NextResponse(null, { status: 401 });
+  if (!session) return unauthorized();
 
   const { id } = await params;
   const track = await loadOwnedTrack(id, session.user.id);
-  if (!track) return new NextResponse(null, { status: 404 });
+  if (!track) return notFound();
 
   const job = await latestJob(id);
   // "No job yet" is the normal state for most tracks (nobody's run Separate
@@ -136,8 +160,9 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
   // track spams the console every session.
   if (!job) return NextResponse.json(null);
 
-  // Already resolved — no need to ask Replicate again.
-  if (job.status === "ready" || job.status === "failed") {
+  // Already resolved — no need to ask Replicate again. A still-"pending" job
+  // hasn't been handed to Replicate yet (POST is mid-flight) — nothing to poll.
+  if (job.status === "ready" || job.status === "failed" || !job.replicatePredictionId) {
     return NextResponse.json(job);
   }
 
@@ -150,10 +175,20 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
   }
 
   if (prediction.status === "succeeded") {
-    const output = prediction.output as Record<StemName, string>;
+    const output = prediction.output as Partial<Record<StemName, string>> | null;
+    if (!output || STEM_NAMES.some((stem) => typeof output[stem] !== "string")) {
+      const failed = await prisma.stemSeparationJob.update({
+        where: { id: job.id },
+        data: { status: "failed", errorMessage: "Replicate returned an unexpected output shape.", completedAt: new Date() },
+      });
+      return NextResponse.json(failed);
+    }
     const uploaded = await Promise.all(
       STEM_NAMES.map(async (stem) => {
-        const res = await fetch(output[stem]);
+        const res = await fetch(output[stem] as string);
+        // Without this check a 4xx/5xx HTML error page was uploaded as the
+        // "stem" and the job marked ready with corrupt audio.
+        if (!res.ok) throw new Error(`Fetching the ${stem} stem failed (${res.status}).`);
         const buffer = Buffer.from(await res.arrayBuffer());
         // Replicate's own delivery URLs serve these as application/octet-stream
         // regardless of actual format — we know it's really WAV since that's
@@ -198,3 +233,6 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
   // Still "starting"/"processing" on Replicate's side — nothing new yet.
   return NextResponse.json(job);
 }
+
+export const POST = apiHandler(handlePOST);
+export const GET = apiHandler(handleGET);

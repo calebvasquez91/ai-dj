@@ -1,9 +1,10 @@
 "use client";
 
-import { Suspense, useRef, useState } from "react";
+import { Suspense, startTransition, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { useStore } from "@/lib/store";
 import { filesToTracks } from "@/lib/localAudio";
+import { searchTracks } from "@/lib/search";
 import { TrackGrid } from "@/components/TrackGrid";
 import { AddSelectedToPlaylistButton } from "@/components/AddSelectedToPlaylistButton";
 import { ConnectYouTubeButton } from "@/components/ConnectYouTubeButton";
@@ -20,17 +21,32 @@ function LibraryContent() {
   const removeLocalTrack = useStore((s) => s.removeLocalTrack);
   const startShuffle = useStore((s) => s.startShuffle);
   const libraryLoaded = useStore((s) => s.libraryLoaded);
-  const query = (useSearchParams().get("q") ?? "").trim().toLowerCase();
+  // The query is mirrored from the store (the top search box writes it on
+  // every keystroke) through a low-priority transition: the box and its
+  // dropdown stay instant while the heavy grid re-render yields to the next
+  // keystroke instead of blocking it. The initial value comes from the ?q=
+  // param so a reload/shared link renders already-filtered with no flash.
+  const urlQuery = useSearchParams().get("q") ?? "";
+  const [query, setQuery] = useState(urlQuery);
+  useEffect(() => {
+    const sync = (q: string) => startTransition(() => setQuery(q));
+    // Whenever this page mounts the URL is the source of truth (TopBar
+    // clears the box on navigation and fills it from ?q=), so the initial
+    // state above is already right; only later edits need mirroring.
+    return useStore.subscribe((s, prev) => {
+      if (s.searchQuery !== prev.searchQuery) sync(s.searchQuery);
+    });
+  }, []);
   const [sourceFilter, setSourceFilter] = useState<SourceFilter>("all");
 
-  const searched = query
-    ? localLibrary.filter(
-        (t) =>
-          t.title.toLowerCase().includes(query) ||
-          t.artist.toLowerCase().includes(query)
-      )
-    : localLibrary;
-  const filtered = sourceFilter === "all" ? searched : searched.filter((t) => t.source === sourceFilter);
+  const searched = useMemo(
+    () => (query.trim() ? searchTracks(localLibrary, query).map((h) => h.item) : localLibrary),
+    [localLibrary, query]
+  );
+  const filtered = useMemo(
+    () => (sourceFilter === "all" ? searched : searched.filter((t) => t.source === sourceFilter)),
+    [searched, sourceFilter]
+  );
   const shufflableCount = filtered.filter((t) => t.playPreference !== "do-not").length;
   const hasYoutubeTracks = localLibrary.some((t) => t.source === "youtube");
 
@@ -44,14 +60,16 @@ function LibraryContent() {
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const selectedTracks = filtered.filter((t) => selectedIds.has(t.id));
 
-  function toggleSelect(trackId: string) {
+  // Stable identities (useCallback) so TrackGrid's memoized cards don't all
+  // re-render whenever this page does.
+  const toggleSelect = useCallback((trackId: string) => {
     setSelectedIds((prev) => {
       const next = new Set(prev);
       if (next.has(trackId)) next.delete(trackId);
       else next.add(trackId);
       return next;
     });
-  }
+  }, []);
 
   function toggleSelectAll() {
     setSelectedIds((prev) => (prev.size === filtered.length ? new Set() : new Set(filtered.map((t) => t.id))));
@@ -78,15 +96,18 @@ function LibraryContent() {
     }
   }
 
-  function handleRemove(trackId: string) {
-    void removeLocalTrack(trackId);
-  }
+  const handleRemove = useCallback(
+    (trackId: string) => {
+      void removeLocalTrack(trackId);
+    },
+    [removeLocalTrack]
+  );
 
   return (
     <div className="p-6 flex flex-col gap-4">
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 sm:gap-4">
+      <div className="flex flex-col sm:flex-row sm:flex-wrap sm:items-center sm:justify-between gap-3 sm:gap-4">
         <h1 className="text-2xl heading">Music Library</h1>
-        <div className="flex items-center justify-between sm:justify-end gap-1.5 sm:gap-3">
+        <div className="flex flex-wrap items-center justify-between sm:justify-end gap-1.5 sm:gap-3">
           <button
             type="button"
             onClick={() => startShuffle(filtered)}
@@ -174,7 +195,7 @@ function LibraryContent() {
         </p>
       ) : filtered.length === 0 ? (
         <p className="text-sm text-muted">
-          {query ? `No tracks match "${query}".` : "No tracks in this filter."}
+          {query.trim() ? `No tracks match "${query.trim()}".` : "No tracks in this filter."}
         </p>
       ) : (
         <TrackGrid

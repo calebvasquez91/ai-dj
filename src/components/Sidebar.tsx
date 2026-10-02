@@ -55,6 +55,7 @@ export function Sidebar() {
 
   async function handleCreatePlaylist() {
     const id = await createPlaylist();
+    if (!id) return;
     setSidebarOpen(false);
     router.push(`/playlist?id=${id}`);
   }
@@ -69,7 +70,7 @@ export function Sidebar() {
         />
       )}
       <aside
-        className={`fixed inset-y-0 left-0 z-40 w-60 shrink-0 surface-glass border-r border-border/10 shadow-elevate-right flex flex-col gap-4 p-3 overflow-y-auto md:static ${
+        className={`fixed top-0 left-0 z-40 max-md:h-dvh w-60 max-w-[85vw] shrink-0 surface-glass border-r border-border/10 shadow-elevate-right flex flex-col gap-4 p-3 overflow-y-auto md:static ${
           sidebarOpen ? "" : "max-md:hidden"
         }`}
       >
@@ -107,7 +108,8 @@ export function Sidebar() {
                 key={playlist.id}
                 href={`/playlist?id=${playlist.id}`}
                 onClick={closeOnMobile}
-                className="rounded-lg px-2 py-2 text-sm text-muted hover:text-foreground hover:bg-surface-hover truncate"
+                title={playlist.name}
+                className="rounded-lg px-2 py-2 text-sm text-muted hover:text-foreground hover:bg-surface-hover break-words"
               >
                 {playlist.name}
               </Link>

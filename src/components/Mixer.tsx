@@ -22,7 +22,8 @@ export function Mixer() {
   return (
     <>
       <div className="fixed inset-0 z-40 bg-black/50" onClick={toggle} aria-hidden="true" />
-      <div className="fixed inset-x-4 bottom-32 md:bottom-24 z-50 mx-auto max-w-3xl max-h-[70vh] overflow-y-auto rounded-2xl bg-surface/95 backdrop-blur-xl p-4 flex flex-col gap-4 shadow-elevate-lg">
+      {/* See DeckView's note: sized against the space above the player bar, not a flat 70vh. */}
+      <div className="fixed inset-x-4 bottom-32 md:bottom-24 z-50 mx-auto max-w-3xl max-h-[calc(100dvh-9rem)] md:max-h-[calc(100dvh-7rem)] overflow-y-auto overscroll-contain rounded-2xl bg-surface/95 backdrop-blur-xl p-4 flex flex-col gap-4 shadow-elevate-lg">
         <div className="flex items-center justify-between">
           <h2 className="text-sm heading">Mixer</h2>
           <button

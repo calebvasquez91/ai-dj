@@ -213,6 +213,7 @@ body {
   border-radius: 9999px;
   font-weight: 500;
   font-size: 0.8125rem;
+  white-space: nowrap;
   color: var(--muted);
   background: var(--surface);
   box-shadow: 0 1px 3px color-mix(in srgb, var(--foreground) calc(8% * var(--shadow-boost)), transparent);
@@ -872,4 +873,79 @@ body {
   .spooky-card-pulse {
     animation: none;
   }
+}
+
+/* ---- Que's Halloween costumes (components/QueCostumes.tsx) ---- */
+
+/* Moonlit disc with an orange glow behind whichever costume Que is wearing. */
+.que-stage.spooky {
+  background: radial-gradient(circle at 50% 35%, #3b1204 0%, #1a0630 72%);
+  box-shadow: 0 0 0 1.5px rgba(255, 107, 0, 0.55), 0 0 14px rgba(255, 107, 0, 0.45);
+}
+
+/* During the one-shot transformation the flashing tint (a background-color
+   keyframe) has to show through, so the gradient steps aside for its 0.6s. */
+.que-stage.spooky.halloween-transform {
+  background-image: none;
+}
+
+/* Glowing eyes/nose/mouth on the costumes, matching the default face's .que-led. */
+.que-glow-yellow { filter: drop-shadow(0 0 2.5px rgba(255, 214, 74, 0.95)); }
+.que-glow-green { filter: drop-shadow(0 0 2.5px rgba(125, 255, 77, 0.95)); }
+.que-glow-red { filter: drop-shadow(0 0 2.5px rgba(255, 59, 59, 0.95)); }
+
+/* ---- Spooky Music: background lights ----
+   The equalizer bars behind every route (components/MusicWaveBackground.tsx)
+   turn orange / purple / green / red while Spooky Music plays. The colored
+   layer is a pseudo-element that fades in/out over 1s, so leaving the
+   playlist eases back to the default palette instead of snapping. Per-bar
+   colors are set unconditionally (not only under .spooky) so the fade-out
+   keeps each bar's own color rather than flashing a fallback. */
+.music-wave-bar::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  opacity: 0;
+  transition: opacity 1s ease;
+  background: linear-gradient(
+    to top,
+    var(--spooky-bar, #ff6b00),
+    color-mix(in srgb, var(--spooky-bar, #ff6b00) 55%, #000)
+  );
+  box-shadow: 0 0 8px var(--spooky-bar, #ff6b00);
+}
+
+.music-wave-bar:nth-child(4n + 1) { --spooky-bar: #ff6b00; } /* orange */
+.music-wave-bar:nth-child(4n + 2) { --spooky-bar: #8b00ff; } /* purple */
+.music-wave-bar:nth-child(4n + 3) { --spooky-bar: #00ff41; } /* green */
+.music-wave-bar:nth-child(4n) { --spooky-bar: #ff1a1a; } /* red */
+
+.music-wave-bg.spooky .music-wave-bar::after {
+  opacity: 1;
+}
+
+/* Brighter than the default wash (0.1-0.22) so the colors actually read as lights. */
+.music-wave-bg.spooky .music-wave-bar {
+  animation-name: music-wave-bob-spooky;
+}
+
+@keyframes music-wave-bob-spooky {
+  0%, 100% { transform: scaleY(calc(6 / var(--wave-peak, 40))); opacity: 0.3; }
+  50% { transform: scaleY(1); opacity: 0.6; }
+}
+
+/* ---- Now Playing in Spooky mode ----
+   The panel's normal tokens are dark-on-light; over the Halloween
+   backdrop that left the track title nearly invisible. Re-point the
+   tokens (and the inherited text color) at a light-on-dark palette for
+   everything inside the panel. */
+.now-playing-panel.spooky {
+  --foreground: #fff1e0;
+  --muted: #d4bfe6;
+  --surface: #2a1236;
+  --surface-hover: #3a1a48;
+  --border: #6b3a73;
+  --background: #12081f;
+  color: var(--foreground);
 }

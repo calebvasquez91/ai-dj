@@ -44,6 +44,10 @@ export const metadata: Metadata = {
 
 export const viewport: Viewport = {
   themeColor: "#9333ea",
+  // Lets the layout extend under a notch/home-indicator; the player bar and
+  // overlay panels pad themselves with env(safe-area-inset-*) so nothing
+  // important ends up underneath it.
+  viewportFit: "cover",
 };
 
 export default function RootLayout({
@@ -65,7 +69,10 @@ export default function RootLayout({
       <head>
         <script dangerouslySetInnerHTML={{ __html: THEME_INIT_SCRIPT }} />
       </head>
-      <body className="h-full flex flex-col overflow-hidden">
+      {/* h-dvh (dynamic viewport height), not h-full/100vh: on phones the
+          browser's collapsing address bar makes 100vh taller than what's
+          actually visible, which pushed the player bar below the fold. */}
+      <body className="h-dvh flex flex-col overflow-hidden">
         <ServiceWorkerRegister />
         <ThemeInit />
         {children}

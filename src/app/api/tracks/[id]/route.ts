@@ -3,6 +3,8 @@ import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { getStorageBackend, deleteLocalFile, deleteBlobFile } from "@/lib/storage";
 import { toTrackApiResponse } from "@/lib/trackApi";
+import { apiHandler, notFound, unauthorized } from "@/lib/apiRoute";
+import { cleanTags, cleanWaveformPeaks } from "@/lib/apiValidation";
 
 async function loadOwnedTrack(id: string, userId: string) {
   const track = await prisma.track.findUnique({ where: { id } });
@@ -10,13 +12,13 @@ async function loadOwnedTrack(id: string, userId: string) {
   return track;
 }
 
-export async function PATCH(request: Request, { params }: { params: Promise<{ id: string }> }) {
+async function handlePATCH(request: Request, { params }: { params: Promise<{ id: string }> }) {
   const session = await auth();
-  if (!session) return new NextResponse(null, { status: 401 });
+  if (!session) return unauthorized();
 
   const { id } = await params;
   const existing = await loadOwnedTrack(id, session.user.id);
-  if (!existing) return new NextResponse(null, { status: 404 });
+  if (!existing) return notFound();
 
   const body = await request.json().catch(() => null);
   if (!body || typeof body !== "object") {
@@ -53,10 +55,11 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
       );
       data.buildDropPairsJson = JSON.stringify(pairs);
     }
-    if (Array.isArray(a.waveformPeaks)) data.waveformPeaksJson = JSON.stringify(a.waveformPeaks);
+    const peaks = cleanWaveformPeaks(a.waveformPeaks);
+    if (peaks) data.waveformPeaksJson = JSON.stringify(peaks);
   }
   if (Array.isArray(body.tags)) {
-    data.tagsJson = JSON.stringify(body.tags.filter((t: unknown): t is string => typeof t === "string" && t.trim().length > 0));
+    data.tagsJson = JSON.stringify(cleanTags(body.tags));
   }
   if (body.hotCueOverrides && typeof body.hotCueOverrides === "object") {
     const sanitized: Record<string, number> = {};
@@ -88,28 +91,43 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
   return NextResponse.json(toTrackApiResponse(track));
 }
 
-export async function DELETE(request: Request, { params }: { params: Promise<{ id: string }> }) {
+async function handleDELETE(request: Request, { params }: { params: Promise<{ id: string }> }) {
   const session = await auth();
-  if (!session) return new NextResponse(null, { status: 401 });
+  if (!session) return unauthorized();
 
   const { id } = await params;
   const existing = await loadOwnedTrack(id, session.user.id);
-  if (!existing) return new NextResponse(null, { status: 404 });
+  if (!existing) return notFound();
 
-  try {
-    if (existing.source === "youtube") {
-      // Nothing stored — storageKey holds the video id, not a file/blob.
-    } else if (getStorageBackend() === "local") {
-      await deleteLocalFile(existing.storageKey);
-    } else {
-      await deleteBlobFile(existing.storageKey);
-    }
-  } catch (err) {
-    // Don't let a storage-side failure (already gone, transient network
-    // error, etc.) leave the track stuck and undeletable from the app.
-    console.warn(`Failed to delete storage object for track ${id}:`, err);
+  // Separated stems live in Blob under their own URLs; the StemSeparationJob
+  // rows cascade away with the track, so grab the URLs first or they leak.
+  const stemJobs = await prisma.stemSeparationJob.findMany({
+    where: { trackId: id },
+    select: { vocalsUrl: true, drumsUrl: true, bassUrl: true, otherUrl: true },
+  });
+  const stemUrls = stemJobs.flatMap((j) => [j.vocalsUrl, j.drumsUrl, j.bassUrl, j.otherUrl]).filter((u): u is string => !!u);
+
+  // Row first, storage second: if the DB delete fails the track is still
+  // fully playable (nothing was removed); the other order left a "ghost"
+  // track whose audio was already gone. deleteMany (not delete) so a double
+  // click / second tab racing us is a no-op rather than a P2025 error.
+  await prisma.track.deleteMany({ where: { id, userId: session.user.id } });
+
+  // Best-effort: a storage-side failure (already gone, transient network
+  // error, etc.) must not make an already-deleted track look undeletable.
+  const cleanups: Promise<void>[] = [];
+  if (existing.source !== "youtube") {
+    // (youtube: nothing stored — storageKey holds the video id, not a file/blob)
+    cleanups.push(getStorageBackend() === "local" ? deleteLocalFile(existing.storageKey) : deleteBlobFile(existing.storageKey));
   }
-  await prisma.track.delete({ where: { id } });
+  if (getStorageBackend() === "blob") cleanups.push(...stemUrls.map((u) => deleteBlobFile(u)));
+  const results = await Promise.allSettled(cleanups);
+  for (const r of results) {
+    if (r.status === "rejected") console.warn(`Failed to delete a storage object for track ${id}:`, r.reason);
+  }
 
   return new NextResponse(null, { status: 204 });
 }
+
+export const PATCH = apiHandler(handlePATCH);
+export const DELETE = apiHandler(handleDELETE);

@@ -2,6 +2,7 @@
 
 import { useEffect, useId, useRef, useState } from "react";
 import { useStore } from "@/lib/store";
+import { HALLOWEEN_FACES, HalloweenQue, type HalloweenFace } from "@/components/QueCostumes";
 
 /** How long the reaction bounce plays — matches the CSS animation duration in globals.css. */
 const REACT_DURATION_MS = 650;
@@ -11,8 +12,6 @@ const PILL_AUTO_DISMISS_MS = 6000;
 const TALK_FRAME_MS = 150;
 /** Matches globals.css's .que-stage.halloween-transform animation duration. */
 const HALLOWEEN_TRANSFORM_DURATION_MS = 600;
-/** Spec #11's exact face set — one chosen at random on each track change while Spooky Music is active. */
-const HALLOWEEN_FACES = ["💀", "🎃", "👻", "🦇", "🕷️", "🐈‍⬛"];
 
 /**
  * Que — the AI DJ's visible presence. Not a trained model or an LLM: it
@@ -58,7 +57,7 @@ export function Que({
   const [pillText, setPillText] = useState<string | null>(welcomeMessage ?? null);
   const [pillDismissed, setPillDismissed] = useState(false);
   const [talkFrame, setTalkFrame] = useState(0);
-  const [halloweenFace, setHalloweenFace] = useState(() => HALLOWEEN_FACES[0]);
+  const [halloweenFace, setHalloweenFace] = useState<HalloweenFace>(HALLOWEEN_FACES[0]);
   const [transforming, setTransforming] = useState(false);
   const wasSpookyRef = useRef(false);
   const seenShortWhy = useRef<string | null>(null);
@@ -125,8 +124,12 @@ export function Que({
       wasSpookyRef.current = false;
       return;
     }
+    // Never the same costume twice in a row, so a track change always reads as a change.
     // eslint-disable-next-line react-hooks/set-state-in-effect
-    setHalloweenFace(HALLOWEEN_FACES[Math.floor(Math.random() * HALLOWEEN_FACES.length)]);
+    setHalloweenFace((prev) => {
+      const others = HALLOWEEN_FACES.filter((f) => f !== prev);
+      return others[Math.floor(Math.random() * others.length)];
+    });
     if (!wasSpookyRef.current) {
       wasSpookyRef.current = true;
       setTransforming(true);
@@ -166,18 +169,12 @@ export function Que({
   return (
     <div className="flex items-start gap-2 flex-wrap">
       <div
-        className={`que-stage${isPlaying ? " playing" : ""}${reacting ? " reacting" : ""}${showPill ? " talking" : ""}${transforming ? " halloween-transform" : ""}`}
+        className={`que-stage${isPlaying ? " playing" : ""}${reacting ? " reacting" : ""}${showPill ? " talking" : ""}${transforming ? " halloween-transform" : ""}${spooky ? " spooky" : ""}`}
         style={{ width: size + 8, height: size + 8 }}
         title="Que — the AI DJ"
       >
         {spooky ? (
-          <span
-            role="img"
-            aria-label="Que, dressed up for Spooky Music"
-            style={{ fontSize: size * 0.72, lineHeight: 1 }}
-          >
-            {halloweenFace}
-          </span>
+          <HalloweenQue face={halloweenFace} size={size} talking={showPill && talkFrame === 1} />
         ) : (
         <svg viewBox="0 0 84 84" width={size} height={size} fill="none" aria-hidden="true">
           <defs>

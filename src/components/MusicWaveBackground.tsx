@@ -47,10 +47,12 @@ const BAR_ELEMENTS = BARS.map((bar, i) => (
 
 export function MusicWaveBackground() {
   const isPlaying = useStore((s) => s.isPlaying);
+  // Spooky Music tints the bars orange/purple/green/red (see globals.css).
+  const spooky = useStore((s) => s.activePlaylistTheme === "spooky");
 
   return (
     <div
-      className={`music-wave-bg${isPlaying ? " is-playing" : ""}`}
+      className={`music-wave-bg${isPlaying ? " is-playing" : ""}${spooky ? " spooky" : ""}`}
       aria-hidden="true"
     >
       {BAR_ELEMENTS}

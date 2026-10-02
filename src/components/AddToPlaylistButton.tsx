@@ -1,28 +1,19 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useRef, useState } from "react";
 import { useStore } from "@/lib/store";
+import { AnchoredMenu } from "@/components/AnchoredMenu";
 import type { Track } from "@/types/music";
 
 export function AddToPlaylistButton({ track }: { track: Track }) {
   const [open, setOpen] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
+  const close = useCallback(() => setOpen(false), []);
 
   const playlists = useStore((s) => s.playlists);
   const createPlaylist = useStore((s) => s.createPlaylist);
   const addTrackToPlaylist = useStore((s) => s.addTrackToPlaylist);
   const removeTrackFromPlaylist = useStore((s) => s.removeTrackFromPlaylist);
-
-  useEffect(() => {
-    if (!open) return;
-    function handleOutsideClick(e: MouseEvent) {
-      if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
-        setOpen(false);
-      }
-    }
-    document.addEventListener("mousedown", handleOutsideClick);
-    return () => document.removeEventListener("mousedown", handleOutsideClick);
-  }, [open]);
 
   return (
     <div
@@ -35,11 +26,13 @@ export function AddToPlaylistButton({ track }: { track: Track }) {
         onClick={() => setOpen((o) => !o)}
         className="btn-icon text-accent-purple hover:text-accent-pink text-lg leading-none"
         title="Add to playlist"
+        aria-haspopup="menu"
+        aria-expanded={open}
       >
         +
       </button>
       {open && (
-        <div className="absolute right-0 z-10 mt-1 w-48 rounded-xl bg-surface shadow-elevate-lg py-1">
+        <AnchoredMenu anchorRef={containerRef} onClose={close} width={192} align="end" className="py-1">
           {playlists.length === 0 ? (
             <p className="px-3 py-2 text-xs text-muted">No playlists yet.</p>
           ) : (
@@ -54,10 +47,12 @@ export function AddToPlaylistButton({ track }: { track: Track }) {
                       ? removeTrackFromPlaylist(playlist.id, track.id)
                       : addTrackToPlaylist(playlist.id, track)
                   }
-                  className="w-full flex items-center justify-between px-3 py-2 text-sm text-left hover:bg-surface-hover"
+                  className="w-full flex items-center justify-between gap-2 px-3 py-2 text-sm text-left hover:bg-surface-hover"
                 >
-                  <span className="truncate">{playlist.name}</span>
-                  {inPlaylist && <span className="text-accent-teal">✓</span>}
+                  <span className="break-words min-w-0" title={playlist.name}>
+                    {playlist.name}
+                  </span>
+                  {inPlaylist && <span className="text-accent-teal shrink-0">✓</span>}
                 </button>
               );
             })
@@ -67,6 +62,7 @@ export function AddToPlaylistButton({ track }: { track: Track }) {
               type="button"
               onClick={async () => {
                 const id = await createPlaylist();
+                if (!id) return;
                 addTrackToPlaylist(id, track);
                 setOpen(false);
               }}
@@ -75,7 +71,7 @@ export function AddToPlaylistButton({ track }: { track: Track }) {
               + New playlist
             </button>
           </div>
-        </div>
+        </AnchoredMenu>
       )}
     </div>
   );

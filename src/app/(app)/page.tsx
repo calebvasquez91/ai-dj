@@ -61,6 +61,7 @@ export default function Home() {
 
   async function handleBuildPlaylist() {
     const id = await createPlaylist();
+    if (!id) return;
     router.push(`/playlist?id=${id}`);
   }
 
@@ -76,7 +77,7 @@ export default function Home() {
 
   return (
     <div className="flex flex-col">
-      <section className="home-hero relative min-h-[80vh] flex flex-col items-center justify-center gap-6 px-6 text-center">
+      <section className="home-hero relative min-h-[80dvh] flex flex-col items-center justify-center gap-6 px-6 text-center">
         <span className="home-hero-eyebrow">AI DJ</span>
         <h1 className="home-hero-heading">{greeting}</h1>
         <p className="home-hero-subtitle">Your library, mixed into one continuous set.</p>

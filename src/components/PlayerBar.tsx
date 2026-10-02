@@ -64,7 +64,7 @@ export function PlayerBar() {
 
   return (
     <footer
-      className="relative min-h-20 shrink-0 shadow-elevate-top surface-glass border-t border-border/10 px-4 py-2 flex flex-wrap items-center gap-2 lg:gap-4"
+      className="relative min-h-20 shrink-0 shadow-elevate-top surface-glass border-t border-border/10 pt-2 pb-[max(0.5rem,env(safe-area-inset-bottom))] pl-[max(1rem,env(safe-area-inset-left))] pr-[max(1rem,env(safe-area-inset-right))] flex flex-wrap items-center gap-2 lg:gap-4"
       inert={nowPlayingExpanded ? true : undefined}
     >
       {currentTrack && (
@@ -158,7 +158,7 @@ export function PlayerBar() {
         </div>
       </div>
 
-      <div className="flex items-center gap-2 justify-between md:justify-end w-full md:w-auto shrink-0">
+      <div className="flex flex-wrap items-center gap-x-1 gap-y-1 sm:gap-x-2 justify-between md:justify-end w-full md:w-auto shrink-0">
         <button
           type="button"
           onClick={() => speakHypePhrase()}
@@ -209,7 +209,20 @@ export function PlayerBar() {
               : "Beatmatch and mix into the next queued track now (M)"
           }
         >
-          {isTransitioning ? "Mixing…" : nextTrackAnalyzing ? "Analyzing…" : "Mix Now"}
+          {isTransitioning ? (
+            <>
+              Mix<span className="max-sm:hidden">ing</span>…
+            </>
+          ) : nextTrackAnalyzing ? (
+            <>
+              <span className="sm:hidden">…</span>
+              <span className="max-sm:hidden">Analyzing…</span>
+            </>
+          ) : (
+            <>
+              Mix<span className="max-sm:hidden">&nbsp;Now</span>
+            </>
+          )}
         </button>
         <select
           value={djMode}
@@ -260,7 +273,7 @@ export function PlayerBar() {
           className="btn-outline"
           title="Toggle automatic DJ transitions"
         >
-          Auto-DJ {autoDjEnabled ? "On" : "Off"}
+          Auto-DJ<span className="max-sm:hidden">&nbsp;{autoDjEnabled ? "On" : "Off"}</span>
         </button>
         <input
           type="range"
@@ -269,7 +282,8 @@ export function PlayerBar() {
           step={0.01}
           value={volume}
           onChange={(e) => setVolume(Number(e.target.value))}
-          className="hidden xl:block w-20 accent-accent-purple"
+          aria-label="Volume"
+          className="hidden md:block w-20 accent-accent-purple"
         />
       </div>
     </footer>

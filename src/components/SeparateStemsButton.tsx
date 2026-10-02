@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { AnchoredMenu } from "@/components/AnchoredMenu";
 import type { Track } from "@/types/music";
 
 /** Mirrors the API's StemSeparationJob JSON shape — a plain client-side type rather than importing Prisma's generated type into browser code. */
@@ -146,18 +147,6 @@ export function SeparateStemsButton({ track }: { track: Track }) {
     };
   }, []);
 
-  useEffect(() => {
-    if (!open) return;
-    function handleOutsideClick(e: MouseEvent) {
-      if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
-        closePopup();
-      }
-    }
-    document.addEventListener("mousedown", handleOutsideClick);
-    return () => document.removeEventListener("mousedown", handleOutsideClick);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open]);
-
   // Poll while a job is in flight, only while the panel is open.
   useEffect(() => {
     if (!open || !job || (job.status !== "pending" && job.status !== "processing")) return;
@@ -207,7 +196,7 @@ export function SeparateStemsButton({ track }: { track: Track }) {
         🎚️
       </button>
       {open && (
-        <div className="absolute right-0 z-10 mt-1 w-64 rounded-xl bg-surface shadow-elevate-lg p-3 text-sm">
+        <AnchoredMenu anchorRef={containerRef} onClose={closePopup} width={256} align="end" className="p-3 text-sm">
           <p className="font-semibold mb-2">Stem Separation</p>
 
           {fetchError && <p className="text-accent-pink text-xs mb-2">{fetchError}</p>}
@@ -282,7 +271,7 @@ export function SeparateStemsButton({ track }: { track: Track }) {
               )}
             </div>
           )}
-        </div>
+        </AnchoredMenu>
       )}
     </div>
   );

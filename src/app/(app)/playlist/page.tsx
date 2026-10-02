@@ -1,10 +1,60 @@
 "use client";
 
-import { Suspense } from "react";
+import { Suspense, useCallback, useEffect, useLayoutEffect, useRef } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useStore } from "@/lib/store";
 import { formatTime } from "@/lib/format";
 import { TrackThumbnail } from "@/components/TrackThumbnail";
+
+/**
+ * The playlist name as a textarea that grows with its content, not an
+ * <input>: an input can't wrap, so a long name was clipped (and on a phone
+ * pushed the whole page sideways). Enter commits instead of inserting a newline.
+ */
+function PlaylistTitleField({
+  value,
+  onChange,
+  onCommit,
+}: {
+  value: string;
+  onChange: (value: string) => void;
+  onCommit: () => void;
+}) {
+  const ref = useRef<HTMLTextAreaElement>(null);
+  const resize = useCallback(() => {
+    const el = ref.current;
+    if (!el) return;
+    el.style.height = "auto";
+    el.style.height = `${el.scrollHeight}px`;
+  }, []);
+  useLayoutEffect(resize, [value, resize]);
+  // Re-measure when the available width changes (rotate, resize, sidebar toggle).
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const observer = new ResizeObserver(resize);
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [resize]);
+
+  return (
+    <textarea
+      ref={ref}
+      rows={1}
+      value={value}
+      onChange={(e) => onChange(e.target.value.replace(/\n/g, " "))}
+      onBlur={onCommit}
+      onKeyDown={(e) => {
+        if (e.key === "Enter") {
+          e.preventDefault();
+          e.currentTarget.blur();
+        }
+      }}
+      aria-label="Playlist name"
+      className="block w-full min-w-0 resize-none overflow-hidden break-words text-xl sm:text-2xl font-bold bg-transparent outline-none border-b-2 border-transparent focus:border-accent-purple"
+    />
+  );
+}
 
 function PlaylistContent() {
   const id = useSearchParams().get("id") ?? "";
@@ -24,7 +74,7 @@ function PlaylistContent() {
 
   if (!playlist) {
     return (
-      <div className="p-6">
+      <div className="p-4 sm:p-6">
         <p className="text-sm text-muted">
           {playlistsLoaded ? "Playlist not found." : "Loading…"}
         </p>
@@ -33,14 +83,15 @@ function PlaylistContent() {
   }
 
   return (
-    <div className="p-6 flex flex-col gap-6">
-      <div className="flex flex-wrap items-center justify-between gap-4">
-        <input
-          value={playlist.name}
-          onChange={(e) => renamePlaylist(playlist.id, e.target.value)}
-          onBlur={() => persistPlaylistName(playlist.id)}
-          className="text-2xl font-bold bg-transparent outline-none border-b-2 border-transparent focus:border-accent-purple flex-1"
-        />
+    <div className="p-4 sm:p-6 flex flex-col gap-6">
+      <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
+        <div className="min-w-0 flex-1 basis-56">
+          <PlaylistTitleField
+            value={playlist.name}
+            onChange={(name) => renamePlaylist(playlist.id, name)}
+            onCommit={() => persistPlaylistName(playlist.id)}
+          />
+        </div>
         {!playlist.theme && (
           <button
             type="button"
@@ -97,7 +148,10 @@ function PlaylistContent() {
                   if (e.key === "Enter" || e.key === " ")
                     playTrackList(playlist.tracks, index, playlist.theme);
                 }}
-                className={`flex items-center gap-3 rounded-xl px-3 py-2 cursor-pointer border border-transparent hover:border-accent/40 hover:bg-surface-hover transition-colors ${
+                // flex-wrap: on a narrow screen the controls drop to a second
+                // line under the title (the title block keeps a min basis)
+                // instead of squeezing the title down to nothing.
+                className={`flex flex-wrap items-center gap-x-3 gap-y-1 rounded-xl px-3 py-2 cursor-pointer border border-transparent hover:border-accent/40 hover:bg-surface-hover transition-colors ${
                   currentTrack?.id === track.id ? "bg-surface-hover border-accent/40" : ""
                 }`}
               >
@@ -109,10 +163,11 @@ function PlaylistContent() {
                   title={track.title}
                   size={40}
                 />
-                <div className="min-w-0 flex-1">
-                  <p className="text-sm font-medium truncate">{track.title}</p>
-                  <p className="text-xs text-muted truncate">{track.artist}</p>
+                <div className="min-w-0 flex-1 basis-32">
+                  <p className="text-sm font-medium break-words line-clamp-2">{track.title}</p>
+                  <p className="text-xs text-muted break-words line-clamp-1">{track.artist}</p>
                 </div>
+                <div className="ml-auto flex shrink-0 items-center gap-2">
                 <span className="text-xs text-muted">
                   {formatTime(track.durationSec)}
                 </span>
@@ -189,6 +244,7 @@ function PlaylistContent() {
                       </button>
                     </>
                   )}
+                </div>
                 </div>
               </div>
               );
