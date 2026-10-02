@@ -14,6 +14,8 @@
 // gating) and to degrade gracefully to no-bpm on any null/failure — never a
 // broken state.
 const DEEZER_API_BASE = "https://api.deezer.com";
+/** Per-request cap so a hung Deezer call can never hold the route open until the platform timeout (the catch below turns an abort into a plain "no bpm"). */
+const DEEZER_TIMEOUT_MS = 5000;
 
 interface DeezerSearchResponse {
   data?: { id?: number }[];
@@ -27,13 +29,13 @@ interface DeezerTrackResponse {
 export async function lookupBpmFromDeezer(title: string, artist: string): Promise<number | null> {
   try {
     const query = encodeURIComponent(`${artist} ${title}`.trim());
-    const searchRes = await fetch(`${DEEZER_API_BASE}/search?q=${query}&limit=1`);
+    const searchRes = await fetch(`${DEEZER_API_BASE}/search?q=${query}&limit=1`, { signal: AbortSignal.timeout(DEEZER_TIMEOUT_MS) });
     if (!searchRes.ok) return null;
     const searchData = (await searchRes.json()) as DeezerSearchResponse;
     const trackId = searchData.data?.[0]?.id;
     if (!trackId) return null;
 
-    const trackRes = await fetch(`${DEEZER_API_BASE}/track/${trackId}`);
+    const trackRes = await fetch(`${DEEZER_API_BASE}/track/${trackId}`, { signal: AbortSignal.timeout(DEEZER_TIMEOUT_MS) });
     if (!trackRes.ok) return null;
     const trackData = (await trackRes.json()) as DeezerTrackResponse;
     return typeof trackData.bpm === "number" && trackData.bpm > 0 ? trackData.bpm : null;

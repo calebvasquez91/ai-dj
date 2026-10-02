@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { lookupBpmFromDeezer } from "@/lib/deezerBpm";
+import { apiHandler, notFound, unauthorized } from "@/lib/apiRoute";
 
 /**
  * Confidence assigned to a Deezer metadata match — above mix-engine.ts's
@@ -12,13 +13,13 @@ import { lookupBpmFromDeezer } from "@/lib/deezerBpm";
  */
 const METADATA_BPM_CONFIDENCE = 0.5;
 
-export async function POST(request: Request, { params }: { params: Promise<{ id: string }> }) {
+async function handlePOST(request: Request, { params }: { params: Promise<{ id: string }> }) {
   const session = await auth();
-  if (!session) return new NextResponse(null, { status: 401 });
+  if (!session) return unauthorized();
 
   const { id } = await params;
   const track = await prisma.track.findUnique({ where: { id } });
-  if (!track || track.userId !== session.user.id) return new NextResponse(null, { status: 404 });
+  if (!track || track.userId !== session.user.id) return notFound();
   if (track.source !== "youtube") {
     return NextResponse.json({ error: "Metadata BPM lookup only applies to YouTube tracks." }, { status: 400 });
   }
@@ -41,3 +42,5 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
   });
   return NextResponse.json({ bpm: updated.bpm, bpmConfidence: updated.bpmConfidence, bpmSource: updated.bpmSource });
 }
+
+export const POST = apiHandler(handlePOST);

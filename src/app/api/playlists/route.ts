@@ -2,21 +2,23 @@ import { NextResponse } from "next/server";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { loadUserPlaylistsWithSpookyUnion } from "@/lib/playlistApi";
+import { apiHandler, unauthorized } from "@/lib/apiRoute";
+import { cleanText, MAX_NAME_LENGTH } from "@/lib/apiValidation";
 
-export async function GET() {
+async function handleGET() {
   const session = await auth();
-  if (!session) return new NextResponse(null, { status: 401 });
+  if (!session) return unauthorized();
 
   const playlists = await loadUserPlaylistsWithSpookyUnion(session.user.id);
   return NextResponse.json(playlists);
 }
 
-export async function POST(request: Request) {
+async function handlePOST(request: Request) {
   const session = await auth();
-  if (!session) return new NextResponse(null, { status: 401 });
+  if (!session) return unauthorized();
 
   const body = await request.json().catch(() => ({}));
-  const name = typeof body?.name === "string" && body.name.trim() ? body.name.trim() : "New Playlist";
+  const name = cleanText(body?.name, MAX_NAME_LENGTH) || "New Playlist";
 
   const playlist = await prisma.playlist.create({
     data: { userId: session.user.id, name },
@@ -26,3 +28,6 @@ export async function POST(request: Request) {
     { status: 201 }
   );
 }
+
+export const GET = apiHandler(handleGET);
+export const POST = apiHandler(handlePOST);

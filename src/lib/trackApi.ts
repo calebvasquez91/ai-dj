@@ -70,3 +70,38 @@ export function toTrackApiResponse(track: PrismaTrack): TrackApiResponse {
 
   return { ...base, source: "local", sourceUrl: trackSourceUrl(track) };
 }
+
+/**
+ * Columns a playlist's embedded track actually needs. The heavy ones
+ * (waveformPeaksJson, lyricalFingerprintJson, buildDropPairsJson) are omitted
+ * at the query level — the client already has every track's analysis from
+ * GET /api/tracks (store.trackAnalysis), so shipping it again inside every
+ * playlist row was ~2MB of duplicate JSON for a modest library.
+ */
+export const PLAYLIST_TRACK_OMIT = {
+  waveformPeaksJson: true,
+  lyricalFingerprintJson: true,
+  buildDropPairsJson: true,
+} as const;
+
+export type PlaylistTrackRow = Omit<PrismaTrack, keyof typeof PLAYLIST_TRACK_OMIT>;
+
+/** The same Track shape as toTrackApiResponse, minus the analysis/lyricalFingerprint extras (not part of the client's Track type). */
+export function toTrackSummary(track: PlaylistTrackRow): Track {
+  const base = {
+    id: track.id,
+    title: track.title,
+    artist: track.artist,
+    durationSec: track.durationSec,
+    addedAt: track.createdAt.getTime(),
+    thumbnailUrl: track.thumbnailUrl ?? undefined,
+    playPreference: isPlayPreference(track.playPreference) ? track.playPreference : undefined,
+    hotCueOverrides: track.hotCueOverridesJson ? JSON.parse(track.hotCueOverridesJson) : undefined,
+    tags: track.tagsJson ? JSON.parse(track.tagsJson) : undefined,
+  };
+  if (track.source === "youtube") {
+    const bpmSource = track.bpmSource === "metadata" || track.bpmSource === "tap" ? track.bpmSource : undefined;
+    return { ...base, source: "youtube", youtubeVideoId: track.storageKey, bpmSource };
+  }
+  return { ...base, source: "local", sourceUrl: trackSourceUrl(track) };
+}

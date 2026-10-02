@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { handleUpload, type HandleUploadBody } from "@vercel/blob/client";
 import { auth } from "@/auth";
+import { apiHandler, unauthorized } from "@/lib/apiRoute";
 
 const ALLOWED_AUDIO_TYPES = [
   "audio/mpeg",
@@ -14,9 +15,9 @@ const ALLOWED_AUDIO_TYPES = [
 ];
 
 /** Issues short-lived Vercel Blob client-upload tokens (blob storage backend only — see src/lib/storage.ts). */
-export async function POST(request: Request) {
+async function handlePOST(request: Request) {
   const session = await auth();
-  if (!session) return new NextResponse(null, { status: 401 });
+  if (!session) return unauthorized();
 
   const body = (await request.json()) as HandleUploadBody;
 
@@ -34,3 +35,5 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: (error as Error).message }, { status: 400 });
   }
 }
+
+export const POST = apiHandler(handlePOST);
