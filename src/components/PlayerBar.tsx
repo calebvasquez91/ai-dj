@@ -29,6 +29,8 @@ export function PlayerBar() {
   const volume = useStore((s) => s.volume);
   const setVolume = useStore((s) => s.setVolume);
   const autoDjEnabled = useStore((s) => s.autoDjEnabled);
+  const spooky = useStore((s) => s.activePlaylistTheme === "spooky");
+  const requestSpookyFx = useStore((s) => s.requestSpookyFx);
   const setAutoDj = useStore((s) => s.setAutoDj);
   const currentTimeSec = useStore((s) => s.currentTimeSec);
   const requestSeek = useStore((s) => s.requestSeek);
@@ -161,11 +163,16 @@ export function PlayerBar() {
       <div className="flex flex-wrap items-center gap-x-1 gap-y-1 sm:gap-x-2 justify-between md:justify-end w-full md:w-auto shrink-0">
         <button
           type="button"
-          onClick={() => speakHypePhrase()}
+          onClick={() => (spooky ? requestSpookyFx() : speakHypePhrase())}
           className="btn-icon text-accent-purple hover:text-accent-pink"
-          title="Word Play — speak a hype phrase now, DJ's call (uses your browser's text-to-speech; it plays independently of the music, not mixed through it)"
+          aria-label={spooky ? "Spooky FX" : "Word Play"}
+          title={
+            spooky
+              ? "Spooky FX — play a random effect tagged spooky/halloween (replaces Word Play in Spooky Music)"
+              : "Word Play — speak a hype phrase now, DJ's call (uses your browser's text-to-speech; it plays independently of the music, not mixed through it)"
+          }
         >
-          <MicIcon />
+          {spooky ? <span aria-hidden="true" className="text-lg leading-none">🎃</span> : <MicIcon />}
         </button>
         <button
           type="button"

@@ -4,7 +4,14 @@ import { prisma } from "@/lib/prisma";
 import { getStorageBackend, saveLocalFile, deleteLocalFile, deleteBlobFile } from "@/lib/storage";
 import { toFxApiResponse, isFxCategory } from "@/lib/fxApi";
 import { apiHandler, jsonError, unauthorized } from "@/lib/apiRoute";
-import { cleanText, isAcceptableStorageUrl, isValidDuration, MAX_NAME_LENGTH, normalizeAudioMime } from "@/lib/apiValidation";
+import {
+  cleanText,
+  isAcceptableStorageUrl,
+  isValidDuration,
+  MAX_NAME_LENGTH,
+  normalizeAudioMime,
+  parseAffinityField,
+} from "@/lib/apiValidation";
 
 async function handleGET() {
   const session = await auth();
@@ -40,6 +47,7 @@ async function handlePOST(request: Request) {
     const name = cleanText(formData.get("name"), MAX_NAME_LENGTH);
     const category = formData.get("category");
     const durationSec = Number(formData.get("durationSec"));
+    const playlistAffinity = parseAffinityField(formData.get("playlistAffinity"));
     if (!(file instanceof File) || !name || !isFxCategory(category) || !isValidDuration(durationSec)) {
       return NextResponse.json({ error: "Missing file or FX metadata." }, { status: 400 });
     }
@@ -57,6 +65,7 @@ async function handlePOST(request: Request) {
           durationSec,
           storageKey,
           mimeType: normalizeAudioMime(file.type),
+          playlistAffinityJson: JSON.stringify(playlistAffinity),
         },
       });
       return NextResponse.json(toFxApiResponse(fx), { status: 201 });
@@ -90,6 +99,7 @@ async function handlePOST(request: Request) {
         durationSec,
         storageKey: blobUrl,
         mimeType: normalizeAudioMime(typeof mimeType === "string" ? mimeType : ""),
+        playlistAffinityJson: JSON.stringify(parseAffinityField(body?.playlistAffinity)),
       },
     });
     return NextResponse.json(toFxApiResponse(fx), { status: 201 });

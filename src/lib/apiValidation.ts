@@ -94,3 +94,15 @@ export function cleanWaveformPeaks(value: unknown): number[] | null {
   if (!Array.isArray(value) || value.length > MAX_WAVEFORM_PEAKS) return null;
   return value.every(isFiniteNumber) ? (value as number[]) : null;
 }
+
+/** The `playlistAffinity` field of an FX upload: a string array (JSON body) or a JSON-encoded array (multipart form field). Anything else is no affinity. */
+export function parseAffinityField(value: unknown): string[] {
+  if (typeof value === "string") {
+    try {
+      return cleanTags(JSON.parse(value));
+    } catch {
+      return [];
+    }
+  }
+  return cleanTags(value);
+}
