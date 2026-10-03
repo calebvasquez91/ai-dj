@@ -16,6 +16,7 @@
  * already falls back to internally, so both paths degrade identically.
  */
 import type { DjSetMode } from "@/lib/mix-engine";
+import { extractJsonObject } from "@/lib/json-extract";
 
 export interface AiNextTrackCandidate {
   id: string;
@@ -96,18 +97,6 @@ export function pickByBpmProximity(
     recommendedCrossfadeSeconds: DEFAULT_FALLBACK_CROSSFADE_SEC,
     usedFallback: true,
   };
-}
-
-function extractJsonObject(text: string): unknown {
-  // Claude sometimes wraps JSON in a ```json ... ``` fence despite being
-  // asked for "only a JSON object" — strip it defensively rather than
-  // trusting the instruction to always be followed exactly.
-  const cleaned = text
-    .trim()
-    .replace(/^```(?:json)?/i, "")
-    .replace(/```$/, "")
-    .trim();
-  return JSON.parse(cleaned);
 }
 
 /**

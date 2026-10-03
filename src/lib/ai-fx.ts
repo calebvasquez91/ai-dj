@@ -12,6 +12,7 @@
  */
 import type { DjSetMode } from "@/lib/mix-engine";
 import type { FxCategory } from "@/types/music";
+import { extractJsonObject } from "@/lib/json-extract";
 
 export interface AiFxTrackProfile {
   title: string;
@@ -99,17 +100,6 @@ export function pickFallbackTransitionFx(
     reason: "Picked by category + BPM proximity (AI FX pick unavailable).",
     usedFallback: true,
   };
-}
-
-function extractJsonObject(text: string): unknown {
-  // Claude sometimes wraps JSON in a ```json ... ``` fence despite being
-  // asked for "only JSON" — strip it defensively, same as ai-dj.ts.
-  const cleaned = text
-    .trim()
-    .replace(/^```(?:json)?/i, "")
-    .replace(/```$/, "")
-    .trim();
-  return JSON.parse(cleaned);
 }
 
 /**

@@ -17,6 +17,7 @@ import { genreFamilies } from "@/data/styles";
 import { CROSSFADE_PRESETS, DJ_MODES } from "@/components/PlayerBar";
 import { CloseIcon } from "@/components/Icons";
 import type { AmbienceFrequency } from "@/lib/ambience";
+import { HalloweenLayers } from "@/components/HalloweenLayers";
 import type { Track, DeckId } from "@/types/music";
 
 const PICKABLE_TRANSITIONS = transitions.filter((t) => t.executable);
@@ -206,7 +207,7 @@ function LiveDeckControls() {
   const manualLoopOutSec = useStore((s) => s.manualLoopOutSec);
 
   return (
-    <div className="flex items-center gap-1.5">
+    <div className="flex flex-wrap items-center gap-1.5">
       <button
         type="button"
         onClick={() => requestBeatJump(-1)}
@@ -567,6 +568,8 @@ export function DeckView() {
             </button>
           </div>
         </div>
+
+        <HalloweenLayers />
 
         <div className="flex flex-wrap items-center gap-2">
           <select
