@@ -24,6 +24,7 @@ import {
 } from "@/lib/ai-dj";
 import { pickFallbackTransitionFx, type AiFxCandidate, type AiFxTrackProfile } from "@/lib/ai-fx";
 import { jsonInit, syncRequest } from "@/lib/syncRequest";
+import { hasHalloweenAffinity } from "@/lib/fxAffinity";
 import {
   AMBIENCE_DEFAULT_LEVEL,
   FX_DEFAULT_LEVEL,
@@ -163,6 +164,9 @@ interface PlayerState {
   localLibrary: Track[];
   fxLibrary: FxSound[];
   fxLibraryLoaded: boolean;
+  /** FX Library upload option: tag new uploads "spooky, halloween" so Spooky Music can pick them. Kept here (not in the panel) so it survives the panel remounting on tab switches. */
+  tagNewFxForSpooky: boolean;
+  setTagNewFxForSpooky: (tag: boolean) => void;
   /** The `theme` of whichever playlist the current queue was sourced from (playTrackList's `sourcePlaylistTheme` param) — e.g. "spooky" while playing the Spooky Music playlist, null otherwise. Drives all Halloween theming/audio. Cleared by any non-playlist playback (direct track click, Shuffle Play) the same way aiNextPickTrackId is. */
   activePlaylistTheme: string | null;
   libraryLoaded: boolean;
@@ -382,6 +386,8 @@ export const useStore = create<PlayerState>()(
       localLibrary: [],
       fxLibrary: [],
       fxLibraryLoaded: false,
+      tagNewFxForSpooky: true,
+      setTagNewFxForSpooky: (tag) => set({ tagNewFxForSpooky: tag }),
       libraryLoaded: false,
       syncError: null,
       reportSyncError: (message) => set({ syncError: message }),
@@ -577,7 +583,7 @@ export const useStore = create<PlayerState>()(
         // system. Elsewhere, the whole library is in play.
         const isSpooky = activePlaylistTheme === "spooky";
         const eligibleFx = isSpooky
-          ? fxLibrary.filter((fx) => fx.playlistAffinity.includes("spooky") || fx.playlistAffinity.includes("halloween"))
+          ? fxLibrary.filter((fx) => hasHalloweenAffinity(fx.playlistAffinity))
           : fxLibrary;
         const toCandidate = (fx: FxSound): AiFxCandidate => ({
           id: fx.id,

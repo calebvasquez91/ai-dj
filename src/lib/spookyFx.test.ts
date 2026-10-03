@@ -1,8 +1,10 @@
 import { describe, expect, it } from "vitest";
 import type { FxSound } from "@/types/music";
+import { FX_DEFAULT_LEVEL } from "@/lib/layerMix";
 import { fallbackAnalysis } from "@/lib/audio-analysis-core";
 import { estimateStructuralCues } from "@/lib/structural-estimate";
 import {
+  SPOOKY_FX_BASE_GAIN,
   SPOOKY_FX_MAX_SEC,
   decideSpookyFx,
   pickSpookyFx,
@@ -155,5 +157,11 @@ describe("decideSpookyFx", () => {
       if (decideSpookyFx({ moment: null, currentTimeSec: 50, frequency: "occasional", state: fresh, random: lcg }).play) hits++;
     }
     expect(hits).toBeLessThan(60); // ~0.2% per tick
+  });
+});
+
+describe("SPOOKY_FX_BASE_GAIN", () => {
+  it("is the FX slider's default, so the slider reads as the effect's level", () => {
+    expect(SPOOKY_FX_BASE_GAIN).toBe(FX_DEFAULT_LEVEL);
   });
 });

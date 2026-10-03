@@ -13,11 +13,14 @@ import type { FxSound } from "@/types/music";
 import type { TrackAnalysis } from "@/lib/audio-analysis";
 import { detectBuild, type AmbienceFrequency } from "@/lib/ambience";
 import { hasHalloweenAffinity } from "@/lib/fxAffinity";
+import { FX_DEFAULT_LEVEL } from "@/lib/layerMix";
 
 /** Longer than this reads as a backing track, not an effect. */
 export const SPOOKY_FX_MAX_SEC = 30;
-/** Level before the FX slider scales it (scaledFxGain): at the slider's default this is 0.7. */
-export const SPOOKY_FX_BASE_GAIN = 0.7;
+/** Level before the FX slider scales it (scaledFxGain) — the slider's own default, so the slider reads as the effect's level. */
+export const SPOOKY_FX_BASE_GAIN = FX_DEFAULT_LEVEL;
+/** How many decoded spooky FX buffers are kept (the lined-up next one plus a couple recent) — decoded PCM is ~11 MB for a 30s stereo clip. */
+export const SPOOKY_FX_CACHE_MAX = 3;
 
 /** Min seconds of playback between two DJ-triggered spooky FX, by the ambience-frequency setting. */
 const COOLDOWN_SEC: Record<AmbienceFrequency, number> = { off: Infinity, occasional: 45, frequent: 18 };
