@@ -3,6 +3,7 @@
 import { useMemo, useRef, useState } from "react";
 import { useStore } from "@/lib/store";
 import { formatTime } from "@/lib/format";
+import { HALLOWEEN_AFFINITY, hasHalloweenAffinity, withHalloweenAffinity } from "@/lib/fxAffinity";
 import { PlayIcon, PlusIcon, CloseIcon } from "@/components/Icons";
 import type { FxCategory, FxSound } from "@/types/music";
 
@@ -35,6 +36,9 @@ export function FxLibraryPanel() {
   const [search, setSearch] = useState("");
   const [uploading, setUploading] = useState(false);
   const [uploadError, setUploadError] = useState<string | null>(null);
+  // On by default: Spooky Music only draws FX tagged spooky/halloween, so an
+  // untagged upload would silently never play there.
+  const [tagForSpooky, setTagForSpooky] = useState(true);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const previewAudioRef = useRef<HTMLAudioElement | null>(null);
   const previewTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -55,13 +59,44 @@ export function FxLibraryPanel() {
     });
   }, [fxLibrary, categoryFilter, search]);
 
+  // Bulk actions below apply to what's currently shown (category filter + search).
+  const untaggedShown = useMemo(() => filtered.filter((fx) => !hasHalloweenAffinity(fx.playlistAffinity)), [filtered]);
+  const [bulkBusy, setBulkBusy] = useState(false);
+
+  /** PATCHes each target (a few at a time, so a big library doesn't fire hundreds of requests at once). updateFxSound never throws — failures roll back that one row and surface a sync error. */
+  async function applyToShown(targets: FxSound[], patchFor: (fx: FxSound) => Partial<Pick<FxSound, "category" | "playlistAffinity">>) {
+    setBulkBusy(true);
+    try {
+      const queue = [...targets];
+      await Promise.all(
+        Array.from({ length: Math.min(4, queue.length) }, async () => {
+          for (let fx = queue.shift(); fx; fx = queue.shift()) await updateFxSound(fx.id, patchFor(fx));
+        })
+      );
+    } finally {
+      setBulkBusy(false);
+    }
+  }
+
+  function handleBulkCategory(category: FxCategory) {
+    const targets = filtered.filter((fx) => fx.category !== category);
+    if (targets.length === 0) return;
+    const label = CATEGORY_FILTERS.find((f) => f.value === category)?.label ?? category;
+    if (!window.confirm(`Change ${targets.length} sound${targets.length === 1 ? "" : "s"} to ${label}?`)) return;
+    void applyToShown(targets, () => ({ category }));
+  }
+
   async function handleFilesSelected(files: FileList | null) {
     if (!files || files.length === 0) return;
     setUploading(true);
     setUploadError(null);
     try {
       for (const file of Array.from(files)) {
-        await uploadFxSound(file, { name: parseFxFileName(file.name), category: "effect" });
+        await uploadFxSound(file, {
+          name: parseFxFileName(file.name),
+          category: "effect",
+          playlistAffinity: tagForSpooky ? HALLOWEEN_AFFINITY : [],
+        });
       }
     } catch (err) {
       // Without a catch a failed upload (e.g. a 500) was an unhandled promise
@@ -113,6 +148,19 @@ export function FxLibraryPanel() {
         </button>
       </div>
 
+      <label className="flex items-start gap-2 px-1 text-xs text-muted cursor-pointer">
+        <input
+          type="checkbox"
+          checked={tagForSpooky}
+          onChange={(e) => setTagForSpooky(e.target.checked)}
+          className="mt-0.5 accent-accent-purple"
+        />
+        <span>
+          Use new uploads in Spooky Music 🎃
+          <span className="block text-[10px]">Tags them &quot;spooky, halloween&quot; so Spooky Music can pick them.</span>
+        </span>
+      </label>
+
       {uploadError && (
         <p role="alert" className="px-1 text-xs text-accent-pink break-words">
           {uploadError}
@@ -142,6 +190,40 @@ export function FxLibraryPanel() {
           </button>
         ))}
       </div>
+
+      {fxLibrary.length > 0 && (
+        <div className="flex flex-wrap items-center gap-2">
+          <button
+            type="button"
+            disabled={bulkBusy || untaggedShown.length === 0}
+            onClick={() =>
+              void applyToShown(untaggedShown, (fx) => ({ playlistAffinity: withHalloweenAffinity(fx.playlistAffinity) }))
+            }
+            className="btn !text-xs"
+            title="Adds the spooky + halloween tags to every sound currently shown that doesn't have one"
+          >
+            {bulkBusy
+              ? "Saving…"
+              : untaggedShown.length === 0
+                ? "All shown are in Spooky Music 🎃"
+                : `Add ${untaggedShown.length} shown to Spooky Music 🎃`}
+          </button>
+          <select
+            value=""
+            disabled={bulkBusy || filtered.length === 0}
+            onChange={(e) => e.target.value && handleBulkCategory(e.target.value as FxCategory)}
+            aria-label="Set the category of every shown sound"
+            className="text-[10px] rounded bg-surface-hover border border-border/10 px-1.5 py-1.5 outline-none"
+          >
+            <option value="">Set category of {filtered.length} shown…</option>
+            {CATEGORY_FILTERS.filter((f) => f.value !== "all").map((f) => (
+              <option key={f.value} value={f.value}>
+                {f.label}
+              </option>
+            ))}
+          </select>
+        </div>
+      )}
 
       {!fxLibraryLoaded ? (
         <p className="px-1 text-xs text-muted">Loading…</p>

@@ -14,6 +14,7 @@ import {
   isYouTubeVideoId,
   normalizeAudioMime,
   normalizeEmail,
+  parseAffinityField,
 } from "@/lib/apiValidation";
 
 describe("normalizeAudioMime", () => {
@@ -142,5 +143,27 @@ describe("cleanWaveformPeaks", () => {
     expect(cleanWaveformPeaks([0, "a"])).toBeNull();
     expect(cleanWaveformPeaks([0, NaN])).toBeNull();
     expect(cleanWaveformPeaks(new Array(MAX_WAVEFORM_PEAKS + 1).fill(0))).toBeNull();
+  });
+});
+
+describe("parseAffinityField", () => {
+  it("accepts an array", () => {
+    expect(parseAffinityField(["spooky", "halloween"])).toEqual(["spooky", "halloween"]);
+  });
+
+  it("accepts a JSON-encoded array (multipart form field)", () => {
+    expect(parseAffinityField('["spooky","halloween"]')).toEqual(["spooky", "halloween"]);
+  });
+
+  it("dedupes and drops junk", () => {
+    expect(parseAffinityField(["spooky", "Spooky", 5, "", null])).toEqual(["spooky"]);
+  });
+
+  it("returns [] for missing, malformed or non-array input", () => {
+    expect(parseAffinityField(null)).toEqual([]);
+    expect(parseAffinityField(undefined)).toEqual([]);
+    expect(parseAffinityField("not json")).toEqual([]);
+    expect(parseAffinityField('{"a":1}')).toEqual([]);
+    expect(parseAffinityField(42)).toEqual([]);
   });
 });
