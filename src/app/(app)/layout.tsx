@@ -3,6 +3,7 @@ import { auth } from "@/auth";
 import { AuthSessionProvider } from "@/components/AuthSessionProvider";
 import { AppDataLoader } from "@/components/AppDataLoader";
 import { MusicWaveBackground } from "@/components/MusicWaveBackground";
+import { SpookyBackdrop } from "@/components/SpookyBackdrop";
 import { Sidebar } from "@/components/Sidebar";
 import { TopBar } from "@/components/TopBar";
 import { PlayerBar } from "@/components/PlayerBar";
@@ -20,6 +21,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
     <AuthSessionProvider>
       <AppDataLoader />
       <KeyboardShortcuts />
+      <SpookyBackdrop />
       <MusicWaveBackground />
       <div className="flex flex-1 min-h-0">
         <Sidebar />

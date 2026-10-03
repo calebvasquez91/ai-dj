@@ -946,6 +946,113 @@ body {
   --surface: #2a1236;
   --surface-hover: #3a1a48;
   --border: #6b3a73;
-  --background: #12081f;
+  --background: #000000;
   color: var(--foreground);
+}
+
+/* ---- Spooky Music background: black + sparkling glimmers ----
+   While Spooky Music is the active theme (SpookyBackdrop sets
+   data-spooky on <html>), every color token is re-pointed at a black
+   palette so the page, cards and chrome all go black — in light AND dark
+   mode — instead of the default lavender/near-black. Declared after the
+   dark-mode block so it wins at equal specificity. The accents use the
+   dark theme's bright values for contrast on black. */
+:root[data-spooky="true"] {
+  color-scheme: dark;
+  --background: #000000;
+  --surface: #0c0813;
+  --surface-hover: #181022;
+  --foreground: #fff1e0;
+  --muted: #cdb8e0;
+  --accent: #2dd4bf;
+  --accent-strong: #c084fc;
+  --accent-teal: #2dd4bf;
+  --accent-teal-bright: #5eead4;
+  --accent-purple: #c084fc;
+  --accent-purple-bright: #e9d5ff;
+  --accent-pink: #f472b6;
+  --accent-yellow: #fde047;
+  --border: #3a2150;
+  --shadow-boost: 1.8;
+}
+
+/* The default body wash is three tinted radial gradients — plain black
+   means none of them. */
+:root[data-spooky="true"] body {
+  background-image: none;
+}
+
+body {
+  transition: background-color 1s ease;
+}
+
+.surface-glass {
+  transition: background-color 0.6s ease;
+}
+
+/* The sparkle layer fills its positioned parent. Behind the app shell
+   (negative z-index, same reason as .music-wave-bg), it fades in/out over
+   1s; visibility flips after the fade so the 56 twinkling dots aren't
+   being animated while the theme is off. */
+.spooky-sparkles {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+.spooky-sparkles-page {
+  position: fixed;
+  z-index: -1;
+  opacity: 0;
+  visibility: hidden;
+  transition: opacity 1s ease, visibility 0s linear 1s;
+}
+
+.spooky-sparkles-page.is-on {
+  opacity: 1;
+  visibility: visible;
+  transition: opacity 1s ease, visibility 0s;
+}
+
+.spooky-sparkle {
+  position: absolute;
+  left: var(--x);
+  top: var(--y);
+  width: var(--size);
+  height: var(--size);
+  border-radius: 50%;
+  background: var(--tint);
+  box-shadow: 0 0 calc(var(--size) * 2.5) var(--tint);
+  opacity: 0;
+  animation: spooky-twinkle var(--dur, 4s) ease-in-out var(--delay, 0s) infinite;
+}
+
+/* The larger four-point glints: a thin plus-sign instead of a dot. */
+.spooky-sparkle.glint {
+  border-radius: 0;
+  background:
+    linear-gradient(var(--tint), var(--tint)) center / 100% 1px no-repeat,
+    linear-gradient(var(--tint), var(--tint)) center / 1px 100% no-repeat;
+  box-shadow: none;
+  filter: drop-shadow(0 0 3px var(--tint));
+  animation-name: spooky-glint;
+}
+
+@keyframes spooky-twinkle {
+  0%, 100% { opacity: 0; transform: scale(0.4); }
+  50% { opacity: 0.95; transform: scale(1); }
+}
+
+@keyframes spooky-glint {
+  0%, 100% { opacity: 0; transform: scale(0.3) rotate(0deg); }
+  50% { opacity: 1; transform: scale(1) rotate(45deg); }
+}
+
+/* Reduced motion: keep the starfield, drop the twinkling. */
+@media (prefers-reduced-motion: reduce) {
+  .spooky-sparkle {
+    animation: none;
+    opacity: 0.55;
+  }
 }
