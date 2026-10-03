@@ -1,5 +1,12 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { pickFallbackLoop, pickLoopWithAI, type AiLoopCandidate, type AiLoopTrackProfile } from "./ai-loop";
+import {
+  MAX_LOOP_CANDIDATES,
+  pickFallbackLoop,
+  pickLoopWithAI,
+  sanitizeLoopRequest,
+  type AiLoopCandidate,
+  type AiLoopTrackProfile,
+} from "./ai-loop";
 
 const loops: AiLoopCandidate[] = [
   { id: "a", name: "Organ Drone", durationSec: 30 },
@@ -86,5 +93,40 @@ describe("pickLoopWithAI", () => {
     process.env.ANTHROPIC_API_KEY = "test-key";
     vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new Error("timeout")));
     expect((await pickLoopWithAI(track, loops, null)).usedFallback).toBe(true);
+  });
+});
+
+describe("sanitizeLoopRequest", () => {
+  const valid = { currentTrack: { title: "Monster Mash", bpm: 120, camelotKey: "8A", mood: "spooky" }, availableLoops: loops, previousLoopId: "a" };
+
+  it("passes a valid request through", () => {
+    expect(sanitizeLoopRequest(valid)).toEqual(valid);
+  });
+
+  it("rejects bodies without a track title or a loops array", () => {
+    expect(sanitizeLoopRequest(null)).toBeNull();
+    expect(sanitizeLoopRequest("x")).toBeNull();
+    expect(sanitizeLoopRequest({ ...valid, currentTrack: { bpm: 1 } })).toBeNull();
+    expect(sanitizeLoopRequest({ ...valid, availableLoops: "nope" })).toBeNull();
+  });
+
+  it("caps the number of loops", () => {
+    const many = Array.from({ length: MAX_LOOP_CANDIDATES + 40 }, (_, i) => ({ id: `l${i}`, name: "n", durationSec: 5 }));
+    expect(sanitizeLoopRequest({ ...valid, availableLoops: many })?.availableLoops).toHaveLength(MAX_LOOP_CANDIDATES);
+  });
+
+  it("clips long strings and drops malformed loops", () => {
+    const long = "x".repeat(5000);
+    const out = sanitizeLoopRequest({
+      currentTrack: { title: long, mood: long, camelotKey: long, bpm: "fast" },
+      availableLoops: [{ id: "ok", name: long, durationSec: "12" }, { id: 7 }, null, { id: long }],
+      previousLoopId: long,
+    });
+    expect(out?.currentTrack.title).toHaveLength(200);
+    expect(out?.currentTrack.mood).toHaveLength(200);
+    expect(out?.currentTrack.camelotKey).toHaveLength(8);
+    expect(out?.currentTrack.bpm).toBeNull();
+    expect(out?.availableLoops).toEqual([{ id: "ok", name: "x".repeat(200), durationSec: 0 }]);
+    expect(out?.previousLoopId).toBeNull();
   });
 });

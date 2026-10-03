@@ -307,7 +307,12 @@ export function DualDeckStage() {
   const ambientBusyRef = useRef(false);
   // The AI-picked transition FX that is audibly playing right now (if any):
   // its gain node and the unscaled gain, so the FX slider can re-scale it live.
-  const fxLiveRef = useRef<{ gain: GainNode; base: number } | null>(null);
+  // Several can overlap (back-to-back transitions). `audible` flips true when
+  // the sound actually starts (it can be scheduled up to the window in), via
+  // `timer`.
+  const fxLiveRef = useRef<
+    Set<{ gain: GainNode; base: number; audible: boolean; timer: ReturnType<typeof setTimeout> | null }>
+  >(new Set());
   // Pending `el.pause()` timeouts scheduled by stopAmbientLayer/the
   // crossfade-out below, keyed per slot — must be cancelled whenever that
   // same slot is about to be (re)started, or a stale timeout can pause
@@ -1086,6 +1091,23 @@ export function DualDeckStage() {
       return { source, filter, gain, analyser };
     }
 
+    /** Mirrors "is any AI-picked transition FX audible right now" into the store flag the indicator reads. */
+    function syncFxPlaying() {
+      let audible = false;
+      fxLiveRef.current.forEach((live) => {
+        if (live.audible) audible = true;
+      });
+      useStore.getState().setFxPlaying(audible);
+    }
+
+    /** Forgets every live FX (and its pending "audible" timer) — effect teardown; their sources are stopped by the overlay cleanup. */
+    function clearFxLive() {
+      fxLiveRef.current.forEach((live) => {
+        if (live.timer != null) clearTimeout(live.timer);
+      });
+      fxLiveRef.current.clear();
+    }
+
     /** Plays a user-uploaded FX sound (lib/ai-fx.ts's AI pick) as a one-shot overlay during a transition's crossfade — a real audio file, not a synthesized stand-in. startOffsetSec delays it relative to the crossfade's own start (Claude's call on when it should land within the window), clamped to windowSec — ai-fx.ts already caps it to a generous absolute ceiling, but only this call site knows the real (usually much shorter) window a stale/hallucinated value could otherwise schedule the FX well past, firing as a surprise sound disconnected from the transition it was picked for. volumeMultiplier is already capped by the caller (store.ts mirrors ai-fx.ts's MAX_FX_VOLUME_MULTIPLIER), capped again here as a last line of defense since it crossed a client request/response round trip. Plays to the buffer's own natural end (an explicit, bounded stop() — not just relying on the source's own implicit end-of-buffer stop — matching the sibling overlays above) — most FX are short one-shots that finish well inside the crossfade window on their own. */
     function startFxOverlayLayer(
       ctx: AudioContext,
@@ -1112,13 +1134,19 @@ export function DualDeckStage() {
       // The AI's (capped) multiplier, scaled by the "FX" slider — remembered
       // unscaled so moving the slider mid-sound re-scales it live.
       gain.gain.setValueAtTime(scaledFxGain(safeVolume, useStore.getState().fxLevel), now + delaySec);
-      fxLiveRef.current = { gain, base: safeVolume };
-      useStore.getState().setFxPlaying(true);
+      const live = { gain, base: safeVolume, audible: false, timer: null as ReturnType<typeof setTimeout> | null };
+      fxLiveRef.current.add(live);
+      // "FX Playing" only once the sound is actually audible, not when it's scheduled.
+      live.timer = setTimeout(() => {
+        live.timer = null;
+        if (!fxLiveRef.current.has(live)) return;
+        live.audible = true;
+        syncFxPlaying();
+      }, delaySec * 1000);
       source.onended = () => {
-        if (fxLiveRef.current?.gain === gain) {
-          fxLiveRef.current = null;
-          useStore.getState().setFxPlaying(false);
-        }
+        if (live.timer != null) clearTimeout(live.timer);
+        fxLiveRef.current.delete(live);
+        syncFxPlaying();
       };
 
       source.start(now + delaySec);
@@ -2221,16 +2249,11 @@ export function DualDeckStage() {
 
     /** A random halloween/spooky-affinied "background"-category FX, excluding one id (so back-to-back loops don't repeat the same clip) — null when the library has no eligible background FX, which is a graceful "no ambient layer" outcome, not an error. */
     function pickAmbientBackgroundFx(excludeId?: string | null) {
-      const library = useStore.getState().fxLibrary;
-      const pool = library.filter(
-        (fx) =>
-          fx.category === "background" &&
-          (fx.playlistAffinity.includes("spooky") || fx.playlistAffinity.includes("halloween")) &&
-          fx.id !== excludeId
-      );
-      const fallbackPool = pool.length > 0 ? pool : library.filter((fx) => fx.category === "background");
-      if (fallbackPool.length === 0) return null;
-      return fallbackPool[Math.floor(Math.random() * fallbackPool.length)];
+      const pool = ambientLoopPool();
+      const others = pool.filter((fx) => fx.id !== excludeId);
+      const choices = others.length > 0 ? others : pool;
+      if (choices.length === 0) return null;
+      return choices[Math.floor(Math.random() * choices.length)];
     }
 
     /** Cancels a pending `el.pause()` scheduled for this slot (see ambientPauseTimeoutsRef's own comment) — call before playing/reusing that slot. */
@@ -2293,6 +2316,7 @@ export function DualDeckStage() {
       // Don't spend a Claude call until there's an audio graph to play it on.
       if (!audioCtxRef.current || !masterGainRef.current) return;
       ambientBusyRef.current = true;
+      const requestedTrackId = useStore.getState().currentTrack?.id ?? null;
       void chooseAmbientLoop(ambientCurrentFxIdRef.current).then((fx) => {
         ambientBusyRef.current = false;
         if (!fx || ambientRunningRef.current || useStore.getState().activePlaylistTheme !== "spooky") return;
@@ -2302,7 +2326,9 @@ export function DualDeckStage() {
         const { currentTrack, currentTimeSec, isTransitioning, ambienceLevel } = useStore.getState();
         ambientDuckStateRef.current = ambientDuckState(currentTimeSec, currentTrack?.durationSec ?? 0, isTransitioning);
         ambientLastLevelRef.current = ambienceLevel;
-        ambientLastTrackIdRef.current = currentTrack?.id ?? null;
+        // The track the pick was made for: if it changed while the pick was in
+        // flight, the next tick sees the mismatch and picks again.
+        ambientLastTrackIdRef.current = requestedTrackId;
         cancelAmbientPauseTimeout("A");
         activeAmbientSlotRef.current = "A";
         ambientCurrentFxIdRef.current = fx.id;
@@ -2390,10 +2416,12 @@ export function DualDeckStage() {
     /** Re-scales the transition FX that's playing right now when the FX slider moves. */
     function applyFxLevel() {
       const ctx = audioCtxRef.current;
-      const live = fxLiveRef.current;
-      if (!ctx || !live) return;
-      live.gain.gain.cancelScheduledValues(ctx.currentTime);
-      live.gain.gain.setValueAtTime(scaledFxGain(live.base, useStore.getState().fxLevel), ctx.currentTime);
+      if (!ctx) return;
+      const fxLevel = useStore.getState().fxLevel;
+      fxLiveRef.current.forEach((live) => {
+        live.gain.gain.cancelScheduledValues(ctx.currentTime);
+        live.gain.gain.setValueAtTime(scaledFxGain(live.base, fxLevel), ctx.currentTime);
+      });
     }
 
     /** Called every tick (same 500ms cadence as tryAutoTransition/tryAmbience): starts the ambient layer when Spooky Music is active and it isn't running yet (e.g. the FX library was still loading when the playlist first activated), stops it when the playlist is no longer active, re-ducks it, picks a fresh loop for each new track, and crossfades into another loop shortly before the current one ends. */
@@ -2420,6 +2448,7 @@ export function DualDeckStage() {
           ambientBusyRef.current = false;
           if (
             !fx ||
+            useStore.getState().currentTrack?.id !== trackId || // stale: the track moved on, the next tick re-picks
             fx.id === ambientCurrentFxIdRef.current ||
             !ambientRunningRef.current ||
             ambientCrossfadingRef.current
@@ -2820,7 +2849,7 @@ export function DualDeckStage() {
       });
       ambientRunningRef.current = false;
       ambientBusyRef.current = false;
-      fxLiveRef.current = null;
+      clearFxLive();
       useStore.getState().setAmbienceActive(false);
       useStore.getState().setFxPlaying(false);
       if (mashupRef.current?.tickIntervalId != null) {

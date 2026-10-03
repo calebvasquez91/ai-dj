@@ -1,37 +1,28 @@
 import { NextResponse } from "next/server";
 import { auth } from "@/auth";
-import { pickLoopWithAI, type AiLoopCandidate, type AiLoopTrackProfile } from "@/lib/ai-loop";
-import { apiHandler, unauthorized } from "@/lib/apiRoute";
+import { pickLoopWithAI, sanitizeLoopRequest } from "@/lib/ai-loop";
+import { apiHandler, jsonError, unauthorized } from "@/lib/apiRoute";
 
-const MAX_LOOP_CANDIDATES = 100;
-
-interface NextLoopRequestBody {
-  currentTrack?: AiLoopTrackProfile;
-  availableLoops?: AiLoopCandidate[];
-  previousLoopId?: string | null;
-}
-
-function isTrackProfile(value: unknown): value is AiLoopTrackProfile {
-  return typeof value === "object" && value !== null && typeof (value as { title?: unknown }).title === "string";
-}
-
-function isLoopCandidate(value: unknown): value is AiLoopCandidate {
-  return typeof value === "object" && value !== null && typeof (value as { id?: unknown }).id === "string";
-}
+/** Far above any real request (100 loops with short names); anything bigger is rejected before parsing. */
+const MAX_BODY_CHARS = 50_000;
 
 async function handlePOST(request: Request) {
   const session = await auth();
   if (!session) return unauthorized();
 
-  const body = (await request.json().catch(() => null)) as NextLoopRequestBody | null;
-  if (!body || !isTrackProfile(body.currentTrack) || !Array.isArray(body.availableLoops)) {
-    return NextResponse.json({ error: "currentTrack and availableLoops are required." }, { status: 400 });
+  const raw = await request.text();
+  if (raw.length > MAX_BODY_CHARS) return jsonError(413, "Request too large.");
+  let parsed: unknown = null;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    // falls through to the 400 below
   }
-  // Bound the paid Claude prompt regardless of what the client sends.
-  const availableLoops = body.availableLoops.filter(isLoopCandidate).slice(0, MAX_LOOP_CANDIDATES);
-  const previousLoopId = typeof body.previousLoopId === "string" ? body.previousLoopId : null;
+  // Bounds the paid Claude prompt regardless of what the client sends.
+  const body = sanitizeLoopRequest(parsed);
+  if (!body) return jsonError(400, "currentTrack and availableLoops are required.");
 
-  const result = await pickLoopWithAI(body.currentTrack, availableLoops, previousLoopId);
+  const result = await pickLoopWithAI(body.currentTrack, body.availableLoops, body.previousLoopId);
   return NextResponse.json(result);
 }
 

@@ -19,6 +19,8 @@ export async function requestLoopPick(
 ): Promise<string | null> {
   const fallback = () => pickFallbackLoop(availableLoops, previousLoopId).fxId;
   if (availableLoops.length === 0) return null;
+  // One candidate: nothing to choose between, so don't spend a Claude call.
+  if (availableLoops.length === 1) return availableLoops[0].id;
   try {
     const res = await fetch("/api/dj/next-loop", {
       method: "POST",
