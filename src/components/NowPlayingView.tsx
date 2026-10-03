@@ -1,19 +1,13 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import Image from "next/image";
 import { useStore } from "@/lib/store";
 import { formatTime } from "@/lib/format";
 import { ChevronDownIcon, NextIcon, PauseIcon, PlayIcon, PreviousIcon } from "@/components/Icons";
 import { Que } from "@/components/Que";
+import { SpookySparkles } from "@/components/SpookyBackdrop";
 
-// Spec #11's exact gradients — which of the two a track gets is derived
-// from its id (stable per track, no extra state) rather than reassigned
-// randomly on every render.
-const HALLOWEEN_GRADIENTS: [string, string][] = [
-  ["#1a0500", "#2d0a00"],
-  ["#0d0020", "#1a0040"],
-];
 const PARTICLE_EMOJIS = ["🍂", "🕸️", "⚡"];
 const PARTICLE_LIFETIME_MS = 4000;
 const PARTICLE_MIN_INTERVAL_MS = 2000;
@@ -48,13 +42,6 @@ export function NowPlayingView() {
   useEffect(() => {
     if (expanded && !currentTrack) setExpanded(false);
   }, [expanded, currentTrack, setExpanded]);
-
-  const spookyGradient = useMemo(() => {
-    if (!currentTrack) return HALLOWEEN_GRADIENTS[0];
-    let hash = 0;
-    for (const ch of currentTrack.id) hash += ch.charCodeAt(0);
-    return HALLOWEEN_GRADIENTS[hash % HALLOWEEN_GRADIENTS.length];
-  }, [currentTrack]);
 
   // Floating particles drifting up behind the album art (spec #11) — a
   // self-rescheduling timer (not setInterval) so the 2-3s gap between
@@ -116,18 +103,18 @@ export function NowPlayingView() {
         />
       )}
       <div className="absolute inset-0 -z-10 bg-background/70" aria-hidden="true" />
-      {/* Halloween gradient backdrop (spec #11) — painted above the normal
-          blurred-artwork layer (later in DOM order, same -z-10 context) and
-          faded in/out over 1s via opacity alone, so leaving Spooky Music
-          reverts smoothly instead of snapping back to the plain scrim. */}
+      {/* Spooky Music backdrop — solid black with sparkling glimmers,
+          painted above the normal blurred-artwork layer (later in DOM
+          order, same -z-10 context) and faded in/out over 1s via opacity
+          alone, so leaving Spooky Music reverts smoothly instead of
+          snapping back to the plain scrim. */}
       <div
-        className="absolute inset-0 -z-10 transition-opacity duration-1000"
-        style={{
-          opacity: spooky ? 1 : 0,
-          background: `radial-gradient(circle at 50% 30%, ${spookyGradient[0]}, ${spookyGradient[1]} 70%)`,
-        }}
+        className="absolute inset-0 -z-10 bg-black transition-opacity duration-1000"
+        style={{ opacity: spooky ? 1 : 0 }}
         aria-hidden="true"
-      />
+      >
+        {spooky && <SpookySparkles />}
+      </div>
 
       <div className="flex items-center justify-center p-4 shrink-0">
         {spooky && (
