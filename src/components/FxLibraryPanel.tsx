@@ -3,6 +3,7 @@
 import { useMemo, useRef, useState } from "react";
 import { useStore } from "@/lib/store";
 import { formatTime } from "@/lib/format";
+import { HALLOWEEN_AFFINITY } from "@/lib/fxAffinity";
 import { PlayIcon, PlusIcon, CloseIcon } from "@/components/Icons";
 import type { FxCategory, FxSound } from "@/types/music";
 
@@ -35,6 +36,9 @@ export function FxLibraryPanel() {
   const [search, setSearch] = useState("");
   const [uploading, setUploading] = useState(false);
   const [uploadError, setUploadError] = useState<string | null>(null);
+  // On by default: Spooky Music only draws FX tagged spooky/halloween, so an
+  // untagged upload would silently never play there.
+  const [tagForSpooky, setTagForSpooky] = useState(true);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const previewAudioRef = useRef<HTMLAudioElement | null>(null);
   const previewTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -61,7 +65,11 @@ export function FxLibraryPanel() {
     setUploadError(null);
     try {
       for (const file of Array.from(files)) {
-        await uploadFxSound(file, { name: parseFxFileName(file.name), category: "effect" });
+        await uploadFxSound(file, {
+          name: parseFxFileName(file.name),
+          category: "effect",
+          playlistAffinity: tagForSpooky ? HALLOWEEN_AFFINITY : [],
+        });
       }
     } catch (err) {
       // Without a catch a failed upload (e.g. a 500) was an unhandled promise
@@ -112,6 +120,19 @@ export function FxLibraryPanel() {
           {uploading ? "Uploading…" : "Upload FX sound"}
         </button>
       </div>
+
+      <label className="flex items-start gap-2 px-1 text-xs text-muted cursor-pointer">
+        <input
+          type="checkbox"
+          checked={tagForSpooky}
+          onChange={(e) => setTagForSpooky(e.target.checked)}
+          className="mt-0.5 accent-accent-purple"
+        />
+        <span>
+          Use new uploads in Spooky Music 🎃
+          <span className="block text-[10px]">Tags them &quot;spooky, halloween&quot; so Spooky Music can pick them.</span>
+        </span>
+      </label>
 
       {uploadError && (
         <p role="alert" className="px-1 text-xs text-accent-pink break-words">

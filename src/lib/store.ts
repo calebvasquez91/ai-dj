@@ -294,7 +294,10 @@ interface PlayerState {
   ) => void;
 
   loadFxLibrary: () => Promise<void>;
-  uploadFxSound: (file: File, metadata: { name: string; category: FxSound["category"] }) => Promise<void>;
+  uploadFxSound: (
+    file: File,
+    metadata: { name: string; category: FxSound["category"]; playlistAffinity?: string[] }
+  ) => Promise<void>;
   updateFxSound: (fxId: string, patch: Partial<Pick<FxSound, "name" | "category" | "bpm" | "key" | "tags" | "playlistAffinity">>) => Promise<void>;
   /** Local-only patch (no network) for bpm/key/tags inputs — pair with persistFxSound on blur so typing doesn't fire a request per keystroke. */
   patchFxSoundLocal: (fxId: string, patch: Partial<Pick<FxSound, "bpm" | "key" | "tags" | "playlistAffinity">>) => void;
