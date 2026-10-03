@@ -6,6 +6,7 @@ import { formatTime } from "@/lib/format";
 import { TrackThumbnail } from "@/components/TrackThumbnail";
 import { CloseIcon } from "@/components/Icons";
 import { FxLibraryPanel } from "@/components/FxLibraryPanel";
+import { LayerIndicator } from "@/components/LayerIndicator";
 
 type PanelTab = "queue" | "fx";
 
@@ -68,6 +69,8 @@ export function QueuePanel() {
             FX Library
           </button>
         </div>
+
+        {isSpooky && <LayerIndicator className="px-4 pt-2 shrink-0" />}
 
         {tab === "fx" ? (
           <FxLibraryPanel />

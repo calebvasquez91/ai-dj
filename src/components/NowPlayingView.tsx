@@ -7,6 +7,7 @@ import { formatTime } from "@/lib/format";
 import { ChevronDownIcon, NextIcon, PauseIcon, PlayIcon, PreviousIcon } from "@/components/Icons";
 import { Que } from "@/components/Que";
 import { SpookySparkles } from "@/components/SpookyBackdrop";
+import { LayerIndicator } from "@/components/LayerIndicator";
 
 const PARTICLE_EMOJIS = ["🍂", "🕸️", "⚡"];
 const PARTICLE_LIFETIME_MS = 4000;
@@ -164,6 +165,8 @@ export function NowPlayingView() {
               </p>
             </div>
           </div>
+
+          {spooky && <LayerIndicator />}
 
           <div className="w-full max-w-md flex flex-col gap-2">
             {isTransitioning && queue[0] ? (

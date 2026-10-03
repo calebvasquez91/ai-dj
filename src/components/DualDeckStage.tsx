@@ -33,7 +33,9 @@ import { resolveHotCues, upcomingDropCueAtSec } from "@/lib/hot-cues";
 import { createTimeStretchVoice, type TimeStretchVoice } from "@/lib/time-stretch";
 import { filterStateToKnobPos } from "@/lib/mixer-controls";
 import { MAX_FX_VOLUME_MULTIPLIER } from "@/lib/ai-fx";
-import type { LocalTrack, Track } from "@/types/music";
+import { ambientDuckState, duckRampSec, duckRatio, scaledFxGain, type AmbientDuckState } from "@/lib/layerMix";
+import { requestLoopPick } from "@/lib/loopApi";
+import type { FxSound, LocalTrack, Track } from "@/types/music";
 
 type DeckId = "A" | "B";
 
@@ -245,7 +247,8 @@ const ECHO_WET_LEVEL = 0.6;
 // "auto-crossfade into the next loop before they end"). Layer 3 of the
 // Spooky Music system — independent of both the deck crossfade (layer 1)
 // and the AI-matched transition FX (layer 2, see startFxOverlayLayer).
-const AMBIENT_VOLUME = 0.25;
+// Its level is the "Ambience" slider (store.ambienceLevel, default 0.25)
+// times a duck ratio — see lib/layerMix.ts for the ducking rules.
 const AMBIENT_FADE_SEC = 1.5;
 const AMBIENT_CROSSFADE_LEAD_SEC = 2;
 
@@ -294,6 +297,17 @@ export function DualDeckStage() {
   const ambientRunningRef = useRef(false);
   const ambientCrossfadingRef = useRef(false);
   const ambientCurrentFxIdRef = useRef<string | null>(null);
+  // Which duck state (lib/layerMix.ts) the loop's gain is currently at, the
+  // Ambience slider value that was last applied, the track a loop was last
+  // picked for (so a new track triggers exactly one new pick), and a guard
+  // for an AI pick that's still in flight.
+  const ambientDuckStateRef = useRef<AmbientDuckState>("normal");
+  const ambientLastLevelRef = useRef<number | null>(null);
+  const ambientLastTrackIdRef = useRef<string | null>(null);
+  const ambientBusyRef = useRef(false);
+  // The AI-picked transition FX that is audibly playing right now (if any):
+  // its gain node and the unscaled gain, so the FX slider can re-scale it live.
+  const fxLiveRef = useRef<{ gain: GainNode; base: number } | null>(null);
   // Pending `el.pause()` timeouts scheduled by stopAmbientLayer/the
   // crossfade-out below, keyed per slot — must be cancelled whenever that
   // same slot is about to be (re)started, or a stale timeout can pause
@@ -1095,7 +1109,17 @@ export function DualDeckStage() {
       const safeVolume = Math.min(Math.max(volumeMultiplier, 0), MAX_FX_VOLUME_MULTIPLIER);
       const now = ctx.currentTime;
       const delaySec = Math.min(Math.max(0, startOffsetSec), Math.max(0, windowSec));
-      gain.gain.setValueAtTime(safeVolume, now + delaySec);
+      // The AI's (capped) multiplier, scaled by the "FX" slider — remembered
+      // unscaled so moving the slider mid-sound re-scales it live.
+      gain.gain.setValueAtTime(scaledFxGain(safeVolume, useStore.getState().fxLevel), now + delaySec);
+      fxLiveRef.current = { gain, base: safeVolume };
+      useStore.getState().setFxPlaying(true);
+      source.onended = () => {
+        if (fxLiveRef.current?.gain === gain) {
+          fxLiveRef.current = null;
+          useStore.getState().setFxPlaying(false);
+        }
+      };
 
       source.start(now + delaySec);
       source.stop(now + delaySec + buffer.duration + 0.05);
@@ -2228,22 +2252,69 @@ export function DualDeckStage() {
       }, delayMs);
     }
 
+    /** The loop's level right now: the Ambience slider times the current duck ratio (lib/layerMix.ts). */
+    function ambientVolumeNow(): number {
+      return useStore.getState().ambienceLevel * duckRatio(ambientDuckStateRef.current);
+    }
+
+    /** Every halloween/spooky-affinied "background" FX (falling back to any background FX) — the pool a loop is chosen from. */
+    function ambientLoopPool(): FxSound[] {
+      const library = useStore.getState().fxLibrary;
+      const pool = library.filter(
+        (fx) =>
+          fx.category === "background" &&
+          (fx.playlistAffinity.includes("spooky") || fx.playlistAffinity.includes("halloween"))
+      );
+      return pool.length > 0 ? pool : library.filter((fx) => fx.category === "background");
+    }
+
+    /** Asks Claude (via /api/dj/next-loop; a random loop that isn't the previous one after 3s or on any failure — lib/loopApi.ts) which loop suits the current track. Never rejects; null only when there is no eligible loop. */
+    async function chooseAmbientLoop(previousLoopId: string | null): Promise<FxSound | null> {
+      const pool = ambientLoopPool();
+      if (pool.length === 0) return null;
+      const { currentTrack, trackAnalysis } = useStore.getState();
+      const analysis = currentTrack ? trackAnalysis[currentTrack.id] : undefined;
+      const fxId = await requestLoopPick(
+        {
+          title: currentTrack?.title ?? "",
+          bpm: analysis && !analysis.fallback ? analysis.bpm : null,
+          camelotKey: analysis?.camelotKey ?? null,
+          mood: currentTrack?.tags && currentTrack.tags.length > 0 ? currentTrack.tags.join(", ") : null,
+        },
+        pool.map((fx) => ({ id: fx.id, name: fx.name, durationSec: fx.durationSec })),
+        previousLoopId
+      );
+      return pool.find((fx) => fx.id === fxId) ?? null;
+    }
+
+    /** Starts the loop layer with an AI-picked loop for the current track. Async (the pick is a network call), so ambientBusyRef stops the 500ms tick from stacking up requests while one is in flight; if Spooky was switched off meanwhile the result is dropped. */
     function startAmbientLayer() {
-      if (ambientRunningRef.current) return;
-      const fx = pickAmbientBackgroundFx();
-      const slot = getOrCreateAmbientSlot("A");
-      const ctx = audioCtxRef.current;
-      if (!fx || !slot || !ctx) return; // no eligible background FX yet (or ctx not ready) — stays off until retried
-      cancelAmbientPauseTimeout("A");
-      activeAmbientSlotRef.current = "A";
-      ambientCurrentFxIdRef.current = fx.id;
-      slot.el.src = fx.sourceUrl;
-      slot.el.currentTime = 0;
-      slot.gain.gain.cancelScheduledValues(ctx.currentTime);
-      slot.gain.gain.setValueAtTime(0, ctx.currentTime);
-      slot.gain.gain.linearRampToValueAtTime(AMBIENT_VOLUME, ctx.currentTime + AMBIENT_FADE_SEC);
-      slot.el.play().catch(() => {});
-      ambientRunningRef.current = true;
+      if (ambientRunningRef.current || ambientBusyRef.current) return;
+      // Don't spend a Claude call until there's an audio graph to play it on.
+      if (!audioCtxRef.current || !masterGainRef.current) return;
+      ambientBusyRef.current = true;
+      void chooseAmbientLoop(ambientCurrentFxIdRef.current).then((fx) => {
+        ambientBusyRef.current = false;
+        if (!fx || ambientRunningRef.current || useStore.getState().activePlaylistTheme !== "spooky") return;
+        const slot = getOrCreateAmbientSlot("A");
+        const ctx = audioCtxRef.current;
+        if (!slot || !ctx) return; // ctx went away — stays off until retried
+        const { currentTrack, currentTimeSec, isTransitioning, ambienceLevel } = useStore.getState();
+        ambientDuckStateRef.current = ambientDuckState(currentTimeSec, currentTrack?.durationSec ?? 0, isTransitioning);
+        ambientLastLevelRef.current = ambienceLevel;
+        ambientLastTrackIdRef.current = currentTrack?.id ?? null;
+        cancelAmbientPauseTimeout("A");
+        activeAmbientSlotRef.current = "A";
+        ambientCurrentFxIdRef.current = fx.id;
+        slot.el.src = fx.sourceUrl;
+        slot.el.currentTime = 0;
+        slot.gain.gain.cancelScheduledValues(ctx.currentTime);
+        slot.gain.gain.setValueAtTime(0, ctx.currentTime);
+        slot.gain.gain.linearRampToValueAtTime(ambientVolumeNow(), ctx.currentTime + AMBIENT_FADE_SEC);
+        slot.el.play().catch(() => {});
+        ambientRunningRef.current = true;
+        useStore.getState().setAmbienceActive(true);
+      });
     }
 
     /** Fades both slots out (whichever is actually active, plus the other in case a crossfade was mid-flight) and stops them — the smooth "theme reset" this layer's half of, matching the 1s visual theme transition elsewhere. */
@@ -2251,6 +2322,10 @@ export function DualDeckStage() {
       if (!ambientRunningRef.current) return;
       ambientRunningRef.current = false;
       ambientCrossfadingRef.current = false;
+      ambientDuckStateRef.current = "normal";
+      ambientLastLevelRef.current = null;
+      ambientLastTrackIdRef.current = null;
+      useStore.getState().setAmbienceActive(false);
       const ctx = audioCtxRef.current;
       (["A", "B"] as const).forEach((key) => {
         const slot = ambientSlotsRef.current[key];
@@ -2264,7 +2339,64 @@ export function DualDeckStage() {
       });
     }
 
-    /** Called every tick (same 500ms cadence as tryAutoTransition/tryAmbience): starts the ambient layer when Spooky Music is active and it isn't running yet (e.g. the FX library was still loading when the playlist first activated), stops it when the playlist is no longer active, and crossfades into a fresh loop shortly before the current one ends. */
+    /** Crossfades the active slot into `nextFx` over fadeSec, the incoming ramp going to the loop's current level. */
+    function crossfadeAmbientTo(nextFx: FxSound, fadeSec: number) {
+      const ctx = audioCtxRef.current;
+      const activeKey = activeAmbientSlotRef.current;
+      const active = ambientSlotsRef.current[activeKey];
+      const nextKey = activeKey === "A" ? "B" : "A";
+      const nextSlot = getOrCreateAmbientSlot(nextKey);
+      if (!ctx || !active || !nextSlot) return;
+
+      const level = ambientVolumeNow();
+      ambientCrossfadingRef.current = true;
+      cancelAmbientPauseTimeout(nextKey);
+      nextSlot.el.src = nextFx.sourceUrl;
+      nextSlot.el.currentTime = 0;
+      nextSlot.gain.gain.cancelScheduledValues(ctx.currentTime);
+      nextSlot.gain.gain.setValueAtTime(0, ctx.currentTime);
+      nextSlot.gain.gain.linearRampToValueAtTime(level, ctx.currentTime + fadeSec);
+      nextSlot.el.play().catch(() => {});
+      active.gain.gain.cancelScheduledValues(ctx.currentTime);
+      active.gain.gain.setValueAtTime(active.gain.gain.value, ctx.currentTime);
+      active.gain.gain.linearRampToValueAtTime(0, ctx.currentTime + fadeSec);
+
+      activeAmbientSlotRef.current = nextKey;
+      ambientCurrentFxIdRef.current = nextFx.id;
+      scheduleAmbientPause(activeKey, active.el, fadeSec * 1000 + 200, () => {
+        ambientCrossfadingRef.current = false;
+      });
+    }
+
+    /** Moves the loop's gain to its target for the current duck state (energy window / last-15s-and-transition ducking, lib/layerMix.ts) and Ambience slider — a 5s ramp down into a transition, 4s back up after the next song starts, a short ramp otherwise, and near-instant when the slider itself moved. Cheap no-op when neither changed. */
+    function applyAmbientDuck() {
+      const ctx = audioCtxRef.current;
+      const slot = ambientSlotsRef.current[activeAmbientSlotRef.current];
+      if (!ctx || !slot || !ambientRunningRef.current) return;
+      const { currentTrack, currentTimeSec, isTransitioning, ambienceLevel } = useStore.getState();
+      const nextState = ambientDuckState(currentTimeSec, currentTrack?.durationSec ?? 0, isTransitioning);
+      const prevState = ambientDuckStateRef.current;
+      const levelChanged = ambienceLevel !== ambientLastLevelRef.current;
+      if (nextState === prevState && !levelChanged) return;
+      const rampSec = levelChanged ? 0.1 : duckRampSec(prevState, nextState);
+      ambientDuckStateRef.current = nextState;
+      ambientLastLevelRef.current = ambienceLevel;
+      const now = ctx.currentTime;
+      slot.gain.gain.cancelScheduledValues(now);
+      slot.gain.gain.setValueAtTime(slot.gain.gain.value, now);
+      slot.gain.gain.linearRampToValueAtTime(ambienceLevel * duckRatio(nextState), now + rampSec);
+    }
+
+    /** Re-scales the transition FX that's playing right now when the FX slider moves. */
+    function applyFxLevel() {
+      const ctx = audioCtxRef.current;
+      const live = fxLiveRef.current;
+      if (!ctx || !live) return;
+      live.gain.gain.cancelScheduledValues(ctx.currentTime);
+      live.gain.gain.setValueAtTime(scaledFxGain(live.base, useStore.getState().fxLevel), ctx.currentTime);
+    }
+
+    /** Called every tick (same 500ms cadence as tryAutoTransition/tryAmbience): starts the ambient layer when Spooky Music is active and it isn't running yet (e.g. the FX library was still loading when the playlist first activated), stops it when the playlist is no longer active, re-ducks it, picks a fresh loop for each new track, and crossfades into another loop shortly before the current one ends. */
     function tryHalloweenAmbientLayer() {
       const isSpooky = useStore.getState().activePlaylistTheme === "spooky";
       if (!isSpooky) {
@@ -2275,38 +2407,39 @@ export function DualDeckStage() {
         startAmbientLayer();
         return;
       }
+      applyAmbientDuck();
       if (ambientCrossfadingRef.current) return;
+
+      // A new track started: pick (once) the loop that suits it, never
+      // repeating the one that just played, and crossfade into it.
+      const trackId = useStore.getState().currentTrack?.id ?? null;
+      if (trackId && trackId !== ambientLastTrackIdRef.current && !ambientBusyRef.current) {
+        ambientLastTrackIdRef.current = trackId;
+        ambientBusyRef.current = true;
+        void chooseAmbientLoop(ambientCurrentFxIdRef.current).then((fx) => {
+          ambientBusyRef.current = false;
+          if (
+            !fx ||
+            fx.id === ambientCurrentFxIdRef.current ||
+            !ambientRunningRef.current ||
+            ambientCrossfadingRef.current
+          ) {
+            return;
+          }
+          crossfadeAmbientTo(fx, AMBIENT_FADE_SEC);
+        });
+        return;
+      }
 
       const activeKey = activeAmbientSlotRef.current;
       const active = ambientSlotsRef.current[activeKey];
-      const ctx = audioCtxRef.current;
-      if (!active || !ctx || !Number.isFinite(active.el.duration) || active.el.duration <= 0) return;
+      if (!active || !Number.isFinite(active.el.duration) || active.el.duration <= 0) return;
       const remaining = active.el.duration - active.el.currentTime;
       if (remaining > AMBIENT_CROSSFADE_LEAD_SEC) return;
 
-      const nextKey = activeKey === "A" ? "B" : "A";
-      const nextSlot = getOrCreateAmbientSlot(nextKey);
       const nextFx = pickAmbientBackgroundFx(ambientCurrentFxIdRef.current);
-      if (!nextSlot || !nextFx) return; // nothing to crossfade into — current loop just plays out and stops naturally
-
-      ambientCrossfadingRef.current = true;
-      const fadeSec = Math.max(0.2, remaining);
-      cancelAmbientPauseTimeout(nextKey);
-      nextSlot.el.src = nextFx.sourceUrl;
-      nextSlot.el.currentTime = 0;
-      nextSlot.gain.gain.cancelScheduledValues(ctx.currentTime);
-      nextSlot.gain.gain.setValueAtTime(0, ctx.currentTime);
-      nextSlot.gain.gain.linearRampToValueAtTime(AMBIENT_VOLUME, ctx.currentTime + fadeSec);
-      nextSlot.el.play().catch(() => {});
-      active.gain.gain.cancelScheduledValues(ctx.currentTime);
-      active.gain.gain.setValueAtTime(AMBIENT_VOLUME, ctx.currentTime);
-      active.gain.gain.linearRampToValueAtTime(0, ctx.currentTime + fadeSec);
-
-      activeAmbientSlotRef.current = nextKey;
-      ambientCurrentFxIdRef.current = nextFx.id;
-      scheduleAmbientPause(activeKey, active.el, fadeSec * 1000 + 200, () => {
-        ambientCrossfadingRef.current = false;
-      });
+      if (!nextFx) return; // nothing to crossfade into — current loop just plays out and stops naturally
+      crossfadeAmbientTo(nextFx, Math.max(0.2, remaining));
     }
 
     /** Nothing queued to transition into — instead of an abrupt stop, fade the active deck's gain to 0 so it reaches silence right as the track naturally ends. Recomputing from the current gain value every tick (rather than a one-shot scheduled ramp) keeps this self-correcting if the check re-fires before the fade completes. */
@@ -2548,6 +2681,10 @@ export function DualDeckStage() {
     }, 500);
 
     const unsubscribe = useStore.subscribe((state, prevState) => {
+      // "Halloween Layers" sliders: apply to the live gain nodes right away
+      // instead of waiting for the next 500ms tick.
+      if (state.ambienceLevel !== prevState.ambienceLevel) applyAmbientDuck();
+      if (state.fxLevel !== prevState.fxLevel) applyFxLevel();
       // Beat Jump — an instant, no-restart nudge on the active deck. Only
       // meaningful for a real, currently-analyzed local track; silently
       // no-ops otherwise (matches loop-roll's own "untrustworthy data just
@@ -2682,6 +2819,10 @@ export function DualDeckStage() {
         }
       });
       ambientRunningRef.current = false;
+      ambientBusyRef.current = false;
+      fxLiveRef.current = null;
+      useStore.getState().setAmbienceActive(false);
+      useStore.getState().setFxPlaying(false);
       if (mashupRef.current?.tickIntervalId != null) {
         clearInterval(mashupRef.current.tickIntervalId);
       }

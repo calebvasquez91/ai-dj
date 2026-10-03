@@ -24,6 +24,12 @@ import {
 } from "@/lib/ai-dj";
 import { pickFallbackTransitionFx, type AiFxCandidate, type AiFxTrackProfile } from "@/lib/ai-fx";
 import { jsonInit, syncRequest } from "@/lib/syncRequest";
+import {
+  AMBIENCE_DEFAULT_LEVEL,
+  FX_DEFAULT_LEVEL,
+  clampAmbienceLevel,
+  clampFxLevel,
+} from "@/lib/layerMix";
 
 const MAX_HISTORY = 50;
 
@@ -118,6 +124,12 @@ interface PlayerState {
   /** Occasional mid-track FX (filter/riser builds, echo throws on breakdowns) — separate from transition FX, which always fire regardless of this setting. */
   ambienceEnabled: boolean;
   ambienceFrequency: AmbienceFrequency;
+  /** "Halloween Layers" sliders (Spooky Music only; in-memory, not persisted). `ambienceLevel` is the background loop's base volume (0–0.5, default 0.25) before DualDeckStage ducks it; `fxLevel` scales transition-FX loudness (0–1, default 0.7). The Music slider is the existing master `volume`. */
+  ambienceLevel: number;
+  fxLevel: number;
+  /** Live flags written by DualDeckStage for the "Ambience" / "FX Playing" indicator — true while the Halloween loop layer is running / an AI-picked transition FX is audibly playing. */
+  ambienceActive: boolean;
+  fxPlaying: boolean;
   /** Opportunistic tempo/key-matched dual-track mashup moments — a distinct, rarer "special moment" from ambience FX. */
   mashupEnabled: boolean;
 
@@ -247,6 +259,10 @@ interface PlayerState {
   setActiveTransitionShortWhy: (shortWhy: string | null) => void;
   setAmbienceEnabled: (enabled: boolean) => void;
   setAmbienceFrequency: (frequency: AmbienceFrequency) => void;
+  setAmbienceLevel: (level: number) => void;
+  setFxLevel: (level: number) => void;
+  setAmbienceActive: (active: boolean) => void;
+  setFxPlaying: (playing: boolean) => void;
   setMashupEnabled: (enabled: boolean) => void;
   setTrackPlayPreference: (trackId: string, preference: Track["playPreference"]) => void;
   /** Manual tags (e.g. "halloween", "spooky") — drives the Spooky Music system playlist's auto-membership. */
@@ -339,6 +355,10 @@ export const useStore = create<PlayerState>()(
       activeTransitionShortWhy: null,
       ambienceEnabled: true,
       ambienceFrequency: "occasional",
+      ambienceLevel: AMBIENCE_DEFAULT_LEVEL,
+      fxLevel: FX_DEFAULT_LEVEL,
+      ambienceActive: false,
+      fxPlaying: false,
       mashupEnabled: true,
 
       mixerPanelOpen: false,
@@ -709,6 +729,10 @@ export const useStore = create<PlayerState>()(
       setActiveTransitionShortWhy: (shortWhy) => set({ activeTransitionShortWhy: shortWhy }),
       setAmbienceEnabled: (enabled) => set({ ambienceEnabled: enabled }),
       setAmbienceFrequency: (frequency) => set({ ambienceFrequency: frequency }),
+      setAmbienceLevel: (level) => set({ ambienceLevel: clampAmbienceLevel(level) }),
+      setFxLevel: (level) => set({ fxLevel: clampFxLevel(level) }),
+      setAmbienceActive: (active) => set({ ambienceActive: active }),
+      setFxPlaying: (playing) => set({ fxPlaying: playing }),
       setMashupEnabled: (enabled) => set({ mashupEnabled: enabled }),
       // Only localLibrary is the source of truth for curation flags, but
       // patch every place a matching track object might already live so a
