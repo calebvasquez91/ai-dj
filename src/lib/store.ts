@@ -85,7 +85,7 @@ interface PlayerState {
   /** Beat Jump — a CDJ-style instant forward/back nudge, in a fixed beat count. Two independent counters (not one +/- field) so a rapid forward-then-back tap can never collide into "no change" — same shape as mixNowRequestId. */
   beatJumpForwardRequestId: number;
   /** Bumped by the player bar's FX button while Spooky Music is active; DualDeckStage plays a random spooky FX on each change. */
-  spookyFxRequestId: number;
+  fxRequestId: number;
   beatJumpBackRequestId: number;
   /** Vinyl Brake Stop, exposed as a direct manual cue — see triggerBackspin in DualDeckStage.tsx. */
   backspinRequestId: number;
@@ -269,7 +269,7 @@ interface PlayerState {
   setFxLevel: (level: number) => void;
   setAmbienceActive: (active: boolean) => void;
   setFxPlaying: (playing: boolean) => void;
-  requestSpookyFx: () => void;
+  requestFx: () => void;
   setMashupEnabled: (enabled: boolean) => void;
   setTrackPlayPreference: (trackId: string, preference: Track["playPreference"]) => void;
   /** Manual tags (e.g. "halloween", "spooky") — drives the Spooky Music system playlist's auto-membership. */
@@ -337,7 +337,7 @@ export const useStore = create<PlayerState>()(
       crossfadeOverrideSec: null,
       mixNowRequestId: 0,
       beatJumpForwardRequestId: 0,
-      spookyFxRequestId: 0,
+      fxRequestId: 0,
       beatJumpBackRequestId: 0,
       backspinRequestId: 0,
       reverseRequestId: 0,
@@ -746,7 +746,7 @@ export const useStore = create<PlayerState>()(
       setFxLevel: (level) => set({ fxLevel: clampFxLevel(level) }),
       setAmbienceActive: (active) => set({ ambienceActive: active }),
       setFxPlaying: (playing) => set({ fxPlaying: playing }),
-      requestSpookyFx: () => set((s) => ({ spookyFxRequestId: s.spookyFxRequestId + 1 })),
+      requestFx: () => set((s) => ({ fxRequestId: s.fxRequestId + 1 })),
       setMashupEnabled: (enabled) => set({ mashupEnabled: enabled }),
       // Only localLibrary is the source of truth for curation flags, but
       // patch every place a matching track object might already live so a

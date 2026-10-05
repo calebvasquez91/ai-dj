@@ -1,18 +1,18 @@
 /**
- * Spooky Music's random FX: the player bar's FX button, and the DJ dropping
- * them into the mix by itself. Pure decision logic (which FX, and whether a
- * moment calls for one right now) — the audio itself is played by
- * DualDeckStage.tsx, the same split ambience.ts uses.
+ * Random one-shot FX: the player bar's FX button, and (in Spooky Music) the
+ * DJ dropping them into the mix by itself. Pure decision logic (which FX,
+ * and whether a moment calls for one right now) — the audio itself is played
+ * by DualDeckStage.tsx, the same split ambience.ts uses.
  *
- * The pool is every FX tagged spooky/halloween (lib/fxAffinity.ts) except
- * "background" ones — those are the ambient loops the quiet bed is built
- * from — and anything too long to read as a hit.
+ * The pool is every sound in the "Effects" category of the FX Library,
+ * whatever its tags — categories like Background (the ambient loops),
+ * Transition, Loop and Vocal are left alone — minus anything too long to
+ * read as a hit.
  */
 
 import type { FxSound } from "@/types/music";
 import type { TrackAnalysis } from "@/lib/audio-analysis";
 import { detectBuild, type AmbienceFrequency } from "@/lib/ambience";
-import { hasHalloweenAffinity } from "@/lib/fxAffinity";
 import { FX_DEFAULT_LEVEL } from "@/lib/layerMix";
 
 /** Longer than this reads as a backing track, not an effect. */
@@ -37,18 +37,12 @@ const WILDCARD_CHANCE_PER_TICK: Record<AmbienceFrequency, number> = { off: 0, oc
 const DROP_LEAD_SEC = 0.5;
 const DROP_TAIL_SEC = 2;
 
-export function spookyFxPool(library: FxSound[]): FxSound[] {
-  return library.filter(
-    (fx) =>
-      fx.category !== "background" &&
-      hasHalloweenAffinity(fx.playlistAffinity) &&
-      fx.durationSec > 0 &&
-      fx.durationSec <= SPOOKY_FX_MAX_SEC
-  );
+export function effectsPool(library: FxSound[]): FxSound[] {
+  return library.filter((fx) => fx.category === "effect" && fx.durationSec > 0 && fx.durationSec <= SPOOKY_FX_MAX_SEC);
 }
 
 /** A random FX from the pool, never the one that just played unless it's the only one. `random` is injectable for tests. */
-export function pickSpookyFx(pool: FxSound[], lastId: string | null, random: () => number = Math.random): FxSound | null {
+export function pickRandomFx(pool: FxSound[], lastId: string | null, random: () => number = Math.random): FxSound | null {
   if (pool.length === 0) return null;
   const others = pool.filter((fx) => fx.id !== lastId);
   const choices = others.length > 0 ? others : pool;

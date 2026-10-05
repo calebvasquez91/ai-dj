@@ -8,8 +8,7 @@ import { TrackThumbnail } from "@/components/TrackThumbnail";
 import { Que } from "@/components/Que";
 import { genreFamilies } from "@/data/styles";
 import type { DjSetMode } from "@/lib/mix-engine";
-import { speakHypePhrase } from "@/lib/wordPlay";
-import { DecksIcon, MicIcon, MixerIcon, NextIcon, PauseIcon, PlayIcon, PreviousIcon, QueueIcon } from "@/components/Icons";
+import { DecksIcon, MixerIcon, NextIcon, PauseIcon, PlayIcon, PreviousIcon, QueueIcon } from "@/components/Icons";
 
 export const CROSSFADE_PRESETS = [5, 10, 15, 20, 30];
 
@@ -29,8 +28,7 @@ export function PlayerBar() {
   const volume = useStore((s) => s.volume);
   const setVolume = useStore((s) => s.setVolume);
   const autoDjEnabled = useStore((s) => s.autoDjEnabled);
-  const spooky = useStore((s) => s.activePlaylistTheme === "spooky");
-  const requestSpookyFx = useStore((s) => s.requestSpookyFx);
+  const requestFx = useStore((s) => s.requestFx);
   const setAutoDj = useStore((s) => s.setAutoDj);
   const currentTimeSec = useStore((s) => s.currentTimeSec);
   const requestSeek = useStore((s) => s.requestSeek);
@@ -163,16 +161,12 @@ export function PlayerBar() {
       <div className="flex flex-wrap items-center gap-x-1 gap-y-1 sm:gap-x-2 justify-between md:justify-end w-full md:w-auto shrink-0">
         <button
           type="button"
-          onClick={() => (spooky ? requestSpookyFx() : speakHypePhrase())}
+          onClick={() => requestFx()}
           className="btn-icon text-accent-purple hover:text-accent-pink"
-          aria-label={spooky ? "Spooky FX" : "Word Play"}
-          title={
-            spooky
-              ? "Spooky FX — play a random effect tagged spooky/halloween (replaces Word Play in Spooky Music)"
-              : "Word Play — speak a hype phrase now, DJ's call (uses your browser's text-to-speech; it plays independently of the music, not mixed through it)"
-          }
+          aria-label="FX"
+          title="FX — play a random sound from your FX Library's Effects category"
         >
-          {spooky ? <span aria-hidden="true" className="text-lg leading-none">🎃</span> : <MicIcon />}
+          <span aria-hidden="true" className="text-sm font-bold leading-none">FX</span>
         </button>
         <button
           type="button"
