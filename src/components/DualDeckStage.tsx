@@ -562,7 +562,20 @@ export function DualDeckStage() {
       // the compatibility scorer and mix engine already treat as neutral.
       if (track.source !== "local") continue;
       const state = useStore.getState();
-      if (state.trackAnalysis[track.id] || analyzingRef.current.has(track.id)) continue;
+      if (analyzingRef.current.has(track.id)) continue;
+      const existing = state.trackAnalysis[track.id];
+      if (existing) {
+        // Analysis persisted by an earlier session has no song map (src/lib/song-map.ts) and the server can't store
+        // one yet. Keep the persisted numbers exactly as they are and just add the map, silently, in the background.
+        // `undefined` = never tried; `null` = tried and nothing usable, so it isn't retried every time.
+        if (existing.songMap !== undefined) continue;
+        analyzingRef.current.add(track.id);
+        analyzeTrackFromUrl(track.sourceUrl)
+          .then((fresh) => useStore.getState().setTrackSongMap(track.id, fresh.songMap ?? null))
+          .catch(() => useStore.getState().setTrackSongMap(track.id, null))
+          .finally(() => analyzingRef.current.delete(track.id));
+        continue;
+      }
       analyzingRef.current.add(track.id);
       state.startAnalyzing(track.id);
       analyzeTrackFromUrl(track.sourceUrl)

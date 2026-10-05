@@ -22,6 +22,8 @@
  * gracefully instead of trusting a bad estimate.
  */
 
+import { buildSongMap, type SongMap } from "@/lib/song-map";
+
 export interface TrackAnalysis {
   bpm: number;
   bpmConfidence: number; // 0-1
@@ -36,6 +38,8 @@ export interface TrackAnalysis {
   buildDropPairs: { buildAtSec: number; dropAtSec: number }[];
   waveformPeaks: number[]; // compact 0-1 normalized peak array for waveform display
   fallback: boolean; // true if this used the neutral-BPM fallback path
+  /** Per-beat grid with downbeats, 8/16/32-bar phrase boundaries and coarse sections (src/lib/song-map.ts). Absent on the WASM fast path, on analyses loaded from older cache entries, and when no steady tempo could be found — callers must treat it as optional and fall back to bpm + beatGridOffsetSec. */
+  songMap?: SongMap | null;
 }
 
 const MIN_BPM = 60;
@@ -554,6 +558,13 @@ export function analyzeSamples(
   const buildDropPairs = findBuildDropPairs(envelope, envelopeRateHz);
   const waveformPeaks = downsampleForWaveform(envelope);
   const { key, confidence: keyConfidence } = estimateKey(samples, sampleRate, durationSec);
+  // The song map is an extra: if it throws for any reason the rest of the analysis must still be returned.
+  let songMap: SongMap | null = null;
+  try {
+    songMap = buildSongMap(samples, sampleRate, durationSec);
+  } catch {
+    songMap = null;
+  }
 
   return {
     bpm: usableBpm,
@@ -568,5 +579,6 @@ export function analyzeSamples(
     buildDropPairs,
     waveformPeaks,
     fallback: bpmConfidence < MIN_TEMPO_CONFIDENCE,
+    songMap,
   };
 }

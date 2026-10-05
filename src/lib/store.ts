@@ -230,6 +230,8 @@ interface PlayerState {
   addLocalTracks: (tracks: Track[]) => void;
   removeLocalTrack: (trackId: string) => Promise<void>;
   setTrackAnalysis: (trackId: string, analysis: TrackAnalysis) => void;
+  /** Adds (or marks as unavailable, with null) a track's song map without touching its persisted analysis. In-memory only — the server has no column for it yet, so each session recomputes it for tracks it plays. */
+  setTrackSongMap: (trackId: string, songMap: TrackAnalysis["songMap"]) => void;
   /**
    * Syncs a YouTube track's resolved bpm across every place a Track object
    * lives (mirrors setTrackPlayPreference's pattern) plus the trackAnalysis
@@ -691,12 +693,20 @@ export const useStore = create<PlayerState>()(
       },
       setTrackAnalysis: (trackId, analysis) => {
         set((s) => ({ trackAnalysis: { ...s.trackAnalysis, [trackId]: analysis } }));
-        // Cache it server-side so it's never recomputed for this track again.
-        void syncRequest(`/api/tracks/${trackId}`, jsonInit("PATCH", { analysis })).then((r) => {
+        // Cache it server-side so it's never recomputed for this track again. The song map stays out of the request:
+        // the server has nowhere to store it, so sending it would only be wasted upload.
+        const persistable: Partial<TrackAnalysis> = { ...analysis };
+        delete persistable.songMap;
+        void syncRequest(`/api/tracks/${trackId}`, jsonInit("PATCH", { analysis: persistable })).then((r) => {
           // Only a cache — the next session just recomputes it — so no toast.
           if (!r.ok) console.warn("Couldn't cache track analysis:", r.error);
         });
       },
+      setTrackSongMap: (trackId, songMap) =>
+        set((s) => {
+          const existing = s.trackAnalysis[trackId];
+          return existing ? { trackAnalysis: { ...s.trackAnalysis, [trackId]: { ...existing, songMap } } } : s;
+        }),
       setLyricalFingerprint: (trackId, fingerprint) => {
         set((s) => ({ trackLyricalFingerprints: { ...s.trackLyricalFingerprints, [trackId]: fingerprint } }));
         // Cache it server-side (fingerprint only, never the lyrics text) so

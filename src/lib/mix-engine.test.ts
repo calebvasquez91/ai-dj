@@ -811,3 +811,83 @@ describe("chooseTransition — varietyBias", () => {
     expect(withBias.id).not.toBe(top.id); // doubled penalty does
   });
 });
+
+// ---------------------------------------------------------------------------
+// Bar/phrase matching from the song map (src/lib/song-map.ts)
+// ---------------------------------------------------------------------------
+
+function makeSongMap(barSec: number, bars = 40): NonNullable<TrackAnalysis["songMap"]> {
+  const downbeats = Array.from({ length: bars }, (_, i) => +(i * barSec).toFixed(4));
+  return {
+    version: 1,
+    durationSec: bars * barSec,
+    bpm: (4 * 60) / barSec,
+    tempoConfidence: 0.6,
+    beatsPerBar: 4,
+    beats: [],
+    downbeatPhase: 0,
+    downbeatConfidence: 0.9,
+    downbeats,
+    phrases: {
+      bars8: downbeats.filter((_, i) => i % 8 === 0),
+      bars16: downbeats.filter((_, i) => i % 16 === 0),
+      bars32: downbeats.filter((_, i) => i % 32 === 0),
+      confidence: 0.5,
+    },
+    sections: [],
+  };
+}
+
+describe("planTransition with song maps", () => {
+  const bar = 1.875; // 128 BPM
+
+  it("starts the incoming track on a phrase boundary, on the same beat of the bar as the outgoing track", () => {
+    const plan = planTransition({
+      current: { track: makeTrack("a", 240), analysis: makeAnalysis({ bpm: 128, songMap: makeSongMap(bar) }) },
+      next: { track: makeTrack("b", 240), analysis: makeAnalysis({ bpm: 128, energyOnsetSec: 12.4, songMap: makeSongMap(bar) }) },
+      currentElapsedSec: bar * 10 + bar / 2, // half way through a bar = beat 3 of 4
+      forceTransitionId: "long-blend",
+    });
+    // raw entry 12.4 s -> phrase boundary at 15 s (within two bars) -> + half a bar
+    expect(plan.incomingEntryOffsetSec).toBeCloseTo(15 + bar / 2, 3);
+  });
+
+  it("keeps drop transitions on the nearest bar line instead of a distant phrase boundary", () => {
+    const plan = planTransition({
+      current: { track: makeTrack("a", 240), analysis: makeAnalysis({ bpm: 128, songMap: makeSongMap(bar) }) },
+      next: {
+        track: makeTrack("b", 240),
+        analysis: makeAnalysis({ bpm: 128, dropAtSec: 30, energyOnsetSec: 5, songMap: makeSongMap(bar) }),
+      },
+      currentElapsedSec: bar * 10,
+      forceTransitionId: "double-drop",
+    });
+    // raw = drop 30 s - window; the result is a bar line (multiple of 1.875), not forced onto an 8-bar phrase (multiples of 15)
+    const bars = plan.incomingEntryOffsetSec / bar;
+    expect(Math.abs(bars - Math.round(bars))).toBeLessThan(1e-3);
+    expect(plan.incomingEntryOffsetSec % 15).not.toBeCloseTo(0, 3);
+  });
+
+  it("falls back to the beat-grid logic unchanged when either track has no usable song map", () => {
+    const base = {
+      current: { track: makeTrack("a", 240), analysis: makeAnalysis({ bpm: 128 }) },
+      next: { track: makeTrack("b", 240), analysis: makeAnalysis({ bpm: 128, energyOnsetSec: 12.4 }) },
+      currentElapsedSec: 21.3,
+      forceTransitionId: "long-blend",
+    };
+    const without = planTransition(base);
+    const oneSided = planTransition({
+      ...base,
+      next: { ...base.next, analysis: { ...base.next.analysis, songMap: makeSongMap(bar) } },
+    });
+    expect(oneSided.incomingEntryOffsetSec).toBeCloseTo(without.incomingEntryOffsetSec, 6);
+    const untrusted = { ...makeSongMap(bar), downbeatConfidence: 0.05 };
+    const bothButUntrusted = planTransition({
+      current: { ...base.current, analysis: { ...base.current.analysis, songMap: untrusted } },
+      next: { ...base.next, analysis: { ...base.next.analysis, songMap: untrusted } },
+      currentElapsedSec: base.currentElapsedSec,
+      forceTransitionId: "long-blend",
+    });
+    expect(bothButUntrusted.incomingEntryOffsetSec).toBeCloseTo(without.incomingEntryOffsetSec, 6);
+  });
+});
