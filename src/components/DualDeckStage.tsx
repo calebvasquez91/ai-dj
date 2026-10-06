@@ -47,9 +47,11 @@ import { requestLoopPick } from "@/lib/loopApi";
 import {
   SPOOKY_FX_BASE_GAIN,
   SPOOKY_FX_CACHE_MAX,
+  SPOOKY_FX_MAX_SEC,
   decideSpookyFx,
-  pickSpookyFx,
-  spookyFxPool,
+  pickRandomFx,
+  effectsPool,
+  noEffectsReason,
   spookyMoment,
   type SpookyFxState,
 } from "@/lib/spookyFx";
@@ -268,7 +270,7 @@ const ECHO_WET_LEVEL = 0.6;
 // Its level is the "Ambience" slider (store.ambienceLevel, default 0.25)
 // times a duck ratio — see lib/layerMix.ts for the ducking rules.
 const AMBIENT_FADE_SEC = 1.5;
-/** After a mid-track ambience effect fires, the DJ's random spooky FX waits this long so the two don't stack. */
+/** After a mid-track ambience effect fires, the Spooky Music DJ's random effect waits this long so the two don't stack. */
 const AMBIENCE_STACK_GUARD_SEC = 8;
 const AMBIENT_CROSSFADE_LEAD_SEC = 2;
 
@@ -330,7 +332,7 @@ export function DualDeckStage() {
   // Several can overlap (back-to-back transitions). `audible` flips true when
   // the sound actually starts (it can be scheduled up to the window in), via
   // `timer`.
-  // Spooky FX (player-bar button + DJ moments): per-track decision memory, the
+  // Random effects (player-bar FX button + Spooky Music DJ moments): per-track decision memory, the
   // FX that played last, the one lined up (and pre-decoding) to play next, and
   // the sources currently sounding so teardown can stop them.
   // `failed` = files that wouldn't load this session (skipped from then on);
@@ -351,7 +353,7 @@ export function DualDeckStage() {
     poolMemo: null,
   });
   const spookyFxSourcesRef = useRef<Set<AudioBufferSourceNode>>(new Set());
-  // Decoded spooky FX (in-flight promises included), bounded — see decodeSpookyFx.
+  // Decoded random effects (in-flight promises included), bounded — see decodeSpookyFx.
   const spookyBuffersRef = useRef(new BoundedCache<Promise<AudioBuffer>>(SPOOKY_FX_CACHE_MAX));
   const fxLiveRef = useRef<
     Set<{ gain: GainNode; base: number; audible: boolean; timer: ReturnType<typeof setTimeout> | null }>
@@ -1168,25 +1170,25 @@ export function DualDeckStage() {
       });
     }
 
-    /** The spooky FX pool (lib/spookyFx.ts) minus any file that failed to load this session — memoized on the library so the 500ms tick doesn't re-filter it. */
-    function spookyPoolNow(): FxSound[] {
+    /** The Effects pool (lib/spookyFx.ts's effectsPool) minus any file that failed to load this session — memoized on the library so the 500ms tick doesn't re-filter it. */
+    function effectsPoolNow(): FxSound[] {
       const lined = spookyFxRef.current;
       const library = useStore.getState().fxLibrary;
       const memo = lined.poolMemo;
       if (memo && memo.library === library && memo.failedCount === lined.failed.size) return memo.pool;
-      const pool = spookyFxPool(library).filter((fx) => !lined.failed.has(fx.id));
+      const pool = effectsPool(library).filter((fx) => !lined.failed.has(fx.id));
       lined.poolMemo = { library, failedCount: lined.failed.size, pool };
       return pool;
     }
 
-    /** A spooky FX file that won't fetch/decode: never picked again this session, and not left lined up. */
+    /** An effect file that won't fetch/decode: never picked again this session, and not left lined up. */
     function markSpookyFxFailed(fx: FxSound) {
       const lined = spookyFxRef.current;
       lined.failed.add(fx.id);
       if (lined.next?.id === fx.id) lined.next = null;
     }
 
-    /** Fetches + decodes a spooky FX file. An in-flight decode is shared (a press that lands while the pre-decode is still running reuses it instead of fetching twice), and only the last few buffers are kept — decoded PCM is large, so "every file ever played" would grow without bound. */
+    /** Fetches + decodes an effect file. An in-flight decode is shared (a press that lands while the pre-decode is still running reuses it instead of fetching twice), and only the last few buffers are kept — decoded PCM is large, so "every file ever played" would grow without bound. */
     function decodeSpookyFx(ctx: AudioContext, url: string): Promise<AudioBuffer> {
       const cache = spookyBuffersRef.current;
       const existing = cache.get(url);
@@ -1204,19 +1206,19 @@ export function DualDeckStage() {
       return decoding;
     }
 
-    /** Picks — and starts decoding in the background — the spooky FX the next button press or DJ moment will play, so it lands without decode lag. Re-picks if the library changed and the lined-up one is gone. */
+    /** Picks — and starts decoding in the background — the effect the next button press or DJ moment will play, so it lands without decode lag. Re-picks if the library changed and the lined-up one is gone. */
     function prefetchSpookyFx() {
       const ctx = audioCtxRef.current;
-      if (!ctx || useStore.getState().activePlaylistTheme !== "spooky") return;
+      if (!ctx) return;
       const lined = spookyFxRef.current;
-      const pool = spookyPoolNow();
+      const pool = effectsPoolNow();
       if (lined.next && pool.some((fx) => fx.id === lined.next?.id)) return;
-      const fx = pickSpookyFx(pool, lined.lastFxId);
+      const fx = pickRandomFx(pool, lined.lastFxId);
       lined.next = fx;
       if (fx) decodeSpookyFx(ctx, fx.sourceUrl).catch(() => markSpookyFxFailed(fx));
     }
 
-    /** Records that a spooky FX just sounded — from the button, the DJ or the Word Play transition effect — so the DJ's own cooldown counts it and it doesn't pile another on straight after. */
+    /** Records that an effect just sounded — from the button, the DJ or the Word Play transition effect — so the DJ's own cooldown counts it and it doesn't pile another on straight after. */
     function markSpookyFxPlayed() {
       const track = useStore.getState().currentTrack;
       const el = deckEl(activeDeckRef.current);
@@ -1229,8 +1231,14 @@ export function DualDeckStage() {
       lined.state = { ...lined.state, lastPlayedSec: el.currentTime };
     }
 
-    /** Plays a random spooky-tagged FX (lib/spookyFx.ts's pool) through the master graph, scaled by the FX slider. "no-audio": the audio graph isn't up; "no-fx": nothing eligible; "failed": the file wouldn't load (and is skipped from now on). Used by the player-bar button, the DJ's random moments, and Spooky Music's replacement for the spoken Word Play transition effect. */
-    async function playSpookyFx(): Promise<"played" | "no-audio" | "no-fx" | "failed"> {
+    /** After a play: in Spooky Music (where the DJ may fire one any moment) decode the next one ahead of time; in other playlists only a button press plays one, so skip it rather than hold ~11 MB buffers for a press that may never come. */
+    function lineUpNextFx() {
+      if (useStore.getState().activePlaylistTheme === "spooky") prefetchSpookyFx();
+      else spookyFxRef.current.next = null;
+    }
+
+    /** Plays a random sound from the Effects category (lib/spookyFx.ts's effectsPool) through the master graph, scaled by the FX slider. "no-audio": the audio graph isn't up; "no-fx": nothing eligible; "failed": the file wouldn't load (and is skipped from now on). Used by the player-bar FX button (any playlist), the DJ's random moments in Spooky Music, and Spooky Music's replacement for the spoken Word Play transition effect. */
+    async function playRandomFx(): Promise<"played" | "no-audio" | "no-fx" | "failed"> {
       const ctx = audioCtxRef.current;
       const masterGain = masterGainRef.current;
       if (!ctx || !masterGain) return "no-audio";
@@ -1248,7 +1256,7 @@ export function DualDeckStage() {
         // A file that won't load never "played": keep the no-repeat rule pointed at the last real one, and line up a replacement.
         lined.lastFxId = previousFxId;
         markSpookyFxFailed(fx);
-        prefetchSpookyFx();
+        lineUpNextFx();
         return "failed";
       }
       if (audioCtxRef.current !== ctx) return "no-audio"; // torn down while decoding
@@ -1271,28 +1279,34 @@ export function DualDeckStage() {
       });
       source.start();
       markSpookyFxPlayed();
-      prefetchSpookyFx(); // line up the next one
+      lineUpNextFx();
       return "played";
     }
 
-    /** The player-bar FX button: a random spooky FX now, or a note on screen saying why not. */
-    async function onSpookyFxButton() {
+    /** The player-bar FX button: a random Effects sound now (in any playlist), or a note on screen saying why not. */
+    async function onFxButton() {
       const state = useStore.getState();
-      if (state.activePlaylistTheme !== "spooky") return;
       if (!state.fxLibraryLoaded) {
         state.reportSyncError("FX are still loading — try again in a moment.");
         return;
       }
-      if (spookyPoolNow().length === 0) {
-        state.reportSyncError('No spooky FX yet — tag FX "spooky, halloween" in the FX Library tab.');
+      if (effectsPoolNow().length === 0) {
+        const reason = noEffectsReason(state.fxLibrary);
+        state.reportSyncError(
+          reason === "none"
+            ? "No effects yet — upload sounds in the FX Library tab and set their category to Effects."
+            : reason === "unusable"
+              ? `Your Effects sounds are empty or longer than ${SPOOKY_FX_MAX_SEC}s — add shorter ones.`
+              : "None of your effects would load — check those files in the FX Library tab."
+        );
         return;
       }
-      const result = await playSpookyFx();
+      const result = await playRandomFx();
       if (result === "no-audio") state.reportSyncError("Press play first, then try the effect again.");
       else if (result === "failed") state.reportSyncError("Couldn't load that effect — try again.");
     }
 
-    /** Stops every spooky FX that is still sounding and drops the lined-up pick and cached buffers — effect teardown. */
+    /** Stops every random effect that is still sounding and drops the lined-up pick and cached buffers — effect teardown. */
     function stopSpookyFx() {
       spookyFxSourcesRef.current.forEach((source) => {
         try {
@@ -1498,10 +1512,11 @@ export function DualDeckStage() {
         // Fire-and-forget: SpeechSynthesis doesn't route through this
         // component's Web Audio graph, so it can't be volume-matched or
         // ducked under the music — it just speaks over whatever's playing.
-        // Spooky Music swaps the spoken phrase for a random spooky FX, same
-        // as the player bar's button (falls back to speech with none tagged).
-        if (useStore.getState().activePlaylistTheme === "spooky" && spookyPoolNow().length > 0) {
-          void playSpookyFx();
+        // Spooky Music swaps the spoken phrase for a random Effects-category
+        // sound (any tags), same as the player bar's button; with no Effects
+        // sounds it falls back to speech.
+        if (useStore.getState().activePlaylistTheme === "spooky" && effectsPoolNow().length > 0) {
+          void playRandomFx();
         } else {
           speakHypePhrase();
         }
@@ -2419,7 +2434,7 @@ export function DualDeckStage() {
       }
     }
 
-    /** The DJ dropping a random spooky FX into the mix on its own — mainly in a track's build-up and at its drop (a small chance elsewhere), gated by the same on/off + frequency setting as the other mid-track FX, never during a transition or other special move. */
+    /** In Spooky Music, the DJ dropping a random effect into the mix on its own — mainly in a track's build-up and at its drop (a small chance elsewhere), gated by the same on/off + frequency setting as the other mid-track FX, never during a transition or other special move. */
     function trySpookyFxMoment() {
       const state = useStore.getState();
       if (state.activePlaylistTheme !== "spooky") return;
@@ -2439,7 +2454,7 @@ export function DualDeckStage() {
         if (sinceAmbience >= 0 && sinceAmbience < AMBIENCE_STACK_GUARD_SEC) return;
       }
       prefetchSpookyFx();
-      if (!spookyFxRef.current.next) return; // nothing tagged to play
+      if (!spookyFxRef.current.next) return; // no Effects sounds to play
       if (spookyFxRef.current.trackId !== track.id) {
         spookyFxRef.current.trackId = track.id;
         spookyFxRef.current.state = { lastPlayedSec: null, lastRollSec: null };
@@ -2460,7 +2475,7 @@ export function DualDeckStage() {
       });
       // The cooldown (lastPlayedSec) is only recorded once an effect really sounds — markSpookyFxPlayed — so a file that fails to load doesn't burn it.
       spookyFxRef.current.state = { ...decision.state, lastPlayedSec: spookyFxRef.current.state.lastPlayedSec };
-      if (decision.play) void playSpookyFx();
+      if (decision.play) void playRandomFx();
     }
 
     /** Lazily builds (once) and returns one of the two ambient-background Web Audio slots, wired straight into the master graph. */
@@ -2950,7 +2965,7 @@ export function DualDeckStage() {
       // instead of waiting for the next 500ms tick.
       if (state.ambienceLevel !== prevState.ambienceLevel) applyAmbientDuck();
       if (state.fxLevel !== prevState.fxLevel) applyFxLevel();
-      if (state.spookyFxRequestId !== prevState.spookyFxRequestId) void onSpookyFxButton();
+      if (state.fxRequestId !== prevState.fxRequestId) void onFxButton();
       // Beat Jump — an instant, no-restart nudge on the active deck. Only
       // meaningful for a real, currently-analyzed local track; silently
       // no-ops otherwise (matches loop-roll's own "untrustworthy data just

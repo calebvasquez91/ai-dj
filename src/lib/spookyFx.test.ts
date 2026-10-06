@@ -7,8 +7,9 @@ import {
   SPOOKY_FX_BASE_GAIN,
   SPOOKY_FX_MAX_SEC,
   decideSpookyFx,
-  pickSpookyFx,
-  spookyFxPool,
+  pickRandomFx,
+  effectsPool,
+  noEffectsReason,
   spookyMoment,
   type SpookyFxState,
 } from "./spookyFx";
@@ -29,27 +30,29 @@ function fx(id: string, over: Partial<FxSound> = {}): FxSound {
   };
 }
 
-describe("spookyFxPool", () => {
-  it("keeps only FX tagged spooky or halloween", () => {
-    const pool = spookyFxPool([
-      fx("a"),
-      fx("b", { playlistAffinity: ["halloween"] }),
-      fx("c", { playlistAffinity: [] }),
-      fx("d", { playlistAffinity: ["christmas"] }),
+describe("effectsPool", () => {
+  it("keeps every sound in the Effects category, whatever its tags", () => {
+    const pool = effectsPool([
+      fx("tagged"),
+      fx("untagged", { playlistAffinity: [] }),
+      fx("other-tag", { playlistAffinity: ["christmas"] }),
     ]);
-    expect(pool.map((f) => f.id)).toEqual(["a", "b"]);
+    expect(pool.map((f) => f.id)).toEqual(["tagged", "untagged", "other-tag"]);
   });
 
-  it("leaves out background loops, whatever their tags", () => {
-    expect(spookyFxPool([fx("loop", { category: "background" })])).toEqual([]);
+  it("leaves out every other category, even when tagged spooky", () => {
+    expect(
+      effectsPool([
+        fx("loop-bg", { category: "background" }),
+        fx("trans", { category: "transition" }),
+        fx("loop", { category: "loop" }),
+        fx("vocal", { category: "vocal" }),
+      ])
+    ).toEqual([]);
   });
 
-  it("includes transition-category FX", () => {
-    expect(spookyFxPool([fx("t", { category: "transition" })])).toHaveLength(1);
-  });
-
-  it("drops FX that are empty or too long to read as an effect", () => {
-    const pool = spookyFxPool([
+  it("drops sounds that are empty or too long to read as an effect", () => {
+    const pool = effectsPool([
       fx("zero", { durationSec: 0 }),
       fx("long", { durationSec: SPOOKY_FX_MAX_SEC + 1 }),
       fx("edge", { durationSec: SPOOKY_FX_MAX_SEC }),
@@ -58,24 +61,41 @@ describe("spookyFxPool", () => {
   });
 });
 
-describe("pickSpookyFx", () => {
+describe("noEffectsReason", () => {
+  it("is null when something is playable", () => {
+    expect(noEffectsReason([fx("a")])).toBeNull();
+  });
+
+  it('is "none" for an empty library or one with no Effects sounds', () => {
+    expect(noEffectsReason([])).toBe("none");
+    expect(noEffectsReason([fx("bg", { category: "background" })])).toBe("none");
+  });
+
+  it('is "unusable" when Effects sounds exist but are all empty or too long', () => {
+    expect(
+      noEffectsReason([fx("zero", { durationSec: 0 }), fx("long", { durationSec: SPOOKY_FX_MAX_SEC + 1 })])
+    ).toBe("unusable");
+  });
+});
+
+describe("pickRandomFx", () => {
   const pool = [fx("a"), fx("b"), fx("c")];
 
   it("returns null for an empty pool", () => {
-    expect(pickSpookyFx([], null)).toBeNull();
+    expect(pickRandomFx([], null)).toBeNull();
   });
 
   it("never repeats the last one while others exist", () => {
-    for (let i = 0; i < 50; i++) expect(pickSpookyFx(pool, "b")?.id).not.toBe("b");
+    for (let i = 0; i < 50; i++) expect(pickRandomFx(pool, "b")?.id).not.toBe("b");
   });
 
   it("repeats the only FX rather than going silent", () => {
-    expect(pickSpookyFx([fx("a")], "a")?.id).toBe("a");
+    expect(pickRandomFx([fx("a")], "a")?.id).toBe("a");
   });
 
   it("can reach every other FX (uses the injected random)", () => {
-    expect(pickSpookyFx(pool, "a", () => 0)?.id).toBe("b");
-    expect(pickSpookyFx(pool, "a", () => 0.99)?.id).toBe("c");
+    expect(pickRandomFx(pool, "a", () => 0)?.id).toBe("b");
+    expect(pickRandomFx(pool, "a", () => 0.99)?.id).toBe("c");
   });
 });
 
