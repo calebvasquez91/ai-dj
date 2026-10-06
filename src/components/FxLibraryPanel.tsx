@@ -37,8 +37,10 @@ export function FxLibraryPanel() {
   const [uploading, setUploading] = useState(false);
   const [uploadError, setUploadError] = useState<string | null>(null);
   // On by default: Spooky Music only draws FX tagged spooky/halloween, so an
-  // untagged upload would silently never play there.
-  const [tagForSpooky, setTagForSpooky] = useState(true);
+  // untagged upload would silently never play there. Lives in the store so
+  // it isn't reset when this panel remounts on a tab switch.
+  const tagForSpooky = useStore((s) => s.tagNewFxForSpooky);
+  const setTagForSpooky = useStore((s) => s.setTagNewFxForSpooky);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const previewAudioRef = useRef<HTMLAudioElement | null>(null);
   const previewTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);

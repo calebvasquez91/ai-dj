@@ -102,7 +102,7 @@ function peakWindowAverage(peaks: number[], durationSec: number, fromSec: number
   return sum / (endIdx - startIdx);
 }
 
-function detectBuild(analysis: TrackAnalysis, durationSec: number, currentTimeSec: number): boolean {
+export function detectBuild(analysis: TrackAnalysis, durationSec: number, currentTimeSec: number): boolean {
   const { waveformPeaks, dropAtSec } = analysis;
   if (waveformPeaks.length === 0) {
     // No real energy envelope to read a rise from (no per-sample analysis
