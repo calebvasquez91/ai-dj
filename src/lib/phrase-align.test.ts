@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { alignEntryToBar, beatInBarAt, snapToDownbeatOrPhrase } from "./phrase-align";
+import { alignEntryToBar, beatInBarAt, songMapMatchesBpm, snapToDownbeatOrPhrase } from "./phrase-align";
 import type { SongMap } from "./song-map";
 
 /** A 120 BPM song: bars are 2 s long, 8-bar phrases every 16 s. */
@@ -76,7 +76,9 @@ describe("alignEntryToBar", () => {
 
   it("shifts the entry so both tracks are on the same beat of the bar", () => {
     // outgoing at 33 s: 0.5 bar (= beat 2 of 4) into the bar starting at 32; incoming base bar line 22 -> 22 + 0.5*2 s
-    expect(alignEntryToBar(map(), 21.2, map(), 33)).toBeCloseTo(23, 6);
+    // = 23 s, or the same beat one bar earlier (21 s), which is the one nearer the wanted 21.2 s
+    expect(alignEntryToBar(map(), 21.2, map(), 33)).toBeCloseTo(21, 6);
+    expect(alignEntryToBar(map(), 22.4, map(), 33)).toBeCloseTo(23, 6);
   });
 
   it("works across different tempos (the offset is a fraction of the incoming bar)", () => {
@@ -89,5 +91,42 @@ describe("alignEntryToBar", () => {
     expect(alignEntryToBar(map(), 20, null, 30)).toBeNull();
     expect(alignEntryToBar(null, 20, map(), 30)).toBeNull();
     expect(alignEntryToBar(map(), 20, map(), null)).toBeNull();
+  });
+});
+
+describe("songMapMatchesBpm", () => {
+  it("accepts a map whose tempo is within a few percent of the analysis tempo", () => {
+    expect(songMapMatchesBpm(map({ bpm: 120 }), 120)).toBe(true);
+    expect(songMapMatchesBpm(map({ bpm: 120 }), 123)).toBe(true);
+  });
+
+  it("rejects a different tempo, including an exact octave (the grids would drift apart)", () => {
+    expect(songMapMatchesBpm(map({ bpm: 75 }), 120)).toBe(false);
+    expect(songMapMatchesBpm(map({ bpm: 60 }), 120)).toBe(false);
+    expect(songMapMatchesBpm(map({ bpm: 240 }), 120)).toBe(false);
+  });
+
+  it("rejects a missing map or a missing analysis tempo", () => {
+    expect(songMapMatchesBpm(null, 120)).toBe(false);
+    expect(songMapMatchesBpm(map(), 0)).toBe(false);
+  });
+});
+
+describe("alignEntryToBar — nearest candidate", () => {
+  // 120 BPM map: bars are 2 s long. Outgoing is at 11.75 s = beat 3.5 of its bar, so the shift is 1.75 s.
+  const opts = { preferPhrase: false };
+
+  it("takes the same beat of the bar one bar earlier when that lands closer to the wanted entry", () => {
+    expect(alignEntryToBar(map(), 20, map(), 11.75, opts)).toBeCloseTo(19.75, 6); // 21.75 vs 19.75: earlier is closer to 20
+    expect(alignEntryToBar(map(), 18.2, map(), 11.75, opts)).toBeCloseTo(17.75, 6); // base 18: 19.75 vs 17.75
+  });
+
+  it("keeps the forward shift when that is the closer one", () => {
+    expect(alignEntryToBar(map(), 21, map(), 11.75, opts)).toBeCloseTo(21.75, 6); // base 20: 21.75 vs 19.75
+    expect(alignEntryToBar(map(), 19, map(), 11.75, opts)).toBeCloseTo(19.75, 6); // base 18: 19.75 vs 17.75
+  });
+
+  it("never steps back before the start of the track", () => {
+    expect(alignEntryToBar(map(), 0, map(), 1.9, opts)).toBeGreaterThanOrEqual(0);
   });
 });

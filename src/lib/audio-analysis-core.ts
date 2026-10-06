@@ -542,7 +542,9 @@ const MIN_TEMPO_CONFIDENCE = 0.15;
 export function analyzeSamples(
   samples: Float32Array,
   sampleRate: number,
-  durationSec: number
+  durationSec: number,
+  /** `songMap: false` skips the song map (the main-thread fallback does, so a slow device that already timed out in the worker doesn't block the UI for longer). The result's songMap is then undefined. */
+  options: { songMap?: boolean } = {}
 ): TrackAnalysis {
   const envelope = computeEnergyEnvelope(samples, sampleRate);
   const envelopeRateHz = 1 / ENVELOPE_HOP_SEC;
@@ -559,11 +561,13 @@ export function analyzeSamples(
   const waveformPeaks = downsampleForWaveform(envelope);
   const { key, confidence: keyConfidence } = estimateKey(samples, sampleRate, durationSec);
   // The song map is an extra: if it throws for any reason the rest of the analysis must still be returned.
-  let songMap: SongMap | null = null;
-  try {
-    songMap = buildSongMap(samples, sampleRate, durationSec);
-  } catch {
-    songMap = null;
+  let songMap: SongMap | null | undefined = options.songMap === false ? undefined : null;
+  if (options.songMap !== false) {
+    try {
+      songMap = buildSongMap(samples, sampleRate, durationSec);
+    } catch {
+      songMap = null;
+    }
   }
 
   return {

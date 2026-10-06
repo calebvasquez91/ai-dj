@@ -20,13 +20,15 @@
 import { analyzeSamples } from "@/lib/audio-analysis-core";
 
 interface AnalysisWorkerRequest {
+  /** Echoed back with the result so the caller can tell concurrent requests apart (see lib/workerCall.ts). */
+  id: number;
   samples: Float32Array;
   sampleRate: number;
   durationSec: number;
 }
 
 onmessage = (event: MessageEvent<AnalysisWorkerRequest>) => {
-  const { samples, sampleRate, durationSec } = event.data;
+  const { id, samples, sampleRate, durationSec } = event.data;
   const result = analyzeSamples(samples, sampleRate, durationSec);
-  postMessage(result);
+  postMessage({ id, result });
 };

@@ -871,22 +871,6 @@ export function buildSongMap(
 // Using a song map
 // ---------------------------------------------------------------------------
 
-/** The phrase boundary (8-, 16- or 32-bar) closest to `timeSec`; null when the map has none. */
-export function nearestPhraseBoundary(map: SongMap, timeSec: number, phraseBars: 8 | 16 | 32 = 8): number | null {
-  const list = phraseBars === 32 ? map.phrases.bars32 : phraseBars === 16 ? map.phrases.bars16 : map.phrases.bars8;
-  if (list.length === 0) return null;
-  let best = list[0];
-  for (const t of list) if (Math.abs(t - timeSec) < Math.abs(best - timeSec)) best = t;
-  return best;
-}
-
-/** The first phrase boundary at or after `timeSec`; null when there is none. */
-export function nextPhraseBoundary(map: SongMap, timeSec: number, phraseBars: 8 | 16 | 32 = 8): number | null {
-  const list = phraseBars === 32 ? map.phrases.bars32 : phraseBars === 16 ? map.phrases.bars16 : map.phrases.bars8;
-  for (const t of list) if (t >= timeSec - 1e-6) return t;
-  return null;
-}
-
 /** True when the map's downbeats and phrases are trustworthy enough to align a mix to. */
 export function isPhraseGridTrustworthy(map: SongMap | null | undefined): map is SongMap {
   return !!map && map.tempoConfidence >= 0.3 && map.downbeatConfidence >= 0.3 && map.downbeats.length >= 8;

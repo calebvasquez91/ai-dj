@@ -11,6 +11,9 @@
 
 import { isPhraseGridTrustworthy, type SongMap } from "@/lib/song-map";
 
+/** How far a song map's tempo may sit from the analysis tempo (as a fraction) and still count as the same tempo. */
+const BPM_AGREEMENT_TOLERANCE = 0.04;
+
 /** A phrase boundary within this many bars of the target wins over the nearest bar line. */
 const PHRASE_PREFERENCE_BARS = 2;
 
@@ -69,6 +72,17 @@ export function snapToDownbeatOrPhrase(
 }
 
 /**
+ * True when the map's tempo matches the track's analysed tempo (`TrackAnalysis.bpm`, which also drives the tempo
+ * sync and the incoming deck's playback rate). Bar matching measures time in the map's beats while the mix runs on
+ * the analysis tempo, so when the two disagree — an octave error in either, or the old analyser being wrong — the
+ * grids drift apart across the window. Callers should skip bar matching then and keep the beat-grid logic.
+ */
+export function songMapMatchesBpm(map: SongMap | null | undefined, analysisBpm: number): boolean {
+  if (!map || !(analysisBpm > 0) || !(map.bpm > 0)) return false;
+  return Math.abs(map.bpm / analysisBpm - 1) <= BPM_AGREEMENT_TOLERANCE;
+}
+
+/**
  * Where to start the incoming track: on one of its bar lines (or phrase boundary) near `rawEntrySec`, shifted
  * forward by the outgoing track's current beat-in-bar so both tracks are on the same beat of their bar at the
  * moment the mix begins. `preferPhrase: false` keeps to the nearest bar line (use it when the entry point has to
@@ -86,6 +100,10 @@ export function alignEntryToBar(
   const outBeat = beatInBarAt(outgoing, outgoingTimeSec);
   const base = snapToDownbeatOrPhrase(incoming, rawEntrySec, options);
   if (outBeat == null || base == null || !incoming) return null;
-  const i = barIndexAt(incoming, base);
-  return base + (outBeat / 4) * barLength(incoming, Math.max(0, i));
+  const len = barLength(incoming, Math.max(0, barIndexAt(incoming, base)));
+  const shifted = base + (outBeat / 4) * len;
+  // The same beat of the bar one bar earlier is just as aligned; take whichever lands closer to the wanted entry
+  // point, so the shift never pushes a drop (or any entry) up to a whole bar later than it needed to be.
+  const earlier = shifted - len;
+  return earlier >= 0 && Math.abs(earlier - rawEntrySec) < Math.abs(shifted - rawEntrySec) ? earlier : shifted;
 }

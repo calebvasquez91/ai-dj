@@ -6,8 +6,6 @@ import {
   fft,
   fillBeatGaps,
   isPhraseGridTrustworthy,
-  nearestPhraseBoundary,
-  nextPhraseBoundary,
   type SongMap,
 } from "./song-map";
 import { fMeasure, renderSynthSong, type SynthSection } from "./song-map.fixtures";
@@ -117,27 +115,8 @@ function fakeMap(over: Partial<SongMap> = {}): SongMap {
   };
 }
 
-describe("phrase helpers", () => {
+describe("isPhraseGridTrustworthy", () => {
   const map = fakeMap();
-
-  it("nearestPhraseBoundary picks the closest boundary of the requested phrase length", () => {
-    expect(nearestPhraseBoundary(map, 17.9, 8)).toBe(16);
-    expect(nearestPhraseBoundary(map, 30, 8)).toBe(32);
-    expect(nearestPhraseBoundary(map, 30, 16)).toBe(32);
-    expect(nearestPhraseBoundary(map, 40, 32)).toBe(64); // 32-bar phrases start at 0 s and 64 s in this fixture
-  });
-
-  it("nextPhraseBoundary is the first boundary at or after the time", () => {
-    expect(nextPhraseBoundary(map, 16, 8)).toBe(16);
-    expect(nextPhraseBoundary(map, 16.1, 8)).toBe(32);
-    expect(nextPhraseBoundary(map, 100, 8)).toBeNull();
-  });
-
-  it("returns null when the map has no boundaries of that length", () => {
-    const empty = fakeMap({ phrases: { bars8: [], bars16: [], bars32: [], confidence: 0 } });
-    expect(nearestPhraseBoundary(empty, 5)).toBeNull();
-    expect(nextPhraseBoundary(empty, 5)).toBeNull();
-  });
 
   it("isPhraseGridTrustworthy needs a steady tempo, a confident downbeat and enough bars", () => {
     expect(isPhraseGridTrustworthy(map)).toBe(true);

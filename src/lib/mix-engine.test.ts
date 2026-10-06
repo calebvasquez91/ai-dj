@@ -848,8 +848,9 @@ describe("planTransition with song maps", () => {
       currentElapsedSec: bar * 10 + bar / 2, // half way through a bar = beat 3 of 4
       forceTransitionId: "long-blend",
     });
-    // raw entry 12.4 s -> phrase boundary at 15 s (within two bars) -> + half a bar
-    expect(plan.incomingEntryOffsetSec).toBeCloseTo(15 + bar / 2, 3);
+    // raw entry 12.4 s -> phrase boundary at 15 s (within two bars) -> + half a bar (14.06 s, the same beat of the bar
+    // one bar earlier, is closer to the wanted 12.4 s than 15.94 s)
+    expect(plan.incomingEntryOffsetSec).toBeCloseTo(15 + bar / 2 - bar, 3);
   });
 
   it("keeps drop transitions on the nearest bar line instead of a distant phrase boundary", () => {
@@ -866,6 +867,39 @@ describe("planTransition with song maps", () => {
     const bars = plan.incomingEntryOffsetSec / bar;
     expect(Math.abs(bars - Math.round(bars))).toBeLessThan(1e-3);
     expect(plan.incomingEntryOffsetSec % 15).not.toBeCloseTo(0, 3);
+  });
+
+  it("lands a drop transition's entry within a bar of where the incoming drop needs it, whatever beat the outgoing track is on", () => {
+    for (const beatOfBar of [0, 1, 2, 3, 3.9]) {
+      const plan = planTransition({
+        current: { track: makeTrack("a", 240), analysis: makeAnalysis({ bpm: 128, songMap: makeSongMap(bar) }) },
+        next: {
+          track: makeTrack("b", 240),
+          analysis: makeAnalysis({ bpm: 128, dropAtSec: 60, energyOnsetSec: 5, songMap: makeSongMap(bar) }),
+        },
+        currentElapsedSec: bar * 10 + (beatOfBar / 4) * bar,
+        forceTransitionId: "double-drop",
+      });
+      expect(Math.abs(plan.incomingEntryOffsetSec - (60 - plan.windowSec))).toBeLessThanOrEqual(bar + 1e-6);
+    }
+  });
+
+  it("skips bar matching when a song map's tempo disagrees with the track's analysed tempo", () => {
+    const base = {
+      current: { track: makeTrack("a", 240), analysis: makeAnalysis({ bpm: 128 }) },
+      next: { track: makeTrack("b", 240), analysis: makeAnalysis({ bpm: 128, energyOnsetSec: 12.4 }) },
+      currentElapsedSec: 21.3,
+      forceTransitionId: "long-blend",
+    };
+    const without = planTransition(base);
+    // maps say 75 BPM (bar = 3.2 s) while the analysis says 128: the two grids can't both be right
+    const wrongTempoMap = makeSongMap(3.2);
+    const plan = planTransition({
+      ...base,
+      current: { ...base.current, analysis: { ...base.current.analysis, songMap: wrongTempoMap } },
+      next: { ...base.next, analysis: { ...base.next.analysis, songMap: wrongTempoMap } },
+    });
+    expect(plan.incomingEntryOffsetSec).toBeCloseTo(without.incomingEntryOffsetSec, 6);
   });
 
   it("falls back to the beat-grid logic unchanged when either track has no usable song map", () => {
