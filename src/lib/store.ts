@@ -84,7 +84,7 @@ interface PlayerState {
   mixNowRequestId: number;
   /** Beat Jump — a CDJ-style instant forward/back nudge, in a fixed beat count. Two independent counters (not one +/- field) so a rapid forward-then-back tap can never collide into "no change" — same shape as mixNowRequestId. */
   beatJumpForwardRequestId: number;
-  /** Bumped by the player bar's FX button while Spooky Music is active; DualDeckStage plays a random spooky FX on each change. */
+  /** Bumped by the player bar's FX button (any playlist); DualDeckStage plays a random Effects-category sound on each change. */
   fxRequestId: number;
   beatJumpBackRequestId: number;
   /** Vinyl Brake Stop, exposed as a direct manual cue — see triggerBackspin in DualDeckStage.tsx. */

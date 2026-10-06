@@ -9,6 +9,7 @@ import {
   decideSpookyFx,
   pickRandomFx,
   effectsPool,
+  noEffectsReason,
   spookyMoment,
   type SpookyFxState,
 } from "./spookyFx";
@@ -57,6 +58,23 @@ describe("effectsPool", () => {
       fx("edge", { durationSec: SPOOKY_FX_MAX_SEC }),
     ]);
     expect(pool.map((f) => f.id)).toEqual(["edge"]);
+  });
+});
+
+describe("noEffectsReason", () => {
+  it("is null when something is playable", () => {
+    expect(noEffectsReason([fx("a")])).toBeNull();
+  });
+
+  it('is "none" for an empty library or one with no Effects sounds', () => {
+    expect(noEffectsReason([])).toBe("none");
+    expect(noEffectsReason([fx("bg", { category: "background" })])).toBe("none");
+  });
+
+  it('is "unusable" when Effects sounds exist but are all empty or too long', () => {
+    expect(
+      noEffectsReason([fx("zero", { durationSec: 0 }), fx("long", { durationSec: SPOOKY_FX_MAX_SEC + 1 })])
+    ).toBe("unusable");
   });
 });
 

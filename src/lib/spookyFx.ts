@@ -19,10 +19,10 @@ import { FX_DEFAULT_LEVEL } from "@/lib/layerMix";
 export const SPOOKY_FX_MAX_SEC = 30;
 /** Level before the FX slider scales it (scaledFxGain) — the slider's own default, so the slider reads as the effect's level. */
 export const SPOOKY_FX_BASE_GAIN = FX_DEFAULT_LEVEL;
-/** How many decoded spooky FX buffers are kept (the lined-up next one plus a couple recent) — decoded PCM is ~11 MB for a 30s stereo clip. */
+/** How many decoded random-FX buffers are kept (the lined-up next one plus a couple recent) — decoded PCM is ~11 MB for a 30s stereo clip. */
 export const SPOOKY_FX_CACHE_MAX = 3;
 
-/** Min seconds of playback between two DJ-triggered spooky FX, by the ambience-frequency setting. */
+/** Min seconds of playback between two DJ-triggered random FX (Spooky Music), by the ambience-frequency setting. */
 const COOLDOWN_SEC: Record<AmbienceFrequency, number> = { off: Infinity, occasional: 45, frequent: 18 };
 /** Chance a build-up / drop moment actually gets an FX when it's rolled — rolled at most once per ROLL_INTERVAL_SEC so a 20s build isn't rolled every tick. */
 const MOMENT_CHANCE: Record<AmbienceFrequency, { build: number; drop: number }> = {
@@ -39,6 +39,12 @@ const DROP_TAIL_SEC = 2;
 
 export function effectsPool(library: FxSound[]): FxSound[] {
   return library.filter((fx) => fx.category === "effect" && fx.durationSec > 0 && fx.durationSec <= SPOOKY_FX_MAX_SEC);
+}
+
+/** Why the pool is empty, for the FX button's message: "none" = the library has no Effects sounds, "unusable" = it has some but every one is empty or too long, null = something is playable. */
+export function noEffectsReason(library: FxSound[]): "none" | "unusable" | null {
+  if (effectsPool(library).length > 0) return null;
+  return library.some((fx) => fx.category === "effect") ? "unusable" : "none";
 }
 
 /** A random FX from the pool, never the one that just played unless it's the only one. `random` is injectable for tests. */

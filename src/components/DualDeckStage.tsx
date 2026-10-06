@@ -47,9 +47,11 @@ import { requestLoopPick } from "@/lib/loopApi";
 import {
   SPOOKY_FX_BASE_GAIN,
   SPOOKY_FX_CACHE_MAX,
+  SPOOKY_FX_MAX_SEC,
   decideSpookyFx,
   pickRandomFx,
   effectsPool,
+  noEffectsReason,
   spookyMoment,
   type SpookyFxState,
 } from "@/lib/spookyFx";
@@ -268,7 +270,7 @@ const ECHO_WET_LEVEL = 0.6;
 // Its level is the "Ambience" slider (store.ambienceLevel, default 0.25)
 // times a duck ratio — see lib/layerMix.ts for the ducking rules.
 const AMBIENT_FADE_SEC = 1.5;
-/** After a mid-track ambience effect fires, the DJ's random spooky FX waits this long so the two don't stack. */
+/** After a mid-track ambience effect fires, the Spooky Music DJ's random effect waits this long so the two don't stack. */
 const AMBIENCE_STACK_GUARD_SEC = 8;
 const AMBIENT_CROSSFADE_LEAD_SEC = 2;
 
@@ -1229,6 +1231,12 @@ export function DualDeckStage() {
       lined.state = { ...lined.state, lastPlayedSec: el.currentTime };
     }
 
+    /** After a play: in Spooky Music (where the DJ may fire one any moment) decode the next one ahead of time; in other playlists only a button press plays one, so skip it rather than hold ~11 MB buffers for a press that may never come. */
+    function lineUpNextFx() {
+      if (useStore.getState().activePlaylistTheme === "spooky") prefetchSpookyFx();
+      else spookyFxRef.current.next = null;
+    }
+
     /** Plays a random sound from the Effects category (lib/spookyFx.ts's effectsPool) through the master graph, scaled by the FX slider. "no-audio": the audio graph isn't up; "no-fx": nothing eligible; "failed": the file wouldn't load (and is skipped from now on). Used by the player-bar FX button (any playlist), the DJ's random moments in Spooky Music, and Spooky Music's replacement for the spoken Word Play transition effect. */
     async function playRandomFx(): Promise<"played" | "no-audio" | "no-fx" | "failed"> {
       const ctx = audioCtxRef.current;
@@ -1248,7 +1256,7 @@ export function DualDeckStage() {
         // A file that won't load never "played": keep the no-repeat rule pointed at the last real one, and line up a replacement.
         lined.lastFxId = previousFxId;
         markSpookyFxFailed(fx);
-        prefetchSpookyFx();
+        lineUpNextFx();
         return "failed";
       }
       if (audioCtxRef.current !== ctx) return "no-audio"; // torn down while decoding
@@ -1271,7 +1279,7 @@ export function DualDeckStage() {
       });
       source.start();
       markSpookyFxPlayed();
-      prefetchSpookyFx(); // line up the next one
+      lineUpNextFx();
       return "played";
     }
 
@@ -1283,7 +1291,14 @@ export function DualDeckStage() {
         return;
       }
       if (effectsPoolNow().length === 0) {
-        state.reportSyncError("No effects yet — upload sounds in the FX Library tab and set their category to Effects.");
+        const reason = noEffectsReason(state.fxLibrary);
+        state.reportSyncError(
+          reason === "none"
+            ? "No effects yet — upload sounds in the FX Library tab and set their category to Effects."
+            : reason === "unusable"
+              ? `Your Effects sounds are empty or longer than ${SPOOKY_FX_MAX_SEC}s — add shorter ones.`
+              : "None of your effects would load — check those files in the FX Library tab."
+        );
         return;
       }
       const result = await playRandomFx();
@@ -1497,8 +1512,9 @@ export function DualDeckStage() {
         // Fire-and-forget: SpeechSynthesis doesn't route through this
         // component's Web Audio graph, so it can't be volume-matched or
         // ducked under the music — it just speaks over whatever's playing.
-        // Spooky Music swaps the spoken phrase for a random spooky FX, same
-        // as the player bar's button (falls back to speech with none tagged).
+        // Spooky Music swaps the spoken phrase for a random Effects-category
+        // sound (any tags), same as the player bar's button; with no Effects
+        // sounds it falls back to speech.
         if (useStore.getState().activePlaylistTheme === "spooky" && effectsPoolNow().length > 0) {
           void playRandomFx();
         } else {
