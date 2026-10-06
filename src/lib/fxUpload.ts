@@ -7,6 +7,8 @@ interface FxUploadMetadata {
   name: string;
   category: FxCategory;
   durationSec: number;
+  /** Playlist-affinity tags to create the FX with (e.g. lib/fxAffinity.ts's HALLOWEEN_AFFINITY); omitted = none. */
+  playlistAffinity?: string[];
 }
 
 export async function uploadFx(file: File, metadata: FxUploadMetadata): Promise<FxSound> {
@@ -27,6 +29,7 @@ async function uploadLocal(file: File, metadata: FxUploadMetadata): Promise<Resp
   formData.append("name", metadata.name);
   formData.append("category", metadata.category);
   formData.append("durationSec", String(metadata.durationSec));
+  formData.append("playlistAffinity", JSON.stringify(metadata.playlistAffinity ?? []));
   return fetch("/api/fx", { method: "POST", body: formData });
 }
 
@@ -44,6 +47,7 @@ async function uploadToBlob(file: File, metadata: FxUploadMetadata): Promise<Res
       fileName: file.name,
       category: metadata.category,
       durationSec: metadata.durationSec,
+      playlistAffinity: metadata.playlistAffinity ?? [],
       blobUrl: blob.url,
       mimeType: file.type,
     }),
