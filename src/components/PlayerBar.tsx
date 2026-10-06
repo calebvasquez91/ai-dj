@@ -158,7 +158,8 @@ export function PlayerBar() {
         </div>
       </div>
 
-      <div className="flex flex-wrap items-center gap-x-1 gap-y-1 sm:gap-x-2 justify-between md:justify-end w-full md:w-auto shrink-0">
+      {/* Own row below 850px: between ~768 and ~815px the transport column is narrower than its own buttons and Next would sit on top of FX. */}
+      <div className="flex flex-wrap items-center gap-x-1 gap-y-1 sm:gap-x-2 justify-between min-[850px]:justify-end w-full min-[850px]:w-auto shrink-0">
         <button
           type="button"
           onClick={() => requestFx()}
