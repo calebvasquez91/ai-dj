@@ -13,6 +13,7 @@ export {
   camelotForKey,
 } from "@/lib/audio-analysis-core";
 import { analyzeSamples, type TrackAnalysis } from "@/lib/audio-analysis-core";
+import { callWorker } from "@/lib/workerCall";
 
 function mixToMono(buffer: AudioBuffer): Float32Array {
   if (buffer.numberOfChannels === 1) return buffer.getChannelData(0);
@@ -148,32 +149,17 @@ function analyzeSamplesInWorker(
 ): Promise<TrackAnalysis | null> {
   const worker = getAnalysisWorker();
   if (!worker) return Promise.resolve(null);
-  return new Promise((resolve) => {
-    const timeoutId = setTimeout(() => {
-      cleanup();
-      resolve(null);
-    }, WORKER_ANALYSIS_TIMEOUT_MS);
-    function cleanup() {
-      clearTimeout(timeoutId);
-      worker!.removeEventListener("message", handleMessage);
-      worker!.removeEventListener("error", handleError);
-    }
-    function handleMessage(event: MessageEvent<TrackAnalysis>) {
-      cleanup();
-      resolve(event.data);
-    }
-    function handleError() {
-      cleanup();
-      resolve(null);
-    }
-    worker.addEventListener("message", handleMessage);
-    worker.addEventListener("error", handleError);
-    // Posting a copy (not `samples` itself) as a transferable keeps the
-    // caller's own array intact for the in-thread fallback path below,
-    // should the worker fail or time out.
-    const samplesCopy = samples.slice();
-    worker.postMessage({ samples: samplesCopy, sampleRate, durationSec }, [samplesCopy.buffer]);
-  });
+  // Posting a copy (not `samples` itself) as a transferable keeps the
+  // caller's own array intact for the in-thread fallback path below,
+  // should the worker fail or time out. Several analyses can be in flight
+  // at once, so each call is matched to its own reply (see workerCall.ts).
+  const samplesCopy = samples.slice();
+  return callWorker<TrackAnalysis>(
+    worker,
+    { samples: samplesCopy, sampleRate, durationSec },
+    [samplesCopy.buffer],
+    WORKER_ANALYSIS_TIMEOUT_MS
+  );
 }
 
 /** Browser-only: decodes a track URL and runs the analysis core on its samples (in a Web Worker when available, WASM when available, JS otherwise). */
@@ -189,7 +175,8 @@ export async function analyzeTrackFromUrl(url: string): Promise<TrackAnalysis> {
     const workerResult = await analyzeSamplesInWorker(samples, audioBuffer.sampleRate, audioBuffer.duration);
     if (workerResult) return workerResult;
     const wasmResult = await tryAnalyzeSamplesWasm(samples, audioBuffer.sampleRate, audioBuffer.duration);
-    return wasmResult ?? analyzeSamples(samples, audioBuffer.sampleRate, audioBuffer.duration);
+    // No song map here: the worker (which has it) already failed or timed out, and this runs on the main thread.
+    return wasmResult ?? analyzeSamples(samples, audioBuffer.sampleRate, audioBuffer.duration, { songMap: false });
   } finally {
     ctx.close();
   }

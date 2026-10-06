@@ -148,6 +148,8 @@ interface ActiveTempoRamp {
 
 /** How long the pre-transition tempo ramp takes — matches tempo-ramp's own MIN_WINDOW_SEC_BY_CATEGORY floor in mix-engine.ts. */
 const TEMPO_RAMP_PRE_WINDOW_SEC = 8;
+/** How many tracks past the playing one get a background song-map upgrade (see the analysis effect). */
+const SONG_MAP_UPGRADE_AHEAD = 2;
 /** Short fade at the <audio>-element/buffer-voice swap boundary (both directions) — belt-and-suspenders against a click even though both sides play identical content from the same position. */
 const TEMPO_RAMP_SWAP_FADE_SEC = 0.03;
 
@@ -303,6 +305,10 @@ export function DualDeckStage() {
   });
   const activeDeckRef = useRef<DeckId>("A");
   const analyzingRef = useRef<Set<string>>(new Set());
+  // Song-map upgrades of already-analysed tracks (see the analysis effect): one at a time, and only for the playing
+  // track and the next few. `songMapTick` re-runs the effect when one finishes so the next can start.
+  const songMapUpgradeBusyRef = useRef(false);
+  const [songMapTick, setSongMapTick] = useState(0);
   const lyricsFetchingRef = useRef<Set<string>>(new Set());
   const stemCheckingRef = useRef<Set<string>>(new Set());
   const aiPickRequestedForRef = useRef<string | null>(null);
@@ -601,24 +607,49 @@ export function DualDeckStage() {
   // decision is ready before Mix Now or an auto-transition needs it.
   useEffect(() => {
     const tracks = currentTrack ? [currentTrack, ...queue] : queue;
-    for (const track of tracks) {
+    for (const [index, track] of tracks.entries()) {
       // YouTube tracks have no fetchable/decodable audio buffer to
       // analyze — trackAnalysis simply never gets an entry for them, which
       // the compatibility scorer and mix engine already treat as neutral.
       if (track.source !== "local") continue;
       const state = useStore.getState();
-      if (state.trackAnalysis[track.id] || analyzingRef.current.has(track.id)) continue;
+      if (analyzingRef.current.has(track.id)) continue;
+      const existing = state.trackAnalysis[track.id];
+      if (existing) {
+        // Analysis persisted by an earlier session has no song map (src/lib/song-map.ts) and the server can't store
+        // one yet. Keep the persisted numbers exactly as they are and just add the map, silently, in the background.
+        // `undefined` = never tried; `null` = tried and nothing usable, so it isn't retried every time.
+        if (existing.songMap !== undefined) continue;
+        // Re-decodes the whole file just to get the map, so never for the whole queue at once: the playing track
+        // and the next few only, one at a time.
+        if (index > SONG_MAP_UPGRADE_AHEAD || songMapUpgradeBusyRef.current) continue;
+        songMapUpgradeBusyRef.current = true;
+        analyzingRef.current.add(track.id);
+        analyzeTrackFromUrl(track.sourceUrl)
+          .then((fresh) => useStore.getState().setTrackSongMap(track.id, fresh.songMap ?? null))
+          .catch(() => useStore.getState().setTrackSongMap(track.id, null))
+          .finally(() => {
+            analyzingRef.current.delete(track.id);
+            songMapUpgradeBusyRef.current = false;
+            setSongMapTick((tick) => tick + 1);
+          });
+        continue;
+      }
       analyzingRef.current.add(track.id);
       state.startAnalyzing(track.id);
+      // `songMap: null` ("tried, nothing usable") when the analysis came back without one (WASM/fallback paths):
+      // left undefined it would read as "never tried" and trigger a second full analysis of the same track.
       analyzeTrackFromUrl(track.sourceUrl)
-        .then((analysis) => useStore.getState().setTrackAnalysis(track.id, analysis))
-        .catch(() => useStore.getState().setTrackAnalysis(track.id, fallbackAnalysis()))
+        .then((analysis) =>
+          useStore.getState().setTrackAnalysis(track.id, analysis.songMap === undefined ? { ...analysis, songMap: null } : analysis)
+        )
+        .catch(() => useStore.getState().setTrackAnalysis(track.id, { ...fallbackAnalysis(), songMap: null }))
         .finally(() => {
           analyzingRef.current.delete(track.id);
           useStore.getState().stopAnalyzing(track.id);
         });
     }
-  }, [currentTrack, queue]);
+  }, [currentTrack, queue, songMapTick]);
 
   // Same reachability rule as the analysis effect above, for the lyrical
   // fingerprint (track-sequencing.ts's compatibility score) — a separate

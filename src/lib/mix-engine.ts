@@ -4,6 +4,7 @@ import { transitions, type TransitionCategory, type TransitionEntry } from "@/da
 import type { TrackAnalysis } from "@/lib/audio-analysis";
 import { resolveHotCues, upcomingDropCueAtSec } from "@/lib/hot-cues";
 import { snapToBeatGrid } from "@/lib/beat-grid";
+import { alignEntryToBar, songMapMatchesBpm } from "@/lib/phrase-align";
 import { estimateStructuralCues } from "@/lib/structural-estimate";
 
 export { snapToBeatGrid } from "@/lib/beat-grid";
@@ -849,15 +850,33 @@ export function planTransition({
     : rawEntryOffsetSec;
   const latestSensibleEntrySec = Math.max(0, next.track.durationSec - MIN_CROSSFADE_SEC);
 
-  // Phase-lock: snapping to the incoming track's own beat grid gets the
+  // Bar/phrase matching: when BOTH tracks have a trustworthy song map
+  // (src/lib/song-map.ts), start the incoming track on one of its bar lines
+  // — or an 8-bar phrase boundary — shifted so both tracks are on the same
+  // beat of the bar when the mix begins. This replaces the beat-level
+  // phase-lock below, which only guarantees the beats line up, not which
+  // beat of the bar. Drop transitions stay on the nearest bar line rather
+  // than a phrase boundary a couple of bars away, since they have to land
+  // the incoming drop at the end of the window. Anything the maps can't
+  // answer falls through to the beat-grid logic unchanged.
+  // Only when each map's tempo agrees with that track's analysed tempo (which drives tempo sync and playback rate).
+  const barAlignedEntrySec =
+    quantize &&
+    songMapMatchesBpm(next.analysis.songMap, next.analysis.bpm) &&
+    songMapMatchesBpm(current.analysis.songMap, current.analysis.bpm)
+    ? alignEntryToBar(next.analysis.songMap, rawEntryOffsetSec, current.analysis.songMap, currentElapsedSec, {
+        preferPhrase: transition.category !== "drop",
+      })
+    : null;
+  let entryOffsetSec = barAlignedEntrySec ?? baseEntryOffsetSec;
+  // Fallback phase-lock (no usable song maps): snapping to the incoming track's own beat grid gets the
   // tempo right, but says nothing about where the outgoing track currently
   // sits within ITS beat cycle — so the two downbeats can still land apart
   // even though both tracks are on-tempo. Nudge the entry point forward by
   // the outgoing track's current sub-beat phase (converted into incoming-
   // track-time via the rate the incoming deck starts at) so the two
   // downbeats actually coincide the moment the incoming track starts.
-  let entryOffsetSec = baseEntryOffsetSec;
-  if (quantize && currentElapsedSec != null && current.analysis.bpm > 0) {
+  if (barAlignedEntrySec == null && quantize && currentElapsedSec != null && current.analysis.bpm > 0) {
     const fromBeatLenSec = 60 / current.analysis.bpm;
     const fromPhaseSec =
       (((currentElapsedSec - current.analysis.beatGridOffsetSec) % fromBeatLenSec) + fromBeatLenSec) %
