@@ -18,6 +18,8 @@ import { CROSSFADE_PRESETS, DJ_MODES } from "@/components/PlayerBar";
 import { CloseIcon } from "@/components/Icons";
 import type { AmbienceFrequency } from "@/lib/ambience";
 import { HalloweenLayers } from "@/components/HalloweenLayers";
+import { EnergyGraph } from "@/components/EnergyGraph";
+import { resampleBuckets } from "@/lib/resample";
 import type { Track, DeckId } from "@/types/music";
 
 const PICKABLE_TRANSITIONS = transitions.filter((t) => t.executable);
@@ -59,13 +61,7 @@ function Waveform({
   }, [hasPeaks]);
   const bars = useMemo(() => {
     if (!fitCount || fitCount >= peaks.length) return peaks;
-    return Array.from({ length: fitCount }, (_, i) => {
-      const start = Math.floor((i * peaks.length) / fitCount);
-      const end = Math.max(start + 1, Math.floor(((i + 1) * peaks.length) / fitCount));
-      let max = 0;
-      for (let j = start; j < end; j++) max = Math.max(max, peaks[j]);
-      return max;
-    });
+    return resampleBuckets(peaks, fitCount, "max");
   }, [peaks, fitCount]);
 
   if (peaks.length === 0) {
@@ -177,6 +173,7 @@ function DeckCard({
         )}
       </div>
       {track.source === "youtube" && <TapTempoControl key={track.id} trackId={track.id} />}
+      <EnergyGraph peaks={analysis?.waveformPeaks ?? []} progressRatio={progressRatio} />
       <Waveform peaks={analysis?.waveformPeaks ?? []} progressRatio={progressRatio} markerRatio={markerRatio} spooky={spooky} />
       {hotCues && currentTimeSec != null && (
         <HotCuePads trackId={track.id} slots={hotCues} currentTimeSec={currentTimeSec} />

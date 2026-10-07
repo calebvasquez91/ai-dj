@@ -29,6 +29,7 @@ export function PlayerBar() {
   const setVolume = useStore((s) => s.setVolume);
   const autoDjEnabled = useStore((s) => s.autoDjEnabled);
   const requestFx = useStore((s) => s.requestFx);
+  const fxLayerActive = useStore((s) => s.fxLayerActive);
   const setAutoDj = useStore((s) => s.setAutoDj);
   const currentTimeSec = useStore((s) => s.currentTimeSec);
   const requestSeek = useStore((s) => s.requestSeek);
@@ -163,9 +164,18 @@ export function PlayerBar() {
         <button
           type="button"
           onClick={() => requestFx()}
-          className="btn-icon text-accent-purple hover:text-accent-pink"
+          aria-pressed={fxLayerActive}
+          className={`btn-icon transition-all ${
+            fxLayerActive
+              ? "bg-accent-purple text-white shadow-[0_0_12px_var(--accent-purple)]"
+              : "text-accent-purple/60 hover:text-accent-pink"
+          }`}
           aria-label="FX"
-          title="FX — play a random sound from your FX Library's Effects category"
+          title={
+            fxLayerActive
+              ? "FX playing — press again to stop it"
+              : "FX — play a random sound from your FX Library's Effects category (press again while it plays to stop it)"
+          }
         >
           <span aria-hidden="true" className="text-sm font-bold leading-none">FX</span>
         </button>
