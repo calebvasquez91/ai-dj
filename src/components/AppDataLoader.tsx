@@ -13,6 +13,7 @@ export function AppDataLoader() {
     void useStore.getState().loadLibrary();
     void useStore.getState().loadPlaylists();
     void useStore.getState().loadFxLibrary();
+    useStore.getState().loadAutoFx();
   }, []);
 
   return null;

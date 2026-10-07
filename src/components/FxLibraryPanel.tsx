@@ -5,6 +5,7 @@ import { useStore } from "@/lib/store";
 import { formatTime } from "@/lib/format";
 import { HALLOWEEN_AFFINITY, hasHalloweenAffinity, withHalloweenAffinity } from "@/lib/fxAffinity";
 import { PlayIcon, PlusIcon, CloseIcon } from "@/components/Icons";
+import { effectsPool } from "@/lib/spookyFx";
 import type { FxCategory, FxSound } from "@/types/music";
 
 const CATEGORY_FILTERS: { value: FxCategory | "all"; label: string }[] = [
@@ -20,6 +21,56 @@ const PREVIEW_MAX_SEC = 5;
 
 function parseFxFileName(fileName: string): string {
   return fileName.replace(/\.[^/.]+$/, "");
+}
+
+/** Auto FX: fire an effect by itself when the playing track's energy enters a peak or a valley (lib/autoFx.ts). Off by default; the choice is saved in this browser. */
+function AutoFxControls() {
+  const autoFx = useStore((s) => s.autoFx);
+  const setAutoFx = useStore((s) => s.setAutoFx);
+  const fxLibrary = useStore((s) => s.fxLibrary);
+  const effects = useMemo(() => effectsPool(fxLibrary), [fxLibrary]);
+  const selectClass = "min-w-0 flex-1 text-[10px] rounded bg-surface-hover border border-border/10 px-1.5 py-1.5 outline-none";
+  const options = (
+    <>
+      <option value="none">None</option>
+      <option value="random">Random effect</option>
+      {effects.map((fx) => (
+        <option key={fx.id} value={fx.id}>
+          {fx.name}
+        </option>
+      ))}
+    </>
+  );
+  return (
+    <div className="flex flex-col gap-2 rounded-md border border-border/10 p-2">
+      <label className="flex items-start gap-2 text-xs text-muted cursor-pointer">
+        <input
+          type="checkbox"
+          checked={autoFx.enabled}
+          onChange={(e) => setAutoFx({ enabled: e.target.checked })}
+          className="mt-0.5 accent-accent-purple"
+        />
+        <span>
+          Auto FX at energy peaks &amp; valleys
+          <span className="block text-[10px]">Plays an effect when a track&apos;s energy rises into a peak or drops into a valley (see the Energy graph on the decks).</span>
+        </span>
+      </label>
+      <div className="flex items-center gap-2">
+        <label className="flex flex-1 min-w-0 flex-col gap-0.5 text-[10px] text-muted">
+          Peak
+          <select value={autoFx.peakFx} onChange={(e) => setAutoFx({ peakFx: e.target.value })} aria-label="Effect for energy peaks" className={selectClass}>
+            {options}
+          </select>
+        </label>
+        <label className="flex flex-1 min-w-0 flex-col gap-0.5 text-[10px] text-muted">
+          Valley
+          <select value={autoFx.valleyFx} onChange={(e) => setAutoFx({ valleyFx: e.target.value })} aria-label="Effect for energy valleys" className={selectClass}>
+            {options}
+          </select>
+        </label>
+      </div>
+    </div>
+  );
 }
 
 /** The FX Library tab inside QueuePanel — upload, browse/filter/search, preview, and hand-edit metadata for FX sounds (spec #1-3, #6). */
@@ -162,6 +213,8 @@ export function FxLibraryPanel() {
           <span className="block text-[10px]">Tags them &quot;spooky, halloween&quot; so Spooky Music can pick them.</span>
         </span>
       </label>
+
+      <AutoFxControls />
 
       {uploadError && (
         <p role="alert" className="px-1 text-xs text-accent-pink break-words">

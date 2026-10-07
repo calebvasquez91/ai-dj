@@ -31,6 +31,7 @@ import {
   clampAmbienceLevel,
   clampFxLevel,
 } from "@/lib/layerMix";
+import { AUTO_FX_DEFAULTS, loadAutoFxSettings, saveAutoFxSettings, type AutoFxSettings } from "@/lib/autoFxSettings";
 
 const MAX_HISTORY = 50;
 
@@ -133,6 +134,10 @@ interface PlayerState {
   /** Live flags written by DualDeckStage for the "Ambience" / "FX Playing" indicator — true while the Halloween loop layer is running / an AI-picked transition FX is audibly playing. */
   ambienceActive: boolean;
   fxPlaying: boolean;
+  /** True while the player-bar FX button's sound is playing (or loading): the button glows, and pressing it again stops the sound. Written by DualDeckStage. */
+  fxLayerActive: boolean;
+  /** Auto FX: fire a chosen effect when playback enters an energy peak or valley (lib/autoFx.ts). Saved in localStorage. */
+  autoFx: AutoFxSettings;
   /** Opportunistic tempo/key-matched dual-track mashup moments — a distinct, rarer "special moment" from ambience FX. */
   mashupEnabled: boolean;
 
@@ -271,6 +276,10 @@ interface PlayerState {
   setFxLevel: (level: number) => void;
   setAmbienceActive: (active: boolean) => void;
   setFxPlaying: (playing: boolean) => void;
+  setFxLayerActive: (active: boolean) => void;
+  setAutoFx: (patch: Partial<AutoFxSettings>) => void;
+  /** Reads the saved Auto FX settings (browser only; called once on app load). */
+  loadAutoFx: () => void;
   requestFx: () => void;
   setMashupEnabled: (enabled: boolean) => void;
   setTrackPlayPreference: (trackId: string, preference: Track["playPreference"]) => void;
@@ -372,6 +381,8 @@ export const useStore = create<PlayerState>()(
       fxLevel: FX_DEFAULT_LEVEL,
       ambienceActive: false,
       fxPlaying: false,
+      fxLayerActive: false,
+      autoFx: AUTO_FX_DEFAULTS,
       mashupEnabled: true,
 
       mixerPanelOpen: false,
@@ -756,6 +767,13 @@ export const useStore = create<PlayerState>()(
       setFxLevel: (level) => set({ fxLevel: clampFxLevel(level) }),
       setAmbienceActive: (active) => set({ ambienceActive: active }),
       setFxPlaying: (playing) => set({ fxPlaying: playing }),
+      setFxLayerActive: (active) => set({ fxLayerActive: active }),
+      setAutoFx: (patch) => {
+        const autoFx = { ...get().autoFx, ...patch };
+        set({ autoFx });
+        saveAutoFxSettings(autoFx);
+      },
+      loadAutoFx: () => set({ autoFx: loadAutoFxSettings() }),
       requestFx: () => set((s) => ({ fxRequestId: s.fxRequestId + 1 })),
       setMashupEnabled: (enabled) => set({ mashupEnabled: enabled }),
       // Only localLibrary is the source of truth for curation flags, but

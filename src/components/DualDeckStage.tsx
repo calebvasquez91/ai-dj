@@ -42,6 +42,8 @@ import {
   type AmbientDuckState,
 } from "@/lib/layerMix";
 import { BoundedCache } from "@/lib/boundedCache";
+import { INITIAL_AUTO_FX_STATE, decideAutoFx, type AutoFxState } from "@/lib/autoFx";
+import { energyProfileFromPeaks } from "@/lib/energyProfile";
 import { hasHalloweenAffinity } from "@/lib/fxAffinity";
 import { requestLoopPick } from "@/lib/loopApi";
 import {
@@ -148,6 +150,8 @@ interface ActiveTempoRamp {
 
 /** How long the pre-transition tempo ramp takes — matches tempo-ramp's own MIN_WINDOW_SEC_BY_CATEGORY floor in mix-engine.ts. */
 const TEMPO_RAMP_PRE_WINDOW_SEC = 8;
+/** How long the FX layer's sound takes to fade out when the FX button is pressed again, or another effect replaces it. */
+const FX_STOP_FADE_SEC = 0.2;
 /** How many tracks past the playing one get a background song-map upgrade (see the analysis effect). */
 const SONG_MAP_UPGRADE_AHEAD = 2;
 /** Short fade at the <audio>-element/buffer-voice swap boundary (both directions) — belt-and-suspenders against a click even though both sides play identical content from the same position. */
@@ -364,6 +368,22 @@ export function DualDeckStage() {
   const fxLiveRef = useRef<
     Set<{ gain: GainNode; base: number; audible: boolean; timer: ReturnType<typeof setTimeout> | null }>
   >(new Set());
+  // The ONE dedicated FX layer (player-bar FX button, Auto FX, DJ moments): the sound playing now, so a second press
+  // can fade it out and a new sound can replace it. `fxPendingRef` = a sound is still decoding; `fxPressTokenRef`
+  // identifies the latest request so a press that cancels a still-decoding one makes it stand down.
+  const fxLayerRef = useRef<{
+    source: AudioBufferSourceNode;
+    gain: GainNode;
+    live: { gain: GainNode; base: number; audible: boolean; timer: ReturnType<typeof setTimeout> | null };
+  } | null>(null);
+  const fxPendingRef = useRef(false);
+  const fxPressTokenRef = useRef(0);
+  // Auto FX (lib/autoFx.ts): the peak/valley tracking state and the current track's energy profile (recomputed when its waveform data changes).
+  const autoFxRef = useRef<{ state: AutoFxState; peaks: number[] | null; profile: number[] }>({
+    state: INITIAL_AUTO_FX_STATE,
+    peaks: null,
+    profile: [],
+  });
   // Pending `el.pause()` timeouts scheduled by stopAmbientLayer/the
   // crossfade-out below, keyed per slot — must be cancelled whenever that
   // same slot is about to be (re)started, or a stale timeout can pause
@@ -1199,6 +1219,15 @@ export function DualDeckStage() {
         fxLiveRef.current.delete(live);
         syncFxPlaying();
       });
+      return live;
+    }
+
+    /** Stops tracking a live FX that is being faded out: the FX slider must not snap its gain back mid-fade. */
+    function untrackLiveFx(live: { timer: ReturnType<typeof setTimeout> | null }) {
+      if (live.timer != null) clearTimeout(live.timer);
+      live.timer = null;
+      fxLiveRef.current.delete(live as never);
+      syncFxPlaying();
     }
 
     /** The Effects pool (lib/spookyFx.ts's effectsPool) minus any file that failed to load this session — memoized on the library so the 500ms tick doesn't re-filter it. */
@@ -1269,10 +1298,9 @@ export function DualDeckStage() {
     }
 
     /** Plays a random sound from the Effects category (lib/spookyFx.ts's effectsPool) through the master graph, scaled by the FX slider. "no-audio": the audio graph isn't up; "no-fx": nothing eligible; "failed": the file wouldn't load (and is skipped from now on). Used by the player-bar FX button (any playlist), the DJ's random moments in Spooky Music, and Spooky Music's replacement for the spoken Word Play transition effect. */
-    async function playRandomFx(): Promise<"played" | "no-audio" | "no-fx" | "failed"> {
+    async function playRandomFx(): Promise<"played" | "no-audio" | "no-fx" | "failed" | "cancelled"> {
       const ctx = audioCtxRef.current;
-      const masterGain = masterGainRef.current;
-      if (!ctx || !masterGain) return "no-audio";
+      if (!ctx || !masterGainRef.current) return "no-audio";
       prefetchSpookyFx();
       const lined = spookyFxRef.current;
       const fx = lined.next;
@@ -1280,27 +1308,76 @@ export function DualDeckStage() {
       lined.next = null;
       const previousFxId = lined.lastFxId;
       lined.lastFxId = fx.id;
-      let buffer: AudioBuffer;
-      try {
-        buffer = await decodeSpookyFx(ctx, fx.sourceUrl);
-      } catch {
+      const result = await startFxSound(fx);
+      if (result === "failed") {
         // A file that won't load never "played": keep the no-repeat rule pointed at the last real one, and line up a replacement.
         lined.lastFxId = previousFxId;
         markSpookyFxFailed(fx);
         lineUpNextFx();
+      } else if (result === "played") {
+        markSpookyFxPlayed();
+        lineUpNextFx();
+      } else {
+        lined.lastFxId = previousFxId; // cancelled / no audio: it never sounded
+      }
+      return result;
+    }
+
+    /** Plays one specific FX sound (Auto FX's assigned peak/valley effect) on the FX layer. A sound that isn't in the library any more is skipped. */
+    async function playFxById(id: string): Promise<"played" | "no-audio" | "no-fx" | "failed" | "cancelled"> {
+      const fx = useStore.getState().fxLibrary.find((f) => f.id === id);
+      if (!fx || fx.durationSec <= 0) return "no-fx";
+      const result = await startFxSound(fx);
+      if (result === "failed") markSpookyFxFailed(fx);
+      else if (result === "played") markSpookyFxPlayed();
+      return result;
+    }
+
+    /** The one FX layer: decodes `fx`, fades out whatever the layer is playing (0.2 s) and then starts it, through the master graph scaled by the FX slider. "cancelled" = the button was pressed again while it was still decoding. */
+    async function startFxSound(fx: FxSound): Promise<"played" | "no-audio" | "failed" | "cancelled"> {
+      const ctx = audioCtxRef.current;
+      const masterGain = masterGainRef.current;
+      if (!ctx || !masterGain) return "no-audio";
+      const token = ++fxPressTokenRef.current;
+      fxPendingRef.current = true;
+      useStore.getState().setFxLayerActive(true);
+      let buffer: AudioBuffer;
+      try {
+        buffer = await decodeSpookyFx(ctx, fx.sourceUrl);
+      } catch {
+        if (token === fxPressTokenRef.current) {
+          fxPendingRef.current = false;
+          if (!fxLayerRef.current) useStore.getState().setFxLayerActive(false);
+        }
         return "failed";
       }
-      if (audioCtxRef.current !== ctx) return "no-audio"; // torn down while decoding
+      if (token !== fxPressTokenRef.current) return "cancelled";
+      fxPendingRef.current = false;
+      if (audioCtxRef.current !== ctx) {
+        useStore.getState().setFxLayerActive(false);
+        return "no-audio"; // torn down while decoding
+      }
+      // Only one FX at a time: fade the current one out first, then start this one as that fade ends.
+      const replacing = fxLayerRef.current != null;
+      if (replacing) stopFxLayer(FX_STOP_FADE_SEC);
+      const delaySec = replacing ? FX_STOP_FADE_SEC : 0;
       const source = ctx.createBufferSource();
       source.buffer = buffer;
       const gain = ctx.createGain();
       source.connect(gain);
       gain.connect(masterGain);
       gain.gain.value = scaledFxGain(SPOOKY_FX_BASE_GAIN, useStore.getState().fxLevel);
-      trackLiveFx(source, gain, SPOOKY_FX_BASE_GAIN, 0);
+      const live = trackLiveFx(source, gain, SPOOKY_FX_BASE_GAIN, delaySec);
+      const layer = { source, gain, live };
+      fxLayerRef.current = layer;
+      useStore.getState().setFxLayerActive(true);
       spookyFxSourcesRef.current.add(source);
       source.addEventListener("ended", () => {
         spookyFxSourcesRef.current.delete(source);
+        if (fxLayerRef.current === layer) {
+          fxLayerRef.current = null;
+          useStore.getState().setFxLayerActive(false);
+        }
         try {
           source.disconnect();
           gain.disconnect();
@@ -1308,15 +1385,43 @@ export function DualDeckStage() {
           // already disconnected — harmless
         }
       });
-      source.start();
-      markSpookyFxPlayed();
-      lineUpNextFx();
+      source.start(ctx.currentTime + delaySec);
       return "played";
+    }
+
+    /** Fades the FX layer's sound out (default 0.2 s) and frees the layer; with no sound playing it just clears the button state. */
+    function stopFxLayer(fadeSec = FX_STOP_FADE_SEC) {
+      const layer = fxLayerRef.current;
+      fxLayerRef.current = null;
+      useStore.getState().setFxLayerActive(false);
+      if (!layer) return;
+      untrackLiveFx(layer.live);
+      const ctx = audioCtxRef.current;
+      try {
+        if (!ctx || fadeSec <= 0) {
+          layer.source.stop();
+          return;
+        }
+        const now = ctx.currentTime;
+        layer.gain.gain.cancelScheduledValues(now);
+        layer.gain.gain.setValueAtTime(layer.gain.gain.value, now);
+        layer.gain.gain.linearRampToValueAtTime(0, now + fadeSec);
+        layer.source.stop(now + fadeSec + 0.02);
+      } catch {
+        // already stopped — harmless
+      }
     }
 
     /** The player-bar FX button: a random Effects sound now (in any playlist), or a note on screen saying why not. */
     async function onFxButton() {
       const state = useStore.getState();
+      // Toggle: pressing FX while its sound is playing (or still loading) stops it with a short fade instead of stacking another.
+      if (fxLayerRef.current || fxPendingRef.current) {
+        fxPressTokenRef.current++; // makes a still-decoding request stand down
+        fxPendingRef.current = false;
+        stopFxLayer(FX_STOP_FADE_SEC);
+        return;
+      }
       if (!state.fxLibraryLoaded) {
         state.reportSyncError("FX are still loading — try again in a moment.");
         return;
@@ -1337,6 +1442,35 @@ export function DualDeckStage() {
       else if (result === "failed") state.reportSyncError("Couldn't load that effect — try again.");
     }
 
+    /** Called every tick: when Auto FX is on and playback has just entered an energy peak or valley of the current track (lib/autoFx.ts), plays the effect chosen for it. Tracks the zone silently otherwise (and during transitions), so nothing fires late. */
+    function tryAutoFx() {
+      const state = useStore.getState();
+      const track = state.currentTrack;
+      const activeEl = deckEl(activeDeckRef.current);
+      if (!track || !activeEl || activeEl.paused) return;
+      const memo = autoFxRef.current;
+      const peaks = getAnalysis(track.id).waveformPeaks;
+      if (memo.peaks !== peaks) {
+        memo.peaks = peaks;
+        memo.profile = energyProfileFromPeaks(peaks);
+      }
+      const busy = transitionRef.current || mashupRef.current || loopRef.current || backspinRef.current || tempoRampRef.current;
+      const decision = decideAutoFx({
+        enabled: state.autoFx.enabled && !busy,
+        trackId: track.id,
+        profile: memo.profile,
+        currentTimeSec: activeEl.currentTime,
+        durationSec: track.durationSec,
+        state: memo.state,
+      });
+      memo.state = decision.state;
+      if (!decision.fire) return;
+      if (fxLayerRef.current || fxPendingRef.current) return; // never talk over an effect the user (or the DJ) already has playing
+      const choice = decision.fire === "peak" ? state.autoFx.peakFx : state.autoFx.valleyFx;
+      if (choice === "none") return;
+      void (choice === "random" ? playRandomFx() : playFxById(choice));
+    }
+
     /** Stops every random effect that is still sounding and drops the lined-up pick and cached buffers — effect teardown. */
     function stopSpookyFx() {
       spookyFxSourcesRef.current.forEach((source) => {
@@ -1349,6 +1483,10 @@ export function DualDeckStage() {
       spookyFxSourcesRef.current.clear();
       spookyFxRef.current.next = null;
       spookyBuffersRef.current.clear();
+      fxPressTokenRef.current++;
+      fxPendingRef.current = false;
+      fxLayerRef.current = null;
+      useStore.getState().setFxLayerActive(false);
     }
 
     /** Plays a user-uploaded FX sound (lib/ai-fx.ts's AI pick) as a one-shot overlay during a transition's crossfade — a real audio file, not a synthesized stand-in. startOffsetSec delays it relative to the crossfade's own start (Claude's call on when it should land within the window), clamped to windowSec — ai-fx.ts already caps it to a generous absolute ceiling, but only this call site knows the real (usually much shorter) window a stale/hallucinated value could otherwise schedule the FX well past, firing as a surprise sound disconnected from the transition it was picked for. volumeMultiplier is already capped by the caller (store.ts mirrors ai-fx.ts's MAX_FX_VOLUME_MULTIPLIER), capped again here as a last line of defense since it crossed a client request/response round trip. Plays to the buffer's own natural end (an explicit, bounded stop() — not just relying on the source's own implicit end-of-buffer stop — matching the sibling overlays above) — most FX are short one-shots that finish well inside the crossfade window on their own. */
@@ -2472,6 +2610,7 @@ export function DualDeckStage() {
       if (!state.ambienceEnabled || state.ambienceFrequency === "off") return;
       if (transitionRef.current || mashupRef.current || loopRef.current || backspinRef.current || tempoRampRef.current)
         return;
+      if (fxLayerRef.current || fxPendingRef.current) return; // one FX at a time: don't cut across one that's playing
       const track = state.currentTrack;
       const activeEl = deckEl(activeDeckRef.current);
       if (!track || !activeEl || activeEl.paused) return;
@@ -2988,6 +3127,7 @@ export function DualDeckStage() {
       tryAutoTransition();
       tryAmbience();
       trySpookyFxMoment();
+      tryAutoFx();
       tryHalloweenAmbientLayer();
     }, 500);
 
