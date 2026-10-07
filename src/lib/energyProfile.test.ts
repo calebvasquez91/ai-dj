@@ -42,11 +42,43 @@ describe("energyProfileFromPeaks", () => {
     expect(energyProfileFromPeaks(peaks)).toEqual([]);
   });
 
-  it("returns [] for missing, too-short or flat waveform data (no invented peaks)", () => {
+  it("returns [] for missing or too-short waveform data", () => {
     expect(energyProfileFromPeaks([])).toEqual([]);
     expect(energyProfileFromPeaks([0.1, 0.9, 0.2])).toEqual([]);
+    expect(energyProfileFromPeaks(new Array(99).fill(0.5).map((_, i) => (i < 50 ? 0.1 : 0.9)))).toEqual([]); // fewer points than buckets
+  });
+
+  it("returns [] for a flat track (no invented peaks)", () => {
     expect(energyProfileFromPeaks(new Array(240).fill(0.6))).toEqual([]);
     expect(energyProfileFromPeaks(Array.from({ length: 240 }, (_, i) => 0.5 + (i % 2) * 0.05))).toEqual([]);
+  });
+
+  it("returns [] for a steady track even though its fade-in and fade-out make min-to-max range huge", () => {
+    // loud and level throughout, with a near-silent first and last bucket: range ~0.9, but nothing to call a valley
+    const peaks = Array.from({ length: 240 }, (_, i) => (i < 3 ? 0.05 : i > 236 ? 0.05 : 0.85 + 0.03 * Math.sin(i)));
+    expect(Math.max(...peaks) - Math.min(...peaks)).toBeGreaterThan(0.7);
+    expect(energyProfileFromPeaks(peaks)).toEqual([]);
+  });
+
+  it("returns [] for a mildly varying, heavily compressed track", () => {
+    const peaks = Array.from({ length: 240 }, (_, i) => (i < 80 ? 0.78 : i < 160 ? 0.9 : 0.82));
+    expect(energyProfileFromPeaks(peaks)).toEqual([]);
+  });
+
+  it("returns [] when one loud spike is the only dynamics", () => {
+    const peaks = new Array(240).fill(0.2);
+    peaks[120] = 1;
+    expect(energyProfileFromPeaks(peaks)).toEqual([]);
+  });
+
+  it("still reads a track with real sections even if it fades in and out", () => {
+    const peaks = threeActs();
+    peaks[0] = 0;
+    peaks[239] = 0;
+    const profile = energyProfileFromPeaks(peaks);
+    expect(profile).toHaveLength(ENERGY_PROFILE_POINTS);
+    expect(profile[50]).toBeGreaterThan(PEAK_THRESHOLD);
+    expect(profile[10]).toBeLessThan(VALLEY_THRESHOLD);
   });
 
   it("treats non-finite source values as silence instead of poisoning the profile", () => {

@@ -6,6 +6,7 @@ import { formatTime } from "@/lib/format";
 import { HALLOWEEN_AFFINITY, hasHalloweenAffinity, withHalloweenAffinity } from "@/lib/fxAffinity";
 import { PlayIcon, PlusIcon, CloseIcon } from "@/components/Icons";
 import { effectsPool } from "@/lib/spookyFx";
+import { effectiveAutoFxChoice } from "@/lib/autoFxSettings";
 import type { FxCategory, FxSound } from "@/types/music";
 
 const CATEGORY_FILTERS: { value: FxCategory | "all"; label: string }[] = [
@@ -29,6 +30,9 @@ function AutoFxControls() {
   const setAutoFx = useStore((s) => s.setAutoFx);
   const fxLibrary = useStore((s) => s.fxLibrary);
   const effects = useMemo(() => effectsPool(fxLibrary), [fxLibrary]);
+  // A saved choice whose sound was deleted (or is no longer an Effects sound) plays as "random" — show that, not a blank.
+  const peakChoice = effectiveAutoFxChoice(autoFx.peakFx, effects);
+  const valleyChoice = effectiveAutoFxChoice(autoFx.valleyFx, effects);
   const selectClass = "min-w-0 flex-1 text-[10px] rounded bg-surface-hover border border-border/10 px-1.5 py-1.5 outline-none";
   const options = (
     <>
@@ -58,13 +62,13 @@ function AutoFxControls() {
       <div className="flex items-center gap-2">
         <label className="flex flex-1 min-w-0 flex-col gap-0.5 text-[10px] text-muted">
           Peak
-          <select value={autoFx.peakFx} onChange={(e) => setAutoFx({ peakFx: e.target.value })} aria-label="Effect for energy peaks" className={selectClass}>
+          <select value={peakChoice} onChange={(e) => setAutoFx({ peakFx: e.target.value })} aria-label="Effect for energy peaks" className={selectClass}>
             {options}
           </select>
         </label>
         <label className="flex flex-1 min-w-0 flex-col gap-0.5 text-[10px] text-muted">
           Valley
-          <select value={autoFx.valleyFx} onChange={(e) => setAutoFx({ valleyFx: e.target.value })} aria-label="Effect for energy valleys" className={selectClass}>
+          <select value={valleyChoice} onChange={(e) => setAutoFx({ valleyFx: e.target.value })} aria-label="Effect for energy valleys" className={selectClass}>
             {options}
           </select>
         </label>

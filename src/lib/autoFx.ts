@@ -5,7 +5,9 @@
  * "Enters" means the zone changed since the last tick, so:
  *  - a track that starts in a valley (a quiet intro) does not fire at 0:00,
  *  - a seek into the middle of a peak does not fire,
- *  - and turning Auto FX on while a peak is already playing waits for the next one.
+ *  - turning Auto FX on while a peak is already playing waits for the next one,
+ *  - and neither does a profile that only becomes available mid-track (the analysis finishing after playback started):
+ *    with no previous zone there is nothing to have "entered" from.
  */
 
 import { energyZoneAt, type EnergyZone } from "@/lib/energyProfile";
@@ -53,7 +55,7 @@ export function decideAutoFx({
     lastFiredSec: sameTrack ? state.lastFiredSec : null,
   };
 
-  if (!enabled || !zone || !sameTrack || seeked) return { fire: null, state: next };
+  if (!enabled || !zone || !sameTrack || seeked || state.lastZone == null) return { fire: null, state: next };
   if (zone === state.lastZone || zone === "mid") return { fire: null, state: next };
   if (durationSec - currentTimeSec <= AUTO_FX_TRANSITION_LEAD_SEC) return { fire: null, state: next };
   // currentTime < lastFiredSec means playback went back past the last firing (a seek the jump check missed): don't let the stale stamp block it.

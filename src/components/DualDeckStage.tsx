@@ -43,6 +43,8 @@ import {
 } from "@/lib/layerMix";
 import { BoundedCache } from "@/lib/boundedCache";
 import { INITIAL_AUTO_FX_STATE, decideAutoFx, type AutoFxState } from "@/lib/autoFx";
+import { effectiveAutoFxChoice } from "@/lib/autoFxSettings";
+import { FX_LOAD_IDLE, beginFxRequest, finishFxRequest, pressFx, resetFxLoad, type FxLoadState } from "@/lib/fxLayer";
 import { energyProfileFromPeaks } from "@/lib/energyProfile";
 import { hasHalloweenAffinity } from "@/lib/fxAffinity";
 import { requestLoopPick } from "@/lib/loopApi";
@@ -150,6 +152,8 @@ interface ActiveTempoRamp {
 
 /** How long the pre-transition tempo ramp takes — matches tempo-ramp's own MIN_WINDOW_SEC_BY_CATEGORY floor in mix-engine.ts. */
 const TEMPO_RAMP_PRE_WINDOW_SEC = 8;
+/** A playing FX registered so the FX slider can rescale it and the "FX Playing" indicator can follow it (see trackLiveFx). */
+type LiveFx = { gain: GainNode; base: number; audible: boolean; timer: ReturnType<typeof setTimeout> | null };
 /** How long the FX layer's sound takes to fade out when the FX button is pressed again, or another effect replaces it. */
 const FX_STOP_FADE_SEC = 0.2;
 /** How many tracks past the playing one get a background song-map upgrade (see the analysis effect). */
@@ -365,19 +369,16 @@ export function DualDeckStage() {
   const spookyFxSourcesRef = useRef<Set<AudioBufferSourceNode>>(new Set());
   // Decoded random effects (in-flight promises included), bounded — see decodeSpookyFx.
   const spookyBuffersRef = useRef(new BoundedCache<Promise<AudioBuffer>>(SPOOKY_FX_CACHE_MAX));
-  const fxLiveRef = useRef<
-    Set<{ gain: GainNode; base: number; audible: boolean; timer: ReturnType<typeof setTimeout> | null }>
-  >(new Set());
+  const fxLiveRef = useRef<Set<LiveFx>>(new Set());
   // The ONE dedicated FX layer (player-bar FX button, Auto FX, DJ moments): the sound playing now, so a second press
-  // can fade it out and a new sound can replace it. `fxPendingRef` = a sound is still decoding; `fxPressTokenRef`
-  // identifies the latest request so a press that cancels a still-decoding one makes it stand down.
+  // can fade it out and a new sound can replace it. `fxLoadRef` = whether a sound is still decoding and which request
+  // is the live one (lib/fxLayer.ts), so a press that cancels a still-decoding request makes it stand down.
   const fxLayerRef = useRef<{
     source: AudioBufferSourceNode;
     gain: GainNode;
-    live: { gain: GainNode; base: number; audible: boolean; timer: ReturnType<typeof setTimeout> | null };
+    live: LiveFx;
   } | null>(null);
-  const fxPendingRef = useRef(false);
-  const fxPressTokenRef = useRef(0);
+  const fxLoadRef = useRef<FxLoadState>(FX_LOAD_IDLE);
   // Auto FX (lib/autoFx.ts): the peak/valley tracking state and the current track's energy profile (recomputed when its waveform data changes).
   const autoFxRef = useRef<{ state: AutoFxState; peaks: number[] | null; profile: number[] }>({
     state: INITIAL_AUTO_FX_STATE,
@@ -1206,7 +1207,7 @@ export function DualDeckStage() {
 
     /** Registers a playing FX so the FX slider can rescale it live and the "FX Playing" indicator reflects it: the indicator lights once it is audible (`delaySec` after now), not when it was scheduled, and clears when the source ends. */
     function trackLiveFx(source: AudioBufferSourceNode, gain: GainNode, base: number, delaySec: number) {
-      const live = { gain, base, audible: false, timer: null as ReturnType<typeof setTimeout> | null };
+      const live: LiveFx = { gain, base, audible: false, timer: null };
       fxLiveRef.current.add(live);
       live.timer = setTimeout(() => {
         live.timer = null;
@@ -1223,10 +1224,10 @@ export function DualDeckStage() {
     }
 
     /** Stops tracking a live FX that is being faded out: the FX slider must not snap its gain back mid-fade. */
-    function untrackLiveFx(live: { timer: ReturnType<typeof setTimeout> | null }) {
+    function untrackLiveFx(live: LiveFx) {
       if (live.timer != null) clearTimeout(live.timer);
       live.timer = null;
-      fxLiveRef.current.delete(live as never);
+      fxLiveRef.current.delete(live);
       syncFxPlaying();
     }
 
@@ -1323,10 +1324,10 @@ export function DualDeckStage() {
       return result;
     }
 
-    /** Plays one specific FX sound (Auto FX's assigned peak/valley effect) on the FX layer. A sound that isn't in the library any more is skipped. */
+    /** Plays one specific Effects sound (Auto FX's assigned peak/valley effect) on the FX layer. A sound that is gone from the library, or no longer an eligible Effects sound, is skipped. */
     async function playFxById(id: string): Promise<"played" | "no-audio" | "no-fx" | "failed" | "cancelled"> {
-      const fx = useStore.getState().fxLibrary.find((f) => f.id === id);
-      if (!fx || fx.durationSec <= 0) return "no-fx";
+      const fx = effectsPoolNow().find((f) => f.id === id);
+      if (!fx) return "no-fx";
       const result = await startFxSound(fx);
       if (result === "failed") markSpookyFxFailed(fx);
       else if (result === "played") markSpookyFxPlayed();
@@ -1338,27 +1339,27 @@ export function DualDeckStage() {
       const ctx = audioCtxRef.current;
       const masterGain = masterGainRef.current;
       if (!ctx || !masterGain) return "no-audio";
-      const token = ++fxPressTokenRef.current;
-      fxPendingRef.current = true;
+      const begun = beginFxRequest(fxLoadRef.current);
+      fxLoadRef.current = begun.state;
       useStore.getState().setFxLayerActive(true);
-      let buffer: AudioBuffer;
+      let buffer: AudioBuffer | null = null;
       try {
         buffer = await decodeSpookyFx(ctx, fx.sourceUrl);
       } catch {
-        if (token === fxPressTokenRef.current) {
-          fxPendingRef.current = false;
-          if (!fxLayerRef.current) useStore.getState().setFxLayerActive(false);
-        }
-        return "failed";
+        // decode failed: handled below, once we know whether this request is still the live one
       }
-      if (token !== fxPressTokenRef.current) return "cancelled";
-      fxPendingRef.current = false;
+      const finished = finishFxRequest(fxLoadRef.current, begun.token, buffer != null, fxLayerRef.current != null);
+      fxLoadRef.current = finished.state;
+      if (finished.outcome === "cancelled" || !buffer) {
+        if (finished.outcome === "failed" && !fxLayerRef.current) useStore.getState().setFxLayerActive(false);
+        return finished.outcome === "cancelled" ? "cancelled" : "failed";
+      }
       if (audioCtxRef.current !== ctx) {
         useStore.getState().setFxLayerActive(false);
         return "no-audio"; // torn down while decoding
       }
       // Only one FX at a time: fade the current one out first, then start this one as that fade ends.
-      const replacing = fxLayerRef.current != null;
+      const replacing = finished.outcome === "replace";
       if (replacing) stopFxLayer(FX_STOP_FADE_SEC);
       const delaySec = replacing ? FX_STOP_FADE_SEC : 0;
       const source = ctx.createBufferSource();
@@ -1416,9 +1417,9 @@ export function DualDeckStage() {
     async function onFxButton() {
       const state = useStore.getState();
       // Toggle: pressing FX while its sound is playing (or still loading) stops it with a short fade instead of stacking another.
-      if (fxLayerRef.current || fxPendingRef.current) {
-        fxPressTokenRef.current++; // makes a still-decoding request stand down
-        fxPendingRef.current = false;
+      const press = pressFx(fxLoadRef.current, fxLayerRef.current != null);
+      fxLoadRef.current = press.state;
+      if (press.action === "stop") {
         stopFxLayer(FX_STOP_FADE_SEC);
         return;
       }
@@ -1465,8 +1466,9 @@ export function DualDeckStage() {
       });
       memo.state = decision.state;
       if (!decision.fire) return;
-      if (fxLayerRef.current || fxPendingRef.current) return; // never talk over an effect the user (or the DJ) already has playing
-      const choice = decision.fire === "peak" ? state.autoFx.peakFx : state.autoFx.valleyFx;
+      if (fxLayerRef.current || fxLoadRef.current.loading) return; // never talk over an effect the user (or the DJ) already has playing
+      // A saved choice whose sound is gone (or no longer an Effects sound) means "random", the same as the dropdown shows.
+      const choice = effectiveAutoFxChoice(decision.fire === "peak" ? state.autoFx.peakFx : state.autoFx.valleyFx, effectsPoolNow());
       if (choice === "none") return;
       void (choice === "random" ? playRandomFx() : playFxById(choice));
     }
@@ -1483,8 +1485,7 @@ export function DualDeckStage() {
       spookyFxSourcesRef.current.clear();
       spookyFxRef.current.next = null;
       spookyBuffersRef.current.clear();
-      fxPressTokenRef.current++;
-      fxPendingRef.current = false;
+      fxLoadRef.current = resetFxLoad(fxLoadRef.current);
       fxLayerRef.current = null;
       useStore.getState().setFxLayerActive(false);
     }
@@ -2610,7 +2611,7 @@ export function DualDeckStage() {
       if (!state.ambienceEnabled || state.ambienceFrequency === "off") return;
       if (transitionRef.current || mashupRef.current || loopRef.current || backspinRef.current || tempoRampRef.current)
         return;
-      if (fxLayerRef.current || fxPendingRef.current) return; // one FX at a time: don't cut across one that's playing
+      if (fxLayerRef.current || fxLoadRef.current.loading) return; // one FX at a time: don't cut across one that's playing
       const track = state.currentTrack;
       const activeEl = deckEl(activeDeckRef.current);
       if (!track || !activeEl || activeEl.paused) return;

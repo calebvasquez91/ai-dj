@@ -78,6 +78,17 @@ describe("decideAutoFx", () => {
     expect(next.state.lastFiredSec).toBeNull();
   });
 
+  it("does not fire when the profile only becomes available mid-track (analysis finishing late)", () => {
+    // playback is already 100 s in with no profile yet (analysis not done)...
+    const noProfile = play(100, 104, INITIAL_AUTO_FX_STATE, { profile: [] }).state;
+    expect(noProfile.lastZone).toBeNull();
+    // ...and the profile arrives at 104.5 s, in the middle of a peak (80-120 s): there is no previous zone to have entered from
+    const arrived = tick(noProfile, 104.5);
+    expect(arrived.fire).toBeNull();
+    // the next real entry after that still fires: the valley at 160 s
+    expect(play(105, 170, arrived.state).fired.map((f) => f.zone)).toEqual(["valley"]);
+  });
+
   it("does nothing without a profile or duration", () => {
     expect(play(0, 100, INITIAL_AUTO_FX_STATE, { profile: [] }).fired).toEqual([]);
     expect(tick(INITIAL_AUTO_FX_STATE, 5, { durationSec: 0 }).fire).toBeNull();

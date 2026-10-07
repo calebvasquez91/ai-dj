@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { AUTO_FX_DEFAULTS, parseAutoFxSettings } from "./autoFxSettings";
+import type { FxSound } from "@/types/music";
+import { AUTO_FX_DEFAULTS, effectiveAutoFxChoice, parseAutoFxSettings } from "./autoFxSettings";
 
 describe("parseAutoFxSettings", () => {
   it("is off with random effects by default", () => {
@@ -26,5 +27,20 @@ describe("parseAutoFxSettings", () => {
     expect(parseAutoFxSettings("null")).toEqual(AUTO_FX_DEFAULTS);
     expect(parseAutoFxSettings("42")).toEqual(AUTO_FX_DEFAULTS);
     expect(parseAutoFxSettings(JSON.stringify({ peakFx: "x".repeat(500) })).peakFx).toBe("random");
+  });
+});
+
+describe("effectiveAutoFxChoice", () => {
+  const pool = [{ id: "fx-1" }, { id: "fx-2" }] as FxSound[];
+
+  it("keeps none, random and any sound still in the pool", () => {
+    expect(effectiveAutoFxChoice("none", pool)).toBe("none");
+    expect(effectiveAutoFxChoice("random", pool)).toBe("random");
+    expect(effectiveAutoFxChoice("fx-2", pool)).toBe("fx-2");
+  });
+
+  it("falls back to random for a sound that was deleted or is no longer an Effects sound", () => {
+    expect(effectiveAutoFxChoice("fx-gone", pool)).toBe("random");
+    expect(effectiveAutoFxChoice("fx-1", [])).toBe("random");
   });
 });

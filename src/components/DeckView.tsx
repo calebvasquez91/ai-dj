@@ -19,6 +19,7 @@ import { CloseIcon } from "@/components/Icons";
 import type { AmbienceFrequency } from "@/lib/ambience";
 import { HalloweenLayers } from "@/components/HalloweenLayers";
 import { EnergyGraph } from "@/components/EnergyGraph";
+import { resampleBuckets } from "@/lib/resample";
 import type { Track, DeckId } from "@/types/music";
 
 const PICKABLE_TRANSITIONS = transitions.filter((t) => t.executable);
@@ -60,13 +61,7 @@ function Waveform({
   }, [hasPeaks]);
   const bars = useMemo(() => {
     if (!fitCount || fitCount >= peaks.length) return peaks;
-    return Array.from({ length: fitCount }, (_, i) => {
-      const start = Math.floor((i * peaks.length) / fitCount);
-      const end = Math.max(start + 1, Math.floor(((i + 1) * peaks.length) / fitCount));
-      let max = 0;
-      for (let j = start; j < end; j++) max = Math.max(max, peaks[j]);
-      return max;
-    });
+    return resampleBuckets(peaks, fitCount, "max");
   }, [peaks, fitCount]);
 
   if (peaks.length === 0) {
