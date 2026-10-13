@@ -14,6 +14,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useStore } from "@/lib/store";
 import { equalPowerGains } from "@/lib/mix-engine";
 import { lookupYoutubeBpm } from "@/lib/youtubeBpm";
+import { LOOKUP_LOOKAHEAD, reachableTracks } from "@/lib/lookahead";
 import { estimateStructuralCues } from "@/lib/structural-estimate";
 import type { YouTubeTrack } from "@/types/music";
 
@@ -145,10 +146,11 @@ export function YouTubeDeckStage() {
   // Metadata-BPM kickoff: mirrors DualDeckStage's own analysis-kickoff
   // effect, just for a different source of the same trackAnalysis map
   // entry (see lib/youtubeBpm.ts) — one attempt per track per session,
-  // never repeated even on a no-match/failure.
+  // never repeated even on a no-match/failure. Only the playing track and the
+  // next few (lib/lookahead.ts): each lookup is a server call out to Deezer, and
+  // a big library queues thousands of tracks.
   useEffect(() => {
-    const tracks = currentTrack ? [currentTrack, ...queue] : queue;
-    for (const track of tracks) {
+    for (const track of reachableTracks(currentTrack, queue, LOOKUP_LOOKAHEAD)) {
       if (track.source !== "youtube") continue;
       if (useStore.getState().trackAnalysis[track.id]) continue;
       if (attemptedBpmLookupRef.current.has(track.id)) continue;
