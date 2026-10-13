@@ -33,8 +33,9 @@ import {
   clampFxLevel,
 } from "@/lib/layerMix";
 import { AUTO_FX_DEFAULTS, loadAutoFxSettings, saveAutoFxSettings, type AutoFxSettings } from "@/lib/autoFxSettings";
-import { STEM_AUTO_DEFAULTS, loadStemAutoSettings, saveStemAutoSettings, type StemAutoSettings } from "@/lib/stemAutoSettings";
+import { loadStemAutoSettings, saveStemAutoSettings, type StemAutoSettings } from "@/lib/stemAutoSettings";
 import type { StemJobState } from "@/lib/stemAutopilot";
+import type { StemCounts } from "@/lib/stemStatus";
 import { judgeStemCandidate } from "@/lib/stemPlanner";
 import { VOICE_CUT_DEFAULTS, loadVoiceCutSettings, saveVoiceCutSettings, type VoiceCutSettings } from "@/lib/voiceCutSettings";
 import type { VoiceMap } from "@/lib/voiceMap";
@@ -52,13 +53,15 @@ export interface StemPick {
 }
 
 export interface StemAutopilotStatus {
-  /** off: switched off. idle: on, nothing to do right now. working: a separation is running or being started. paused: stopped by a problem (budget reached, Replicate not set up, ...) — see `message`. */
-  state: "off" | "idle" | "working" | "paused";
+  /** off: switched off. idle: on, nothing to do right now. working: a separation is running or being started. paused: stopped by a problem (budget reached, ...) — see `message`. unavailable: this server can't separate stems at all (local storage backend, no Replicate token) — see `message`. */
+  state: "off" | "idle" | "working" | "paused" | "unavailable";
   message: string | null;
   /** The engineer's verdicts for the upcoming tracks, nearest first. */
   picks: StemPick[];
   spentUsd: number | null;
   budgetUsd: number | null;
+  /** The user's library-wide job counts; null until the summary has loaded. */
+  counts: StemCounts | null;
 }
 
 export const INITIAL_STEM_AUTOPILOT_STATUS: StemAutopilotStatus = {
@@ -67,6 +70,7 @@ export const INITIAL_STEM_AUTOPILOT_STATUS: StemAutopilotStatus = {
   picks: [],
   spentUsd: null,
   budgetUsd: null,
+  counts: null,
 };
 
 /** Maps a track over every place a Track object lives in the store (library, playlists, queue, current) — the one patch shape the optimistic curation setters and their rollbacks share. */
@@ -172,7 +176,7 @@ interface PlayerState {
   fxLayerActive: boolean;
   /** Auto FX: fire a chosen effect when playback enters an energy peak or valley (lib/autoFx.ts). Saved in localStorage. */
   autoFx: AutoFxSettings;
-  /** Automatic stem separation (components/StemAutopilot.tsx): off by default because it spends money. Saved in localStorage. */
+  /** Automatic stem separation (components/StemAutopilot.tsx): on by default under a server-side spending budget. Saved in localStorage; starts off here so nothing runs before the saved choice is loaded. */
   stemAuto: StemAutoSettings;
   /** Move on 10 s after a track's last voice (lib/voiceMap.ts). On by default; only ever acts on tracks that have voice data. Saved in localStorage. */
   voiceCut: VoiceCutSettings;
@@ -433,7 +437,7 @@ export const useStore = create<PlayerState>()(
       fxPlaying: false,
       fxLayerActive: false,
       autoFx: AUTO_FX_DEFAULTS,
-      stemAuto: STEM_AUTO_DEFAULTS,
+      stemAuto: { enabled: false },
       voiceCut: VOICE_CUT_DEFAULTS,
       trackVoiceMaps: {},
       stemAutopilot: INITIAL_STEM_AUTOPILOT_STATUS,

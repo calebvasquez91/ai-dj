@@ -3,6 +3,7 @@
 import { useStore } from "@/lib/store";
 import { formatTime } from "@/lib/format";
 import type { StemJobState } from "@/lib/stemAutopilot";
+import { describeStemStatus } from "@/lib/stemStatus";
 import { VOICE_SILENCE_CUT_SEC, lastVoiceEndSec, voiceCutoffSec } from "@/lib/voiceMap";
 
 const STATE_LABEL: Record<StemJobState, string> = {
@@ -23,7 +24,7 @@ const STATE_CLASS: Record<StemJobState, string> = {
 
 /**
  * The Stems section of the DJ decks view: the audio engineer's picks among the upcoming tracks, and the switch that
- * lets the app separate them on its own, within a spending budget. Off by default — separation costs real money.
+ * lets the app separate them on its own, within a spending budget (on by default; the server enforces the cap).
  */
 export function StemsPanel() {
   const stemAuto = useStore((s) => s.stemAuto);
@@ -56,9 +57,27 @@ export function StemsPanel() {
       ? `$${status.spentUsd.toFixed(2)} of $${status.budgetUsd.toFixed(2)} budget used`
       : null;
 
+  const headline = describeStemStatus({
+    enabled: stemAuto.enabled,
+    state: status.state,
+    message: status.message,
+    counts: status.counts,
+  });
+  const TONE_CLASS = {
+    off: "text-muted",
+    ok: "text-accent-teal",
+    busy: "text-accent-purple",
+    warn: "text-accent-pink",
+  } as const;
+
   return (
     <section aria-label="Stems" className="card p-3 flex flex-col gap-2">
       <h3 className="text-xs font-semibold uppercase tracking-wide text-accent-purple">Stems</h3>
+
+      <div data-testid="stem-status" role="status" aria-live="polite" className="flex flex-col gap-0.5">
+        <p className={`text-xs font-medium ${TONE_CLASS[headline.tone]}`}>{headline.label}</p>
+        {headline.detail && <p className="text-[10px] text-muted break-words">{headline.detail}</p>}
+      </div>
 
       <label className="flex items-start gap-2 text-xs text-muted cursor-pointer">
         <input
@@ -76,12 +95,6 @@ export function StemsPanel() {
         </span>
       </label>
 
-      {stemAuto.enabled && status.state === "paused" && status.message && (
-        <p role="status" className="text-[11px] text-accent-pink break-words">
-          {status.message}
-        </p>
-      )}
-      {stemAuto.enabled && status.state === "working" && <p className="text-[11px] text-accent-purple">Working on a separation…</p>}
       {stemAuto.enabled && summary && <p className="text-[10px] text-muted">{summary}</p>}
 
       {status.picks.length > 0 ? (

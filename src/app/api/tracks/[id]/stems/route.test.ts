@@ -101,6 +101,17 @@ describe("POST /api/tracks/[id]/stems — automatic starts", () => {
   });
 });
 
+describe("POST /api/tracks/[id]/stems - when this server can't separate", () => {
+  it("answers 503 with a clear reason, and records no failed job, when the Replicate token is missing", async () => {
+    delete process.env.REPLICATE_API_TOKEN;
+    const res = await post(false);
+    expect(res.status).toBe(503);
+    expect(await res.json()).toMatchObject({ reason: "replicate", error: expect.stringMatching(/REPLICATE_API_TOKEN/) });
+    expect(mocks.create).not.toHaveBeenCalled();
+    expect(mocks.predict).not.toHaveBeenCalled();
+  });
+});
+
 describe("POST /api/tracks/[id]/stems — manual starts (unchanged)", () => {
   it("is not held to the automatic budget", async () => {
     mocks.findMany.mockResolvedValue([{ status: "ready", estimatedCostUsd: 99, createdAt: new Date(0) }]);

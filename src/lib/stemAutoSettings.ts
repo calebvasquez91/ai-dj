@@ -1,13 +1,15 @@
 /**
  * Whether automatic stem separation is switched on, kept in the browser's localStorage (a per-device preference, like
- * Auto FX). OFF by default: turning it on lets the app start paid separation jobs for you.
+ * Auto FX). ON by default — without it the DJ almost never has stems to use — because the server holds automatic
+ * separation to a spending budget (STEM_AUTO_BUDGET_USD, $5 by default) and one job at a time. Someone who switched it
+ * off has that saved and keeps it off.
  */
 
 export interface StemAutoSettings {
   enabled: boolean;
 }
 
-export const STEM_AUTO_DEFAULTS: StemAutoSettings = { enabled: false };
+export const STEM_AUTO_DEFAULTS: StemAutoSettings = { enabled: true };
 export const STEM_AUTO_STORAGE_KEY = "ai-dj:stem-auto";
 
 export function parseStemAutoSettings(raw: string | null): StemAutoSettings {
@@ -15,7 +17,7 @@ export function parseStemAutoSettings(raw: string | null): StemAutoSettings {
   try {
     const value = JSON.parse(raw) as Partial<StemAutoSettings> | null;
     if (!value || typeof value !== "object") return STEM_AUTO_DEFAULTS;
-    return { enabled: value.enabled === true };
+    return { enabled: typeof value.enabled === "boolean" ? value.enabled : STEM_AUTO_DEFAULTS.enabled };
   } catch {
     return STEM_AUTO_DEFAULTS;
   }

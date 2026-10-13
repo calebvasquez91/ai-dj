@@ -25,6 +25,7 @@ import { apiHandler, notFound, unauthorized } from "@/lib/apiRoute";
 import { autoBudgetDecision } from "@/lib/stemBudget";
 import { stemSummaryForUser } from "@/lib/stemSummary";
 import { advanceStemJob, replicateClient, stemWebhookUrl } from "@/lib/stemJobs";
+import { stemSupport } from "@/lib/stemSupport";
 
 /**
  * ryan5453/demucs's currently-deployed version, pinned explicitly rather
@@ -68,11 +69,10 @@ async function handlePOST(request: Request, { params }: { params: Promise<{ id: 
       { status: 400 }
     );
   }
-  if (getStorageBackend() !== "blob") {
-    return NextResponse.json(
-      { error: 'Stem separation requires NEXT_PUBLIC_STORAGE_BACKEND="blob" — Replicate needs a publicly reachable audio URL to fetch.' },
-      { status: 400 }
-    );
+  const support = stemSupport({ storageBackend: getStorageBackend(), hasReplicateToken: Boolean(process.env.REPLICATE_API_TOKEN) });
+  if (!support.available) {
+    // 400 for the storage backend (the request can't ever work here), 503 for a missing token (a server setup gap).
+    return NextResponse.json({ error: support.message, reason: support.reason }, { status: support.reason === "storage" ? 400 : 503 });
   }
 
   // Idempotent: an in-flight or already-finished job is returned as-is

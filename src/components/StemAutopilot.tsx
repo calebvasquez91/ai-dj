@@ -5,6 +5,8 @@ import { useStore, type StemPick } from "@/lib/store";
 import { reachableTracks } from "@/lib/lookahead";
 import { judgeStemCandidate } from "@/lib/stemPlanner";
 import { planStemAutopilot, stemStateFromJob, type StemJobState } from "@/lib/stemAutopilot";
+import type { StemSupport } from "@/lib/stemSupport";
+import type { StemCounts } from "@/lib/stemStatus";
 
 /** How many upcoming tracks the engineer looks at. Separation takes minutes per track, so it has to start well ahead. */
 const STEM_LOOKAHEAD = 12;
@@ -37,7 +39,7 @@ export function StemAutopilot() {
   const lookingRef = useRef<Set<string>>(new Set());
   const blockedRef = useRef<string | null>(null);
   const busyUntilRef = useRef(0);
-  const summaryRef = useRef<{ spentUsd: number; budgetUsd: number } | null>(null);
+  const summaryRef = useRef<{ spentUsd: number; budgetUsd: number; counts: StemCounts; support: StemSupport } | null>(null);
   const publishedRef = useRef("");
   const [tick, setTick] = useState(0);
   const bump = () => setTick((t) => t + 1);
@@ -46,8 +48,20 @@ export function StemAutopilot() {
     try {
       const res = await fetch("/api/stems/summary");
       if (!res.ok) return;
-      const s = (await res.json()) as { spentUsd: number; budgetUsd: number };
-      summaryRef.current = { spentUsd: s.spentUsd, budgetUsd: s.budgetUsd };
+      const s = (await res.json()) as {
+        spentUsd: number;
+        budgetUsd: number;
+        ready: number;
+        inFlight: number;
+        failed: number;
+        support?: StemSupport;
+      };
+      summaryRef.current = {
+        spentUsd: s.spentUsd,
+        budgetUsd: s.budgetUsd,
+        counts: { ready: s.ready, inFlight: s.inFlight, failed: s.failed },
+        support: s.support ?? { available: true },
+      };
       bump();
     } catch {
       // the numbers are informational
@@ -110,8 +124,8 @@ export function StemAutopilot() {
   useEffect(() => {
     blockedRef.current = null;
     busyUntilRef.current = 0;
-    // (The decision effect below re-runs on `enabled` by itself.) The summary is fetched a tick later, not inline.
-    if (!enabled) return;
+    // (The decision effect below re-runs on `enabled` by itself.) The summary is fetched a tick later, not inline —
+    // also while switched off, so the panel can say how many stems are ready and whether this server can make any.
     const timer = setTimeout(() => void refreshSummary(), 0);
     return () => clearTimeout(timer);
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -141,18 +155,29 @@ export function StemAutopilot() {
       }));
 
     const running = verdicts.filter((v) => statesRef.current[v.trackId] === "processing").length;
-    const state = !enabled ? "off" : blockedRef.current ? "paused" : running > 0 || startingRef.current.size > 0 ? "working" : "idle";
+    const support = summaryRef.current?.support;
+    const unavailable = support && !support.available ? support : null;
+    const state = unavailable
+      ? "unavailable"
+      : !enabled
+        ? "off"
+        : blockedRef.current
+          ? "paused"
+          : running > 0 || startingRef.current.size > 0
+            ? "working"
+            : "idle";
     const status = {
       state,
-      message: enabled ? blockedRef.current : null,
+      message: unavailable ? unavailable.message : enabled ? blockedRef.current : null,
       picks,
       spentUsd: summaryRef.current?.spentUsd ?? null,
       budgetUsd: summaryRef.current?.budgetUsd ?? null,
+      counts: summaryRef.current?.counts ?? null,
     } as const;
     const key = JSON.stringify(status);
     if (key !== publishedRef.current) {
       publishedRef.current = key;
-      useStore.getState().setStemAutopilotStatus({ ...status, picks: [...status.picks] });
+      useStore.getState().setStemAutopilotStatus({ ...status, picks: [...status.picks], counts: status.counts && { ...status.counts } });
     }
 
     if (!enabled || blockedRef.current) return;
@@ -162,7 +187,8 @@ export function StemAutopilot() {
       inFlight: running + startingRef.current.size,
     });
     for (const id of plan.check) void lookUp(id);
-    if (plan.start && Date.now() >= busyUntilRef.current) void start(plan.start);
+    // Existing stems are still looked up when this server can't make new ones; only the paid start is skipped.
+    if (plan.start && !unavailable && Date.now() >= busyUntilRef.current) void start(plan.start);
     // lookUp/start are stable closures over refs
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [enabled, currentTrack, queue, trackAnalysis, fingerprints, tick]);
