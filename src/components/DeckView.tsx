@@ -18,6 +18,7 @@ import { CROSSFADE_PRESETS, DJ_MODES } from "@/components/PlayerBar";
 import { CloseIcon } from "@/components/Icons";
 import type { AmbienceFrequency } from "@/lib/ambience";
 import { HalloweenLayers } from "@/components/HalloweenLayers";
+import { StemsPanel } from "@/components/StemsPanel";
 import { EnergyGraph } from "@/components/EnergyGraph";
 import { resampleBuckets } from "@/lib/resample";
 import type { Track, DeckId } from "@/types/music";
@@ -567,6 +568,8 @@ export function DeckView() {
         </div>
 
         <HalloweenLayers />
+
+        <StemsPanel />
 
         <div className="flex flex-wrap items-center gap-2">
           <select

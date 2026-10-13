@@ -2,6 +2,8 @@ import { redirect } from "next/navigation";
 import { auth } from "@/auth";
 import { AuthSessionProvider } from "@/components/AuthSessionProvider";
 import { AppDataLoader } from "@/components/AppDataLoader";
+import { StemAutopilot } from "@/components/StemAutopilot";
+import { VoiceMapLoader } from "@/components/VoiceMapLoader";
 import { MusicWaveBackground } from "@/components/MusicWaveBackground";
 import { SpookyBackdrop } from "@/components/SpookyBackdrop";
 import { Sidebar } from "@/components/Sidebar";
@@ -20,6 +22,8 @@ export default async function AppLayout({ children }: { children: React.ReactNod
   return (
     <AuthSessionProvider>
       <AppDataLoader />
+      <StemAutopilot />
+      <VoiceMapLoader />
       <KeyboardShortcuts />
       <SpookyBackdrop />
       <MusicWaveBackground />

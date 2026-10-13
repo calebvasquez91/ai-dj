@@ -45,6 +45,7 @@ import { BoundedCache } from "@/lib/boundedCache";
 import { ANALYSIS_JOB_TIMEOUT_MS, pickNextAnalysisJob } from "@/lib/analysisJobs";
 import { LOOKUP_LOOKAHEAD, reachableTracks } from "@/lib/lookahead";
 import { withTimeout } from "@/lib/withTimeout";
+import { voiceCutoffSec } from "@/lib/voiceMap";
 import { INITIAL_AUTO_FX_STATE, decideAutoFx, type AutoFxState } from "@/lib/autoFx";
 import { effectiveAutoFxChoice } from "@/lib/autoFxSettings";
 import { FX_LOAD_IDLE, beginFxRequest, finishFxRequest, pressFx, resetFxLoad, type FxLoadState } from "@/lib/fxLayer";
@@ -3009,6 +3010,7 @@ export function DualDeckStage() {
         excludeTransitionIds: state.stemAvailability[nextTrack.id]
           ? state.rerolledTransitionIds
           : [...state.rerolledTransitionIds, "vocal-layering"],
+        vocalStemReady: Boolean(state.stemAvailability[nextTrack.id]),
         varietyBias: state.djVarietyBias,
         categoryWeights: useDjWeights.getState().categoryWeights,
         quantize: state.quantizeEnabled,
@@ -3018,7 +3020,7 @@ export function DualDeckStage() {
         duration / 2,
         Math.max(1, nextTrack.durationSec - plan.incomingEntryOffsetSec)
       );
-      // Four independent triggers, any one of which starts the transition:
+      // Five independent triggers, any one of which starts the transition:
       // - near the natural end of the file (the classic case)
       // - a hard ceiling on active playback time, so a track never rides
       //   past MAX_ACTIVE_PLAY_SEC regardless of how long the file is
@@ -3029,11 +3031,18 @@ export function DualDeckStage() {
       // - Breakdown Mixing: the outgoing track's low-energy breakdown is
       //   imminent — an opportunistic early mix since there's less to
       //   clash with, for whichever transition style got chosen
+      // - Voices done: the audio engineer's voice map (lib/voiceMap.ts) says the
+      //   singing ended and VOICE_SILENCE_CUT_SEC have passed with nobody
+      //   singing again — measured from the LAST voice in the track, so an
+      //   instrumental break mid-song is left alone. Only for tracks that
+      //   have voice data, and only when the "move on" setting is on.
       // Double Drop and Breakdown Mixing are gated behind MIN_ACTIVE_PLAY_SEC
       // (a floor, not a ceiling) — they're the two *opportunistic* triggers
       // that could otherwise fire well before a track's had any real airtime.
       const nearNaturalEnd = duration - currentTime <= clampedWindow;
       const pastActiveCap = currentTime >= MAX_ACTIVE_PLAY_SEC - clampedWindow;
+      const voiceCutoffAtSec = state.voiceCut.enabled ? voiceCutoffSec(state.trackVoiceMaps[track.id], duration) : null;
+      const voicesDone = voiceCutoffAtSec != null && currentTime >= voiceCutoffAtSec;
       const pastMinFloor = currentTime >= MIN_ACTIVE_PLAY_SEC;
       // Prefers the outgoing track's own *next upcoming* Hot Cue drop (Cue 4
       // if it hasn't happened yet, else Cue 6) over the single best-effort
@@ -3071,17 +3080,18 @@ export function DualDeckStage() {
         const nearNaturalEndSoon = duration - currentTime <= anticipationWindow;
         const pastActiveCapSoon = currentTime >= MAX_ACTIVE_PLAY_SEC - anticipationWindow;
         const pastMinFloorSoon = currentTime >= MIN_ACTIVE_PLAY_SEC - TEMPO_RAMP_PRE_WINDOW_SEC;
+        const voicesDoneSoon = voiceCutoffAtSec != null && currentTime >= voiceCutoffAtSec - TEMPO_RAMP_PRE_WINDOW_SEC;
         const breakdownOpportunitySoon =
           pastMinFloorSoon &&
           currentAnalysis.breakdownAtSec != null &&
           currentTime >= currentAnalysis.breakdownAtSec - anticipationWindow &&
           currentTime < currentAnalysis.breakdownAtSec + anticipationWindow;
-        if (nearNaturalEndSoon || pastActiveCapSoon || breakdownOpportunitySoon) {
+        if (nearNaturalEndSoon || pastActiveCapSoon || breakdownOpportunitySoon || voicesDoneSoon) {
           void startTempoRamp(track, nextTrack, currentAnalysis, nextAnalysis);
         }
       }
 
-      if (nearNaturalEnd || pastActiveCap || dropAligned || breakdownOpportunity) {
+      if (nearNaturalEnd || pastActiveCap || dropAligned || breakdownOpportunity || voicesDone) {
         if (nextTrack.source !== "local") {
           fadeThenAdvance(clampedWindow);
           tempoRampCompletedPairRef.current = null;
@@ -3228,6 +3238,7 @@ export function DualDeckStage() {
         excludeTransitionIds: state.stemAvailability[nextTrack.id]
           ? state.rerolledTransitionIds
           : [...state.rerolledTransitionIds, "vocal-layering"],
+        vocalStemReady: Boolean(state.stemAvailability[nextTrack.id]),
         varietyBias: state.djVarietyBias,
         categoryWeights: useDjWeights.getState().categoryWeights,
         quantize: state.quantizeEnabled,

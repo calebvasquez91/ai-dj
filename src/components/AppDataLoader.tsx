@@ -14,6 +14,8 @@ export function AppDataLoader() {
     void useStore.getState().loadPlaylists();
     void useStore.getState().loadFxLibrary();
     useStore.getState().loadAutoFx();
+    useStore.getState().loadStemAuto();
+    useStore.getState().loadVoiceCut();
   }, []);
 
   return null;

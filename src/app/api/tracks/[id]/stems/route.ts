@@ -10,18 +10,21 @@
 // it never waits on Replicate. GET is the poll: it checks Replicate's
 // current status and, the first time it sees "succeeded", pulls the 4 stem
 // files into this app's own Blob storage (Replicate's own output URLs are
-// temporary) before marking the job "ready". No webhook for this pass —
-// polling works identically in every environment with no extra setup, and
-// there's no existing job/webhook infrastructure in this app to extend
-// either way; a webhook is a natural, easy follow-up once this is proven
-// out and used at real volume.
+// temporary) before marking the job "ready". Replicate also calls
+// /api/stems/webhook when a run finishes (https deployments only), so the job
+// is settled even when nobody is polling — Replicate deletes a run's output
+// after about an hour, so a closed tab used to mean paid-for stems were lost.
+// Polling stays as the path that works everywhere (local dev, previews).
+// Both go through lib/stemJobs.ts's advanceStemJob.
 import { NextResponse } from "next/server";
-import Replicate from "replicate";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
-import { getStorageBackend, uploadBlobFile } from "@/lib/storage";
+import { getStorageBackend } from "@/lib/storage";
 import { trackSourceUrl } from "@/lib/trackApi";
 import { apiHandler, notFound, unauthorized } from "@/lib/apiRoute";
+import { autoBudgetDecision } from "@/lib/stemBudget";
+import { stemSummaryForUser } from "@/lib/stemSummary";
+import { advanceStemJob, replicateClient, stemWebhookUrl } from "@/lib/stemJobs";
 
 /**
  * ryan5453/demucs's currently-deployed version, pinned explicitly rather
@@ -38,29 +41,8 @@ import { apiHandler, notFound, unauthorized } from "@/lib/apiRoute";
  */
 const REPLICATE_MODEL_VERSION = "5a7041cc9b82e5a558fea6b3d7b12dea89625e89da33f0447bd727c2d0ab9e77";
 
-/**
- * Replicate's prediction API reports compute time (metrics.predict_time),
- * never a dollar figure, directly — you multiply by the model's per-second
- * hardware rate yourself. This is the rate replicate.com/ryan5453/demucs
- * itself displayed (Nvidia A100 40GB, ~$0.027 for a ~24s example run),
- * checked 2026-09-21. Replicate's general pricing page only lists an 80GB
- * A100 tier, so this model-specific figure may drift from it — cross-check
- * estimatedCostUsd against your own Replicate billing dashboard during your
- * 2-3-track test and adjust this constant if it's off.
- */
-const COST_PER_SECOND_USD = 0.027 / 24;
-
 /** How long a "pending" (claimed, Replicate not yet called) job may sit before POST treats it as dead. */
 const PENDING_STALE_MS = 2 * 60 * 1000;
-
-type StemName = "vocals" | "drums" | "bass" | "other";
-const STEM_NAMES: readonly StemName[] = ["vocals", "drums", "bass", "other"];
-
-function replicateClient(): Replicate {
-  const auth_token = process.env.REPLICATE_API_TOKEN;
-  if (!auth_token) throw new Error("REPLICATE_API_TOKEN is not set.");
-  return new Replicate({ auth: auth_token });
-}
 
 async function loadOwnedTrack(id: string, userId: string) {
   const track = await prisma.track.findUnique({ where: { id } });
@@ -101,32 +83,56 @@ async function handlePOST(request: Request, { params }: { params: Promise<{ id: 
   // were billed for) their own prediction. A "pending" row older than
   // PENDING_STALE_MS means the process that claimed it died before reaching
   // Replicate; it is treated as failed so the track is not stuck forever.
+  // `?auto=1` marks a start the app made on its own (the stem autopilot), as opposed to someone pressing the button.
+  // Those are held to the spending budget and to a few jobs at a time, and a failed job is never retried by them (it
+  // would be billed again for the same likely failure) — all enforced here, since a client can't be trusted with
+  // the money.
+  const auto = new URL(request.url).searchParams.get("auto") === "1";
   const claim = await prisma.$transaction(async (tx) => {
     await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${"stems:" + id}))`;
     const existing = await tx.stemSeparationJob.findFirst({ where: { trackId: id }, orderBy: { createdAt: "desc" } });
     if (existing) {
       const stalePending = existing.status === "pending" && Date.now() - existing.createdAt.getTime() > PENDING_STALE_MS;
       if (stalePending) {
-        await tx.stemSeparationJob.update({
+        const failed = await tx.stemSeparationJob.update({
           where: { id: existing.id },
           data: { status: "failed", errorMessage: "Never reached Replicate.", completedAt: new Date() },
         });
-      } else if (existing.status !== "failed") {
+        if (auto) return { existing: failed };
+      } else if (existing.status !== "failed" || auto) {
         return { existing };
       }
+    }
+    if (auto) {
+      const summary = await stemSummaryForUser(tx, session.user.id);
+      const decision = autoBudgetDecision({ spentUsd: summary.spentUsd, inFlight: summary.inFlight, budgetUsd: summary.budgetUsd });
+      if (!decision.allowed) return { blocked: { reason: decision.reason, summary } };
     }
     const job = await tx.stemSeparationJob.create({ data: { trackId: id, status: "pending", replicatePredictionId: "" } });
     return { job };
   });
+  if (claim.blocked) {
+    const { reason, summary } = claim.blocked;
+    return NextResponse.json(
+      {
+        error: reason === "budget" ? "The automatic stem separation budget has been reached." : "Too many separations are already running.",
+        reason,
+        ...summary,
+      },
+      { status: reason === "budget" ? 402 : 429 }
+    );
+  }
   if (claim.existing) return NextResponse.json(claim.existing);
   const claimed = claim.job;
 
+  const webhook = stemWebhookUrl(request.url);
   let prediction;
   try {
     const replicate = replicateClient();
     prediction = await replicate.predictions.create({
       version: REPLICATE_MODEL_VERSION,
       input: { audio: trackSourceUrl(track), output_format: "wav" },
+      ...(webhook ? { webhook, webhook_events_filter: ["completed" as const] } : {}),
     });
   } catch (err) {
     await prisma.stemSeparationJob
@@ -160,78 +166,11 @@ async function handleGET(request: Request, { params }: { params: Promise<{ id: s
   // track spams the console every session.
   if (!job) return NextResponse.json(null);
 
-  // Already resolved — no need to ask Replicate again. A still-"pending" job
-  // hasn't been handed to Replicate yet (POST is mid-flight) — nothing to poll.
-  if (job.status === "ready" || job.status === "failed" || !job.replicatePredictionId) {
-    return NextResponse.json(job);
-  }
-
-  let prediction;
   try {
-    const replicate = replicateClient();
-    prediction = await replicate.predictions.get(job.replicatePredictionId);
+    return NextResponse.json(await advanceStemJob(job));
   } catch (err) {
     return NextResponse.json({ error: `Failed to check Replicate status: ${String(err)}` }, { status: 502 });
   }
-
-  if (prediction.status === "succeeded") {
-    const output = prediction.output as Partial<Record<StemName, string>> | null;
-    if (!output || STEM_NAMES.some((stem) => typeof output[stem] !== "string")) {
-      const failed = await prisma.stemSeparationJob.update({
-        where: { id: job.id },
-        data: { status: "failed", errorMessage: "Replicate returned an unexpected output shape.", completedAt: new Date() },
-      });
-      return NextResponse.json(failed);
-    }
-    const uploaded = await Promise.all(
-      STEM_NAMES.map(async (stem) => {
-        const res = await fetch(output[stem] as string);
-        // Without this check a 4xx/5xx HTML error page was uploaded as the
-        // "stem" and the job marked ready with corrupt audio.
-        if (!res.ok) throw new Error(`Fetching the ${stem} stem failed (${res.status}).`);
-        const buffer = Buffer.from(await res.arrayBuffer());
-        // Replicate's own delivery URLs serve these as application/octet-stream
-        // regardless of actual format — we know it's really WAV since that's
-        // what we requested via output_format above, so set it explicitly
-        // rather than trusting (or falling back past) their generic header.
-        const url = await uploadBlobFile(`stems/${id}/${job.id}-${stem}.wav`, buffer, "audio/wav");
-        return [stem, url] as const;
-      })
-    );
-    const urls = Object.fromEntries(uploaded) as Record<StemName, string>;
-    const predictTimeSec = prediction.metrics?.predict_time ?? null;
-
-    const updated = await prisma.stemSeparationJob.update({
-      where: { id: job.id },
-      data: {
-        status: "ready",
-        vocalsUrl: urls.vocals,
-        drumsUrl: urls.drums,
-        bassUrl: urls.bass,
-        otherUrl: urls.other,
-        predictTimeSec,
-        estimatedCostUsd: predictTimeSec != null ? predictTimeSec * COST_PER_SECOND_USD : null,
-        replicateModelVersion: prediction.version,
-        completedAt: new Date(),
-      },
-    });
-    return NextResponse.json(updated);
-  }
-
-  if (prediction.status === "failed" || prediction.status === "canceled" || prediction.status === "aborted") {
-    const updated = await prisma.stemSeparationJob.update({
-      where: { id: job.id },
-      data: {
-        status: "failed",
-        errorMessage: typeof prediction.error === "string" ? prediction.error : JSON.stringify(prediction.error ?? "Unknown error"),
-        completedAt: new Date(),
-      },
-    });
-    return NextResponse.json(updated);
-  }
-
-  // Still "starting"/"processing" on Replicate's side — nothing new yet.
-  return NextResponse.json(job);
 }
 
 export const POST = apiHandler(handlePOST);

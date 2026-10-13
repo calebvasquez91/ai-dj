@@ -30,6 +30,10 @@ export interface AiNextTrackCandidate {
   energy: number | null;
   /** false for a YouTube track (no raw audio buffer access, so bpm/key/energy above are a best-effort metadata match or a structural estimate, never real per-sample analysis) or a local track that hasn't been analyzed yet. Told to Claude explicitly so it can weigh these fields' reliability, not just their presence. */
   hasRealAnalysis: boolean;
+  /** "ready" when this track's isolated vocal stem has already been separated, so a vocal-layering transition into it is possible; "none" otherwise. Optional so older callers still work. */
+  stems?: "ready" | "none";
+  /** The audio engineer's 0-100 rating of how well this track suits stem treatment (lib/stemPlanner.ts); null when it can't be rated yet (not analysed), absent for older callers. */
+  engineerStemScore?: number | null;
 }
 
 export interface AiDjBoardState {
@@ -66,7 +70,7 @@ export const DJ_MODE_DESCRIPTIONS: Record<DjSetMode, string> = {
 export const AI_CANDIDATE_CAP = 60;
 
 const SYSTEM_PROMPT =
-  "You are an AI DJ. Given the current track and the remaining unplayed tracks, choose the single best next track for a seamless mix. Consider BPM compatibility (prefer within 6 BPM or exact double/half), key compatibility (same key, relative major/minor, or adjacent on the circle of fifths), energy arc (build, sustain, or release depending on DJ board energy setting), and the active mix mode. Each candidate has hasRealAnalysis: true (real per-track BPM/key/energy detection) or false (a rough metadata-based or estimated guess, less trustworthy) — when two candidates are otherwise close, prefer the one with hasRealAnalysis: true. Return only a JSON object: { trackId: string, transitionNote: string, recommendedCrossfadeSeconds: number }";
+  "You are an AI DJ. Given the current track and the remaining unplayed tracks, choose the single best next track for a seamless mix. Consider BPM compatibility (prefer within 6 BPM or exact double/half), key compatibility (same key, relative major/minor, or adjacent on the circle of fifths), energy arc (build, sustain, or release depending on DJ board energy setting), and the active mix mode. Each candidate has hasRealAnalysis: true (real per-track BPM/key/energy detection) or false (a rough metadata-based or estimated guess, less trustworthy) — when two candidates are otherwise close, prefer the one with hasRealAnalysis: true. Each candidate also has stems: \"ready\" when its isolated vocal stem has been separated (so a vocal-layering transition into it is possible) and engineerStemScore, the audio engineer's 0-100 rating of how well the track suits stem treatment — when candidates are otherwise close, prefer one with stems ready, and say so in transitionNote. Return only a JSON object: { trackId: string, transitionNote: string, recommendedCrossfadeSeconds: number }";
 
 // The originally-specified "claude-sonnet-4-20250514" 404s on the current
 // Anthropic API (confirmed in production logs — not_found_error) — that

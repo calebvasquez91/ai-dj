@@ -32,8 +32,41 @@ import {
   clampFxLevel,
 } from "@/lib/layerMix";
 import { AUTO_FX_DEFAULTS, loadAutoFxSettings, saveAutoFxSettings, type AutoFxSettings } from "@/lib/autoFxSettings";
+import { STEM_AUTO_DEFAULTS, loadStemAutoSettings, saveStemAutoSettings, type StemAutoSettings } from "@/lib/stemAutoSettings";
+import type { StemJobState } from "@/lib/stemAutopilot";
+import { judgeStemCandidate } from "@/lib/stemPlanner";
+import { VOICE_CUT_DEFAULTS, loadVoiceCutSettings, saveVoiceCutSettings, type VoiceCutSettings } from "@/lib/voiceCutSettings";
+import type { VoiceMap } from "@/lib/voiceMap";
 
 const MAX_HISTORY = 50;
+
+/** One upcoming track the audio engineer has judged for stems, and where its separation stands. */
+export interface StemPick {
+  trackId: string;
+  title: string;
+  score: number;
+  worthIt: boolean;
+  reasons: string[];
+  state: StemJobState;
+}
+
+export interface StemAutopilotStatus {
+  /** off: switched off. idle: on, nothing to do right now. working: a separation is running or being started. paused: stopped by a problem (budget reached, Replicate not set up, ...) — see `message`. */
+  state: "off" | "idle" | "working" | "paused";
+  message: string | null;
+  /** The engineer's verdicts for the upcoming tracks, nearest first. */
+  picks: StemPick[];
+  spentUsd: number | null;
+  budgetUsd: number | null;
+}
+
+export const INITIAL_STEM_AUTOPILOT_STATUS: StemAutopilotStatus = {
+  state: "off",
+  message: null,
+  picks: [],
+  spentUsd: null,
+  budgetUsd: null,
+};
 
 /** Maps a track over every place a Track object lives in the store (library, playlists, queue, current) — the one patch shape the optimistic curation setters and their rollbacks share. */
 function patchTrackEverywhere(s: PlayerState, trackId: string, fn: (t: Track) => Track) {
@@ -138,6 +171,14 @@ interface PlayerState {
   fxLayerActive: boolean;
   /** Auto FX: fire a chosen effect when playback enters an energy peak or valley (lib/autoFx.ts). Saved in localStorage. */
   autoFx: AutoFxSettings;
+  /** Automatic stem separation (components/StemAutopilot.tsx): off by default because it spends money. Saved in localStorage. */
+  stemAuto: StemAutoSettings;
+  /** Move on 10 s after a track's last voice (lib/voiceMap.ts). On by default; only ever acts on tracks that have voice data. Saved in localStorage. */
+  voiceCut: VoiceCutSettings;
+  /** Voice maps (when the singing happens), built ahead of time by VoiceMapLoader: absent = not tried yet, null = tried and nothing usable. In-memory only — they are cheap to rebuild and hold times, never words. */
+  trackVoiceMaps: Record<string, VoiceMap | null>;
+  /** Live status of the stem autopilot, written by StemAutopilot and read by the Stems panel. */
+  stemAutopilot: StemAutopilotStatus;
   /** Opportunistic tempo/key-matched dual-track mashup moments — a distinct, rarer "special moment" from ambience FX. */
   mashupEnabled: boolean;
 
@@ -278,6 +319,14 @@ interface PlayerState {
   setFxPlaying: (playing: boolean) => void;
   setFxLayerActive: (active: boolean) => void;
   setAutoFx: (patch: Partial<AutoFxSettings>) => void;
+  setStemAuto: (patch: Partial<StemAutoSettings>) => void;
+  setVoiceCut: (patch: Partial<VoiceCutSettings>) => void;
+  /** Reads the saved voice-cut setting (browser only; called once on app load). */
+  loadVoiceCut: () => void;
+  setTrackVoiceMap: (trackId: string, map: VoiceMap | null) => void;
+  /** Reads the saved stem-autopilot setting (browser only; called once on app load). */
+  loadStemAuto: () => void;
+  setStemAutopilotStatus: (status: StemAutopilotStatus) => void;
   /** Reads the saved Auto FX settings (browser only; called once on app load). */
   loadAutoFx: () => void;
   requestFx: () => void;
@@ -383,6 +432,10 @@ export const useStore = create<PlayerState>()(
       fxPlaying: false,
       fxLayerActive: false,
       autoFx: AUTO_FX_DEFAULTS,
+      stemAuto: STEM_AUTO_DEFAULTS,
+      voiceCut: VOICE_CUT_DEFAULTS,
+      trackVoiceMaps: {},
+      stemAutopilot: INITIAL_STEM_AUTOPILOT_STATUS,
       mashupEnabled: true,
 
       mixerPanelOpen: false,
@@ -466,6 +519,8 @@ export const useStore = create<PlayerState>()(
           queue,
           shuffleSession,
           trackAnalysis,
+          stemAvailability,
+          trackLyricalFingerprints,
           djMode,
           crossfadeOverrideSec,
           styleGenreHint,
@@ -485,6 +540,15 @@ export const useStore = create<PlayerState>()(
             camelotKey: analysis?.camelotKey ?? null,
             energy: analysis ? meanEnergy(analysis.waveformPeaks) : null,
             hasRealAnalysis: analysis != null && !analysis.fallback,
+            stems: stemAvailability[t.id] ? "ready" : "none",
+            engineerStemScore:
+              analysis && !analysis.fallback
+                ? judgeStemCandidate({
+                    track: t,
+                    analysis,
+                    hasLyrics: (trackLyricalFingerprints[t.id]?.words?.size ?? 0) > 0,
+                  }).score
+                : null,
           };
         };
 
@@ -774,6 +838,20 @@ export const useStore = create<PlayerState>()(
         saveAutoFxSettings(autoFx);
       },
       loadAutoFx: () => set({ autoFx: loadAutoFxSettings() }),
+      setStemAuto: (patch) => {
+        const stemAuto = { ...get().stemAuto, ...patch };
+        set({ stemAuto });
+        saveStemAutoSettings(stemAuto);
+      },
+      loadStemAuto: () => set({ stemAuto: loadStemAutoSettings() }),
+      setVoiceCut: (patch) => {
+        const voiceCut = { ...get().voiceCut, ...patch };
+        set({ voiceCut });
+        saveVoiceCutSettings(voiceCut);
+      },
+      loadVoiceCut: () => set({ voiceCut: loadVoiceCutSettings() }),
+      setTrackVoiceMap: (trackId, map) => set((s) => ({ trackVoiceMaps: { ...s.trackVoiceMaps, [trackId]: map } })),
+      setStemAutopilotStatus: (stemAutopilot) => set({ stemAutopilot }),
       requestFx: () => set((s) => ({ fxRequestId: s.fxRequestId + 1 })),
       setMashupEnabled: (enabled) => set({ mashupEnabled: enabled }),
       // Only localLibrary is the source of truth for curation flags, but
