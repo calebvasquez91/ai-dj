@@ -39,6 +39,15 @@ export interface AiFxBoardState {
   mixMode: DjSetMode;
   /** Manual crossfade override in seconds, null when the mix engine chooses automatically. */
   crossfadeSeconds: number | null;
+  /** The sync engine's read of this transition (lib/syncEngine.ts), when both tracks are analysed — lets the FX be chosen to fit how the mix will actually go. */
+  sync?: {
+    bpmStrategy: string;
+    keyCompatibility: string;
+    pitchShiftSemitones: number;
+    /** build = energy rises into the next track, release = falls, sustain = holds, contrast = a big swing. */
+    energyStrategy: string;
+    crossfadeSeconds: number;
+  };
 }
 
 export interface AiFxPickResult {
@@ -62,7 +71,7 @@ const DEFAULT_VOLUME_MULTIPLIER = 0.5;
 const MAX_FX_START_OFFSET_SEC = 30;
 
 const SYSTEM_PROMPT =
-  "You are an expert DJ and sound designer. Given two tracks and a library of FX sounds, select the single best transition FX to play during the crossfade. If the FX has no BPM or key data, infer compatibility from its name, tags, category, and duration relative to the crossfade window. For sounds with unknown key or BPM, reason about the mood and texture — a rising sweep works universally, a vocal stab needs key alignment. Return only JSON: { fxId: string, startOffsetSeconds: number, volumeMultiplier: number, reason: string }";
+  "You are an expert DJ and sound designer. Given two tracks and a library of FX sounds, select the single best transition FX to play during the crossfade. If the FX has no BPM or key data, infer compatibility from its name, tags, category, and duration relative to the crossfade window. For sounds with unknown key or BPM, reason about the mood and texture — a rising sweep works universally, a vocal stab needs key alignment. boardState.sync, when present, describes the mix: choose an FX that fits its energyStrategy (a riser for build, a downlifter or reverse sweep for release, an impact for contrast) and whose length suits crossfadeSeconds, and avoid pitched FX when keyCompatibility is tension or clash. Return only JSON: { fxId: string, startOffsetSeconds: number, volumeMultiplier: number, reason: string }";
 
 /** Bare-minimum fallback (used both server-side, when the Claude call itself fails/times out, and client-side, if the request to our own route fails outright) — prefers a "transition"-category FX, closest BPM to the current track when both have one, first candidate otherwise. null fxId when the library (or the filtered candidate set, e.g. halloween-affinity-only) is empty — silence is a valid outcome, not an error. */
 export function pickFallbackTransitionFx(

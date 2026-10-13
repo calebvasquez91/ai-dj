@@ -22,7 +22,8 @@ import {
   pickByBpmProximity,
   type AiNextTrackCandidate,
 } from "@/lib/ai-dj";
-import { pickFallbackTransitionFx, type AiFxCandidate, type AiFxTrackProfile } from "@/lib/ai-fx";
+import { pickFallbackTransitionFx, type AiFxBoardState, type AiFxCandidate, type AiFxTrackProfile } from "@/lib/ai-fx";
+import { buildSyncReport, candidateSyncSummary } from "@/lib/syncEngine";
 import { jsonInit, syncRequest } from "@/lib/syncRequest";
 import { hasHalloweenAffinity } from "@/lib/fxAffinity";
 import {
@@ -552,6 +553,16 @@ export const useStore = create<PlayerState>()(
           };
         };
 
+        // Each candidate also carries how it would sync after the playing track (tempo strategy, key shift), so the
+        // AI can prefer a pick the sync engine can mix cleanly. Needs real analysis of both sides.
+        const currentAnalysis = trackAnalysis[currentTrack.id];
+        const toSyncedCandidate = (t: Track): AiNextTrackCandidate => {
+          const candidate = toCandidate(t);
+          const analysis = trackAnalysis[t.id];
+          if (!currentAnalysis || currentAnalysis.fallback || !analysis || analysis.fallback) return candidate;
+          return { ...candidate, sync: candidateSyncSummary(currentAnalysis, analysis) };
+        };
+
         // Candidate pool for the AI: everything already queued, topped up
         // (bounded by AI_CANDIDATE_CAP) with the wider still-unplayed pool
         // so Claude reasons over more than just the small rolling window —
@@ -575,7 +586,7 @@ export const useStore = create<PlayerState>()(
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
               currentTrack: toCandidate(currentTrack),
-              candidates: candidateTracks.map(toCandidate),
+              candidates: candidateTracks.map(toSyncedCandidate),
               boardState: {
                 mixMode: djMode,
                 mixModeDescription: DJ_MODE_DESCRIPTIONS[djMode],
@@ -673,6 +684,24 @@ export const useStore = create<PlayerState>()(
         });
         const fxCandidates = eligibleFx.map(toCandidate);
 
+        // How this mix will go, for choosing an FX that fits it (needs real analysis of both tracks).
+        const currentAnalysis = trackAnalysis[currentTrack.id];
+        const nextAnalysis = trackAnalysis[nextTrack.id];
+        let sync: AiFxBoardState["sync"];
+        if (currentAnalysis && !currentAnalysis.fallback && nextAnalysis && !nextAnalysis.fallback) {
+          const report = buildSyncReport({
+            current: { track: currentTrack, analysis: currentAnalysis },
+            next: { track: nextTrack, analysis: nextAnalysis },
+          });
+          sync = {
+            bpmStrategy: report.bpmStrategy,
+            keyCompatibility: report.keyCompatibility,
+            pitchShiftSemitones: report.pitchShiftSemitones,
+            energyStrategy: report.energyStrategy,
+            crossfadeSeconds: crossfadeOverrideSec ?? Math.round(report.crossfadeDurationMs / 1000),
+          };
+        }
+
         const trackIdAtStart = currentTrack.id;
         const nextTrackIdAtStart = nextTrack.id;
         set({ aiFxPickLoading: true });
@@ -686,7 +715,7 @@ export const useStore = create<PlayerState>()(
               currentTrack: toProfile(currentTrack),
               nextTrack: toProfile(nextTrack),
               fxLibrary: fxCandidates,
-              boardState: { mixMode: djMode, crossfadeSeconds: crossfadeOverrideSec },
+              boardState: { mixMode: djMode, crossfadeSeconds: crossfadeOverrideSec, sync },
             }),
           });
           picked = res.ok ? await res.json() : pickFallbackTransitionFx(toProfile(currentTrack), fxCandidates);
