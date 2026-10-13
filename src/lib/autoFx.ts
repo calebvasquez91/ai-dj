@@ -2,7 +2,8 @@
  * Auto FX: fire a chosen effect when playback ENTERS an energy peak or valley of the current track
  * (lib/energyProfile.ts). Pure decision logic — DualDeckStage.tsx plays the sound and calls this every tick.
  *
- * "Enters" means the zone changed since the last tick, so:
+ * It fires on a zone CHANGE (see zoneEntryEvent in lib/energyProfile.ts: entering a peak or a valley, or rising out of
+ * a valley back into the body of the track — the drop), so:
  *  - a track that starts in a valley (a quiet intro) does not fire at 0:00,
  *  - a seek into the middle of a peak does not fire,
  *  - turning Auto FX on while a peak is already playing waits for the next one,
@@ -10,7 +11,7 @@
  *    with no previous zone there is nothing to have "entered" from.
  */
 
-import { energyZoneAt, type EnergyZone } from "@/lib/energyProfile";
+import { energyZoneAt, zoneEntryEvent, type EnergyZone } from "@/lib/energyProfile";
 
 /** The track's last stretch belongs to the transition and its own FX. */
 export const AUTO_FX_TRANSITION_LEAD_SEC = 15;
@@ -56,13 +57,14 @@ export function decideAutoFx({
     lastFiredSec: sameTrack ? state.lastFiredSec : null,
   };
 
-  if (!enabled || !zone || !sameTrack || seeked || state.lastZone == null) return { fire: null, state: next };
-  if (zone === state.lastZone || zone === "mid") return { fire: null, state: next };
+  if (!enabled || !zone || !sameTrack || seeked) return { fire: null, state: next };
+  const event = zoneEntryEvent(state.lastZone, zone);
+  if (!event) return { fire: null, state: next };
   if (durationSec - currentTimeSec <= AUTO_FX_TRANSITION_LEAD_SEC) return { fire: null, state: next };
   // currentTime < lastFiredSec means playback went back past the last firing (a seek the jump check missed): don't let the stale stamp block it.
   const lastFired = state.lastFiredSec;
   if (lastFired != null && currentTimeSec >= lastFired && currentTimeSec - lastFired < AUTO_FX_MIN_GAP_SEC) {
     return { fire: null, state: next };
   }
-  return { fire: zone, state: { ...next, lastFiredSec: currentTimeSec } };
+  return { fire: event, state: { ...next, lastFiredSec: currentTimeSec } };
 }

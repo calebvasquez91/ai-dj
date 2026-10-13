@@ -29,11 +29,27 @@ function play(from: number, to: number, start: AutoFxState = INITIAL_AUTO_FX_STA
 }
 
 describe("decideAutoFx", () => {
-  it("fires once on entering a peak, and once on entering the later valley", () => {
+  it("fires on the drop out of the opening valley, on entering the peak, and on entering the later valley", () => {
     const { fired } = play(0, 190);
+    expect(fired.map((f) => f.zone)).toEqual(["peak", "peak", "valley"]);
+    expect(fired[0].at).toBeCloseTo(40, 0); // valley -> body: bucket 20 starts at 40 s
+    expect(fired[1].at).toBeCloseTo(80, 0); // body -> peak: bucket 40 starts at 80 s
+    expect(fired[2].at).toBeCloseTo(160, 0); // body -> valley: bucket 80 starts at 160 s
+  });
+
+  it("fires the peak effect at the drop of a loud, even song that has no peak zone at all", () => {
+    // quiet intro (valley) -> loud body (mid, nothing stands out) -> quiet outro: the body is never a "peak"
+    const zones: EnergyZone[] = Array.from({ length: 100 }, (_, i) => (i < 15 ? "valley" : i < 85 ? "mid" : "valley"));
+    const { fired } = play(0, 190, INITIAL_AUTO_FX_STATE, { zones });
     expect(fired.map((f) => f.zone)).toEqual(["peak", "valley"]);
-    expect(fired[0].at).toBeCloseTo(80, 0); // bucket 40 starts at 80 s
-    expect(fired[1].at).toBeCloseTo(160, 0); // bucket 80 starts at 160 s
+    expect(fired[0].at).toBeCloseTo(30, 0); // the intro ends and the body starts
+    expect(fired[1].at).toBeCloseTo(170, 0); // the outro valley
+  });
+
+  it("does not fire when a peak settles back into the body", () => {
+    const zones: EnergyZone[] = Array.from({ length: 100 }, (_, i) => (i < 30 ? "mid" : i < 50 ? "peak" : "mid"));
+    const { fired } = play(0, 190, INITIAL_AUTO_FX_STATE, { zones });
+    expect(fired.map((f) => f.zone)).toEqual(["peak"]); // entering the peak only, not leaving it
   });
 
   it("does not fire at the start of a track that begins in a valley", () => {

@@ -24,9 +24,9 @@ export const ENERGY_PROFILE_POINTS = 100;
 const MIN_SPREAD = 0.25;
 
 /** A peak is within the loudest fifth of the track... */
-export const PEAK_SHARE = 0.2;
+const PEAK_SHARE = 0.2;
 /** ...and a valley within its quietest fifth. */
-export const VALLEY_SHARE = 0.2;
+const VALLEY_SHARE = 0.2;
 /**
  * A peak must also sit at least this far above the track's typical (median) level, and a valley at least this far
  * below it, as a fraction of the track's quietest-to-loudest range. Without it the rank rule would always hand the
@@ -75,13 +75,39 @@ export function energyZones(profile: number[]): EnergyZone[] {
   });
   const sorted = [...smooth].sort((a, b) => a - b);
   const median = quantile(sorted, 0.5);
-  const peakFrom = quantile(sorted, 1 - PEAK_SHARE);
-  const valleyTo = quantile(sorted, VALLEY_SHARE);
+  // The loudest `PEAK_SHARE * n` values are at or above sorted[n - k]; the quietest `VALLEY_SHARE * n` at or below
+  // sorted[k - 1]. (Indexing the quiet end with floor(share * n) instead took one value too many.)
+  const peakCount = Math.max(1, Math.ceil(n * PEAK_SHARE));
+  const valleyCount = Math.max(1, Math.ceil(n * VALLEY_SHARE));
+  const peakFrom = sorted[Math.max(0, n - peakCount)];
+  const valleyTo = sorted[Math.min(n - 1, valleyCount - 1)];
   return smooth.map((v) => {
     if (v >= peakFrom && v >= median + ZONE_MARGIN) return "peak";
     if (v <= valleyTo && v <= median - ZONE_MARGIN) return "valley";
     return "mid";
   });
+}
+
+/**
+ * The profile and its zones in one call, so everything that shows or acts on peaks and valleys (the energy graph, Auto
+ * FX) takes them from the same place and can't disagree. Both are [] when the track has no usable profile.
+ */
+export function analyzeEnergy(peaks: number[]): { profile: number[]; zones: EnergyZone[] } {
+  const profile = energyProfileFromPeaks(peaks);
+  return { profile, zones: energyZones(profile) };
+}
+
+/**
+ * What Auto FX does when playback moves from zone `prev` to zone `next`: "peak" for entering a peak AND for rising out
+ * of a valley back into the body of the track (the drop — in a loud, even song the body is never a "peak", so without
+ * this the moment you most want an effect would fire nothing), "valley" for dropping into a valley, otherwise null.
+ * No effect without a previous zone: there is nothing to have moved from.
+ */
+export function zoneEntryEvent(prev: EnergyZone | null, next: EnergyZone | null): "peak" | "valley" | null {
+  if (prev == null || next == null || prev === next) return null;
+  if (next === "peak") return "peak";
+  if (next === "valley") return "valley";
+  return prev === "valley" ? "peak" : null; // next is "mid"
 }
 
 /** The zone playback is in at `fraction` (0-1) of the way through the track; null with no zones. */

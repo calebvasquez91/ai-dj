@@ -48,7 +48,7 @@ import { withTimeout } from "@/lib/withTimeout";
 import { INITIAL_AUTO_FX_STATE, decideAutoFx, type AutoFxState } from "@/lib/autoFx";
 import { effectiveAutoFxChoice } from "@/lib/autoFxSettings";
 import { FX_LOAD_IDLE, beginFxRequest, finishFxRequest, pressFx, resetFxLoad, type FxLoadState } from "@/lib/fxLayer";
-import { energyProfileFromPeaks, energyZones, type EnergyZone } from "@/lib/energyProfile";
+import { analyzeEnergy, type EnergyZone } from "@/lib/energyProfile";
 import { hasHalloweenAffinity } from "@/lib/fxAffinity";
 import { requestLoopPick } from "@/lib/loopApi";
 import {
@@ -1445,7 +1445,7 @@ export function DualDeckStage() {
       const peaks = getAnalysis(track.id).waveformPeaks;
       if (memo.peaks !== peaks) {
         memo.peaks = peaks;
-        memo.zones = energyZones(energyProfileFromPeaks(peaks));
+        memo.zones = analyzeEnergy(peaks).zones;
       }
       const busy = transitionRef.current || mashupRef.current || loopRef.current || backspinRef.current || tempoRampRef.current;
       const decision = decideAutoFx({

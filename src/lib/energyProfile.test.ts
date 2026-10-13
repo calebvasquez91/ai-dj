@@ -1,9 +1,11 @@
 import { describe, expect, it } from "vitest";
 import {
   ENERGY_PROFILE_POINTS,
+  analyzeEnergy,
   energyProfileFromPeaks,
   energyZoneAt,
   energyZones,
+  zoneEntryEvent,
   type EnergyZone,
 } from "./energyProfile";
 
@@ -193,5 +195,50 @@ describe("energyZoneAt", () => {
   it("is null with no zones or a non-finite fraction", () => {
     expect(energyZoneAt([], 0.5)).toBeNull();
     expect(energyZoneAt(zonesOf(threeActs()), NaN)).toBeNull();
+  });
+});
+
+describe("energyZones shares are exact", () => {
+  it("gives a strictly rising track exactly a fifth peak and a fifth valley (no off-by-one on either end)", () => {
+    const ramp = Array.from({ length: 100 }, (_, i) => i / 99);
+    const zones = energyZones(ramp);
+    expect(zones.filter((z) => z === "peak")).toHaveLength(20);
+    expect(zones.filter((z) => z === "valley")).toHaveLength(20);
+    expect(zones[99]).toBe("peak");
+    expect(zones[0]).toBe("valley");
+  });
+});
+
+describe("zoneEntryEvent", () => {
+  it("fires 'peak' on entering a peak and 'valley' on entering a valley", () => {
+    expect(zoneEntryEvent("mid", "peak")).toBe("peak");
+    expect(zoneEntryEvent("valley", "peak")).toBe("peak");
+    expect(zoneEntryEvent("mid", "valley")).toBe("valley");
+    expect(zoneEntryEvent("peak", "valley")).toBe("valley");
+  });
+
+  it("fires 'peak' on rising out of a valley into the body (the drop)", () => {
+    expect(zoneEntryEvent("valley", "mid")).toBe("peak");
+  });
+
+  it("does nothing for staying put, settling out of a peak, or having no previous zone", () => {
+    expect(zoneEntryEvent("mid", "mid")).toBeNull();
+    expect(zoneEntryEvent("peak", "peak")).toBeNull();
+    expect(zoneEntryEvent("peak", "mid")).toBeNull();
+    expect(zoneEntryEvent(null, "peak")).toBeNull();
+    expect(zoneEntryEvent("mid", null)).toBeNull();
+  });
+});
+
+describe("analyzeEnergy", () => {
+  it("returns the profile and the zones together, from one source", () => {
+    const { profile, zones } = analyzeEnergy(threeActs());
+    expect(profile).toEqual(energyProfileFromPeaks(threeActs()));
+    expect(zones).toEqual(energyZones(profile));
+  });
+
+  it("is empty on both for a track with no usable profile", () => {
+    expect(analyzeEnergy([])).toEqual({ profile: [], zones: [] });
+    expect(analyzeEnergy(new Array(240).fill(0.6))).toEqual({ profile: [], zones: [] });
   });
 });
