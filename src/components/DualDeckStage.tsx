@@ -42,6 +42,7 @@ import {
   type AmbientDuckState,
 } from "@/lib/layerMix";
 import { BoundedCache } from "@/lib/boundedCache";
+import { ANALYSIS_LOOKAHEAD, LOOKUP_LOOKAHEAD, reachableTracks } from "@/lib/lookahead";
 import { INITIAL_AUTO_FX_STATE, decideAutoFx, type AutoFxState } from "@/lib/autoFx";
 import { effectiveAutoFxChoice } from "@/lib/autoFxSettings";
 import { FX_LOAD_IDLE, beginFxRequest, finishFxRequest, pressFx, resetFxLoad, type FxLoadState } from "@/lib/fxLayer";
@@ -156,8 +157,6 @@ const TEMPO_RAMP_PRE_WINDOW_SEC = 8;
 type LiveFx = { gain: GainNode; base: number; audible: boolean; timer: ReturnType<typeof setTimeout> | null };
 /** How long the FX layer's sound takes to fade out when the FX button is pressed again, or another effect replaces it. */
 const FX_STOP_FADE_SEC = 0.2;
-/** How many tracks past the playing one get a background song-map upgrade (see the analysis effect). */
-const SONG_MAP_UPGRADE_AHEAD = 2;
 /** Short fade at the <audio>-element/buffer-voice swap boundary (both directions) — belt-and-suspenders against a click even though both sides play identical content from the same position. */
 const TEMPO_RAMP_SWAP_FADE_SEC = 0.03;
 
@@ -313,10 +312,10 @@ export function DualDeckStage() {
   });
   const activeDeckRef = useRef<DeckId>("A");
   const analyzingRef = useRef<Set<string>>(new Set());
-  // Song-map upgrades of already-analysed tracks (see the analysis effect): one at a time, and only for the playing
-  // track and the next few. `songMapTick` re-runs the effect when one finishes so the next can start.
-  const songMapUpgradeBusyRef = useRef(false);
-  const [songMapTick, setSongMapTick] = useState(0);
+  // Background analysis (see the analysis effect) runs one track at a time: `analysisBusyRef` is set while a decode is
+  // in flight, and `analysisTick` re-runs the effect when it finishes so the next track in line can start.
+  const analysisBusyRef = useRef(false);
+  const [analysisTick, setAnalysisTick] = useState(0);
   const lyricsFetchingRef = useRef<Set<string>>(new Set());
   const stemCheckingRef = useRef<Set<string>>(new Set());
   const aiPickRequestedForRef = useRef<string | null>(null);
@@ -623,12 +622,14 @@ export function DualDeckStage() {
     reverseRef.current = null;
   }, [deckEl]);
 
-  // Background analysis: as soon as a track is reachable (now playing or
-  // queued), estimate its BPM/beat-grid/energy-onset/key so a mix engine
-  // decision is ready before Mix Now or an auto-transition needs it.
+  // Background analysis: the playing track and the next few queued ones (lib/lookahead.ts), estimating BPM / beat grid
+  // / energy onset / key so a mix engine decision is ready before Mix Now or an auto-transition needs it. Never the
+  // whole queue — starting playback from a big library queues thousands of tracks — and one track at a time, since
+  // each job fetches and decodes a whole audio file. The next track in line starts when this one finishes
+  // (`analysisTick`), and a track further down the queue gets its turn once it moves into the window.
   useEffect(() => {
-    const tracks = currentTrack ? [currentTrack, ...queue] : queue;
-    for (const [index, track] of tracks.entries()) {
+    if (analysisBusyRef.current) return;
+    for (const track of reachableTracks(currentTrack, queue, ANALYSIS_LOOKAHEAD)) {
       // YouTube tracks have no fetchable/decodable audio buffer to
       // analyze — trackAnalysis simply never gets an entry for them, which
       // the compatibility scorer and mix engine already treat as neutral.
@@ -636,49 +637,44 @@ export function DualDeckStage() {
       const state = useStore.getState();
       if (analyzingRef.current.has(track.id)) continue;
       const existing = state.trackAnalysis[track.id];
+      let job: Promise<void>;
       if (existing) {
         // Analysis persisted by an earlier session has no song map (src/lib/song-map.ts) and the server can't store
         // one yet. Keep the persisted numbers exactly as they are and just add the map, silently, in the background.
         // `undefined` = never tried; `null` = tried and nothing usable, so it isn't retried every time.
         if (existing.songMap !== undefined) continue;
-        // Re-decodes the whole file just to get the map, so never for the whole queue at once: the playing track
-        // and the next few only, one at a time.
-        if (index > SONG_MAP_UPGRADE_AHEAD || songMapUpgradeBusyRef.current) continue;
-        songMapUpgradeBusyRef.current = true;
-        analyzingRef.current.add(track.id);
-        analyzeTrackFromUrl(track.sourceUrl)
+        job = analyzeTrackFromUrl(track.sourceUrl)
           .then((fresh) => useStore.getState().setTrackSongMap(track.id, fresh.songMap ?? null))
-          .catch(() => useStore.getState().setTrackSongMap(track.id, null))
-          .finally(() => {
-            analyzingRef.current.delete(track.id);
-            songMapUpgradeBusyRef.current = false;
-            setSongMapTick((tick) => tick + 1);
-          });
-        continue;
+          .catch(() => useStore.getState().setTrackSongMap(track.id, null));
+      } else {
+        state.startAnalyzing(track.id);
+        // `songMap: null` ("tried, nothing usable") when the analysis came back without one (WASM/fallback paths):
+        // left undefined it would read as "never tried" and trigger a second full analysis of the same track.
+        job = analyzeTrackFromUrl(track.sourceUrl)
+          .then((analysis) =>
+            useStore.getState().setTrackAnalysis(track.id, analysis.songMap === undefined ? { ...analysis, songMap: null } : analysis)
+          )
+          .catch(() => useStore.getState().setTrackAnalysis(track.id, { ...fallbackAnalysis(), songMap: null }));
       }
+      analysisBusyRef.current = true;
       analyzingRef.current.add(track.id);
-      state.startAnalyzing(track.id);
-      // `songMap: null` ("tried, nothing usable") when the analysis came back without one (WASM/fallback paths):
-      // left undefined it would read as "never tried" and trigger a second full analysis of the same track.
-      analyzeTrackFromUrl(track.sourceUrl)
-        .then((analysis) =>
-          useStore.getState().setTrackAnalysis(track.id, analysis.songMap === undefined ? { ...analysis, songMap: null } : analysis)
-        )
-        .catch(() => useStore.getState().setTrackAnalysis(track.id, { ...fallbackAnalysis(), songMap: null }))
-        .finally(() => {
-          analyzingRef.current.delete(track.id);
-          useStore.getState().stopAnalyzing(track.id);
-        });
+      void job.finally(() => {
+        analyzingRef.current.delete(track.id);
+        analysisBusyRef.current = false;
+        if (!existing) useStore.getState().stopAnalyzing(track.id);
+        setAnalysisTick((tick) => tick + 1);
+      });
+      return; // one at a time
     }
-  }, [currentTrack, queue, songMapTick]);
+  }, [currentTrack, queue, analysisTick]);
 
-  // Same reachability rule as the analysis effect above, for the lyrical
-  // fingerprint (track-sequencing.ts's compatibility score) — a separate
-  // effect since it's an independent lookup (LRCLIB by title/artist, not
-  // decoded audio) with its own once-ever-per-track cache.
+  // Same reachability rule as the analysis effect above (the playing track and
+  // the next few, lib/lookahead.ts), for the lyrical fingerprint
+  // (track-sequencing.ts's compatibility score) — a separate effect since it's
+  // an independent lookup (LRCLIB by title/artist, not decoded audio) with its
+  // own once-ever-per-track cache.
   useEffect(() => {
-    const tracks = currentTrack ? [currentTrack, ...queue] : queue;
-    for (const track of tracks) {
+    for (const track of reachableTracks(currentTrack, queue, LOOKUP_LOOKAHEAD)) {
       const state = useStore.getState();
       if (state.trackLyricalFingerprints[track.id] || lyricsFetchingRef.current.has(track.id)) continue;
       lyricsFetchingRef.current.add(track.id);
@@ -711,8 +707,7 @@ export function DualDeckStage() {
   // eligibility (see the excludeTransitionIds merges below) — no other
   // effect.
   useEffect(() => {
-    const tracks = currentTrack ? [currentTrack, ...queue] : queue;
-    for (const track of tracks) {
+    for (const track of reachableTracks(currentTrack, queue, LOOKUP_LOOKAHEAD)) {
       if (track.source !== "local") continue; // only local tracks can ever have stems
       const state = useStore.getState();
       if (state.stemAvailability[track.id] !== undefined || stemCheckingRef.current.has(track.id)) continue;
