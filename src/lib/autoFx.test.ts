@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import type { EnergyZone } from "./energyProfile";
 import {
   AUTO_FX_MIN_GAP_SEC,
   AUTO_FX_TRANSITION_LEAD_SEC,
@@ -9,10 +10,10 @@ import {
 
 const DURATION = 200;
 /** 100 buckets of 2 s each: valley 0-19, mid 20-39, peak 40-59, mid 60-79, valley 80-99. */
-const PROFILE: number[] = Array.from({ length: 100 }, (_, i) => (i < 20 ? 0.1 : i < 40 ? 0.5 : i < 60 ? 0.95 : i < 80 ? 0.5 : 0.1));
+const ZONES: EnergyZone[] = Array.from({ length: 100 }, (_, i) => (i < 20 ? "valley" : i < 40 ? "mid" : i < 60 ? "peak" : i < 80 ? "mid" : "valley"));
 
 function tick(state: AutoFxState, t: number, over: Partial<Parameters<typeof decideAutoFx>[0]> = {}) {
-  return decideAutoFx({ enabled: true, trackId: "a", profile: PROFILE, currentTimeSec: t, durationSec: DURATION, state, ...over });
+  return decideAutoFx({ enabled: true, trackId: "a", zones: ZONES, currentTimeSec: t, durationSec: DURATION, state, ...over });
 }
 
 /** Plays 0.5 s ticks from `from` to `to`, returning every firing. */
@@ -57,15 +58,15 @@ describe("decideAutoFx", () => {
   });
 
   it("does not fire in the track's last stretch (the transition's)", () => {
-    const profile = Array.from({ length: 100 }, (_, i) => (i < 95 ? 0.5 : 0.95)); // peak from 95% = 190 s, 10 s from the end
-    const { fired } = play(150, 199, INITIAL_AUTO_FX_STATE, { profile });
+    const zones: EnergyZone[] = Array.from({ length: 100 }, (_, i) => (i < 95 ? "mid" : "peak")); // peak from 95% = 190 s, 10 s from the end
+    const { fired } = play(150, 199, INITIAL_AUTO_FX_STATE, { zones });
     expect(fired).toEqual([]);
     expect(DURATION - 190).toBeLessThanOrEqual(AUTO_FX_TRANSITION_LEAD_SEC);
   });
 
   it("keeps a minimum gap between auto effects on a jagged profile", () => {
-    const jagged = Array.from({ length: 100 }, (_, i) => (i % 2 === 0 ? 0.95 : 0.05)); // zone flips every 2 s
-    const { fired } = play(1, 150, INITIAL_AUTO_FX_STATE, { profile: jagged });
+    const jagged: EnergyZone[] = Array.from({ length: 100 }, (_, i) => (i % 2 === 0 ? "peak" : "valley")); // zone flips every 2 s
+    const { fired } = play(1, 150, INITIAL_AUTO_FX_STATE, { zones: jagged });
     expect(fired.length).toBeGreaterThan(1);
     for (let i = 1; i < fired.length; i++) expect(fired[i].at - fired[i - 1].at).toBeGreaterThanOrEqual(AUTO_FX_MIN_GAP_SEC);
   });
@@ -80,7 +81,7 @@ describe("decideAutoFx", () => {
 
   it("does not fire when the profile only becomes available mid-track (analysis finishing late)", () => {
     // playback is already 100 s in with no profile yet (analysis not done)...
-    const noProfile = play(100, 104, INITIAL_AUTO_FX_STATE, { profile: [] }).state;
+    const noProfile = play(100, 104, INITIAL_AUTO_FX_STATE, { zones: [] }).state;
     expect(noProfile.lastZone).toBeNull();
     // ...and the profile arrives at 104.5 s, in the middle of a peak (80-120 s): there is no previous zone to have entered from
     const arrived = tick(noProfile, 104.5);
@@ -90,7 +91,7 @@ describe("decideAutoFx", () => {
   });
 
   it("does nothing without a profile or duration", () => {
-    expect(play(0, 100, INITIAL_AUTO_FX_STATE, { profile: [] }).fired).toEqual([]);
+    expect(play(0, 100, INITIAL_AUTO_FX_STATE, { zones: [] }).fired).toEqual([]);
     expect(tick(INITIAL_AUTO_FX_STATE, 5, { durationSec: 0 }).fire).toBeNull();
   });
 });

@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo } from "react";
-import { energyProfileFromPeaks, zoneOfEnergy } from "@/lib/energyProfile";
+import { energyProfileFromPeaks, energyZones } from "@/lib/energyProfile";
 
 /**
  * Mini energy graph shown above a deck's waveform: the track's energy across its length (lib/energyProfile.ts), with
@@ -11,10 +11,12 @@ import { energyProfileFromPeaks, zoneOfEnergy } from "@/lib/energyProfile";
 export function EnergyGraph({ peaks, progressRatio }: { peaks: number[]; progressRatio?: number }) {
   const profile = useMemo(() => energyProfileFromPeaks(peaks), [peaks]);
   // The bars depend only on the profile; the playhead moves several times a second, so it is drawn outside this memo.
+  // Bar height is the real energy; the colour is the zone (a peak is the track's loudest fifth, a valley its quietest).
   const bars = useMemo(
-    () =>
-      profile.map((value, i) => {
-        const zone = zoneOfEnergy(value);
+    () => {
+      const zones = energyZones(profile);
+      return profile.map((value, i) => {
+        const zone = zones[i];
         const height = Math.max(0.6, value * 20);
         return (
           <rect
@@ -29,7 +31,8 @@ export function EnergyGraph({ peaks, progressRatio }: { peaks: number[]; progres
             }}
           />
         );
-      }),
+      });
+    },
     [profile]
   );
   if (profile.length === 0) return null;

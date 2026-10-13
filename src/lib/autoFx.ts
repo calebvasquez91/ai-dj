@@ -31,7 +31,8 @@ export const INITIAL_AUTO_FX_STATE: AutoFxState = { trackId: null, lastZone: nul
 export interface AutoFxInput {
   enabled: boolean;
   trackId: string;
-  profile: number[];
+  /** The track's energy zones (energyZones in lib/energyProfile.ts), or [] when it has no usable profile. */
+  zones: EnergyZone[];
   currentTimeSec: number;
   durationSec: number;
   state: AutoFxState;
@@ -40,12 +41,12 @@ export interface AutoFxInput {
 export function decideAutoFx({
   enabled,
   trackId,
-  profile,
+  zones,
   currentTimeSec,
   durationSec,
   state,
 }: AutoFxInput): { fire: "peak" | "valley" | null; state: AutoFxState } {
-  const zone = durationSec > 0 ? energyZoneAt(profile, currentTimeSec / durationSec) : null;
+  const zone = durationSec > 0 ? energyZoneAt(zones, currentTimeSec / durationSec) : null;
   const sameTrack = state.trackId === trackId;
   const seeked = state.lastTimeSec == null || Math.abs(currentTimeSec - state.lastTimeSec) > SEEK_JUMP_SEC;
   const next: AutoFxState = {
