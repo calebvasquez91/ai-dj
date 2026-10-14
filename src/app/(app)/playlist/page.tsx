@@ -67,8 +67,7 @@ function PlaylistContent() {
   const removePlaylist = useStore((s) => s.removePlaylist);
   const removeTrackFromPlaylist = useStore((s) => s.removeTrackFromPlaylist);
   const moveTrackInPlaylist = useStore((s) => s.moveTrackInPlaylist);
-  const playTrackList = useStore((s) => s.playTrackList);
-  const startShuffle = useStore((s) => s.startShuffle);
+  const playPlaylist = useStore((s) => s.playPlaylist);
   const currentTrack = useStore((s) => s.currentTrack);
   const setTrackPlayPreference = useStore((s) => s.setTrackPlayPreference);
 
@@ -115,14 +114,14 @@ function PlaylistContent() {
           <div className="flex items-center gap-3">
             <button
               type="button"
-              onClick={() => playTrackList(playlist.tracks, 0, playlist.theme)}
+              onClick={() => playPlaylist(playlist)}
               className="btn self-start"
             >
               ▶ Play
             </button>
             <button
               type="button"
-              onClick={() => startShuffle(playlist.tracks, playlist.theme)}
+              onClick={() => playPlaylist(playlist, { shuffle: true })}
               disabled={playlist.tracks.filter((t) => t.playPreference !== "do-not").length < 2}
               className="btn-outline self-start"
               title="Play this playlist ordered by tempo/key/energy/theme compatibility — skips Do-Not-Play tracks, puts Must-Play tracks first"
@@ -143,10 +142,10 @@ function PlaylistContent() {
                 key={track.id}
                 role="button"
                 tabIndex={0}
-                onClick={() => playTrackList(playlist.tracks, index, playlist.theme)}
+                onClick={() => playPlaylist(playlist, { startIndex: index })}
                 onKeyDown={(e) => {
                   if (e.key === "Enter" || e.key === " ")
-                    playTrackList(playlist.tracks, index, playlist.theme);
+                    playPlaylist(playlist, { startIndex: index });
                 }}
                 // flex-wrap: on a narrow screen the controls drop to a second
                 // line under the title (the title block keeps a min basis)

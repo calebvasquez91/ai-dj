@@ -245,6 +245,8 @@ interface PlayerState {
   playTrackList: (tracks: Track[], startIndex: number, sourcePlaylistTheme?: string | null) => void;
   /** Starts a true, DJ-driven shuffle session: queues an initial compatibility-aware, non-repeating batch and marks the session active so `next()` keeps extending it as it runs low. See lib/shuffle.ts. */
   startShuffle: (tracks: Track[], sourcePlaylistTheme?: string | null) => void;
+  /** Plays a playlist (from `startIndex`, or as a Shuffle Play session), carrying its `theme` so a themed playlist can't lose its look by one entry point forgetting to pass it. Use this, not playTrackList/startShuffle, for anything that plays a whole playlist. */
+  playPlaylist: (playlist: Pick<Playlist, "tracks" | "theme">, options?: { startIndex?: number; shuffle?: boolean }) => void;
   /**
    * Asks the Anthropic API (via /api/dj/next-track) to pick the best next
    * track for a shuffle session, then reorders it to the front of the
@@ -522,6 +524,12 @@ export const useStore = create<PlayerState>()(
           shuffleSession: { pool, unplayedIds: pool.filter((t) => !batchIds.has(t.id)).map((t) => t.id) },
           recentShuffleOpeningIds: batch.map((t) => t.id),
         });
+      },
+
+      playPlaylist: (playlist, { startIndex = 0, shuffle = false } = {}) => {
+        const theme = playlist.theme ?? null;
+        if (shuffle) get().startShuffle(playlist.tracks, theme);
+        else get().playTrackList(playlist.tracks, startIndex, theme);
       },
 
       requestAiNextPick: async () => {
@@ -991,6 +999,8 @@ export const useStore = create<PlayerState>()(
             currentTimeSec: 0,
             history: nextHistory,
             shuffleSession: null,
+            // Nothing left to play, so nothing left to theme — otherwise the Halloween backdrop, Que's costume and the ambient layer outlive the playlist.
+            activePlaylistTheme: null,
             aiNextPickTrackId: null,
             aiNextPickTransitionNote: null,
             aiNextPickRecommendedCrossfadeSec: null,
