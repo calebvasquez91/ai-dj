@@ -40,6 +40,71 @@ describe("startShuffle", () => {
   });
 });
 
+describe("startShuffle on a themed playlist", () => {
+  it("keeps the playlist's theme, so Halloween theming engages for Shuffle Play too", () => {
+    const tracks = Array.from({ length: 15 }, (_, i) => makeTrack(`t${i}`));
+    useStore.getState().startShuffle(tracks, "spooky");
+    expect(useStore.getState().activePlaylistTheme).toBe("spooky");
+  });
+
+  it("clears a previous theme when the shuffle isn't from a themed playlist", () => {
+    const tracks = Array.from({ length: 15 }, (_, i) => makeTrack(`t${i}`));
+    useStore.getState().playTrackList(tracks, 0, "spooky");
+    useStore.getState().startShuffle(tracks);
+    expect(useStore.getState().activePlaylistTheme).toBeNull();
+  });
+});
+
+describe("a themed playlist's theme through a running session", () => {
+  it("survives next() and shuffle queue extension while tracks keep playing", () => {
+    const tracks = Array.from({ length: 15 }, (_, i) => makeTrack(`t${i}`));
+    useStore.getState().startShuffle(tracks, "spooky");
+    for (let i = 0; i < 6; i++) {
+      useStore.getState().next();
+      const state = useStore.getState();
+      expect(state.currentTrack).not.toBeNull();
+      expect(state.activePlaylistTheme).toBe("spooky");
+    }
+  });
+
+  it("is cleared when the queue runs out and playback stops", () => {
+    const tracks = [makeTrack("a"), makeTrack("b")];
+    useStore.getState().playTrackList(tracks, 0, "spooky");
+    useStore.getState().next(); // b
+    expect(useStore.getState().activePlaylistTheme).toBe("spooky");
+    useStore.getState().next(); // nothing left
+    const state = useStore.getState();
+    expect(state.currentTrack).toBeNull();
+    expect(state.activePlaylistTheme).toBeNull();
+  });
+});
+
+describe("playPlaylist", () => {
+  const tracks = Array.from({ length: 15 }, (_, i) => makeTrack(`t${i}`));
+
+  it("plays from the given index and carries the playlist's theme", () => {
+    useStore.getState().playPlaylist({ tracks, theme: "spooky" }, { startIndex: 3 });
+    const state = useStore.getState();
+    expect(state.currentTrack?.id).toBe("t3");
+    expect(state.activePlaylistTheme).toBe("spooky");
+    expect(state.shuffleSession).toBeNull();
+  });
+
+  it("starts a shuffle session that carries the theme", () => {
+    useStore.getState().playPlaylist({ tracks, theme: "spooky" }, { shuffle: true });
+    const state = useStore.getState();
+    expect(state.shuffleSession).not.toBeNull();
+    expect(state.activePlaylistTheme).toBe("spooky");
+  });
+
+  it("leaves a plain playlist unthemed", () => {
+    useStore.getState().playPlaylist({ tracks }, { shuffle: true });
+    expect(useStore.getState().activePlaylistTheme).toBeNull();
+    useStore.getState().playPlaylist({ tracks });
+    expect(useStore.getState().activePlaylistTheme).toBeNull();
+  });
+});
+
 describe("playTrackList", () => {
   it("clears an active shuffle session (manual play always ends shuffle mode)", () => {
     const tracks = Array.from({ length: 15 }, (_, i) => makeTrack(`t${i}`));
