@@ -1815,7 +1815,8 @@ export function DualDeckStage() {
       // What auto-scoring alone would have picked: the same planning state, minus the user's pin and re-rolls.
       const autoPlan = planTransition(
         planArgsFromState(
-          { ...state, categoryWeights: useDjWeights.getState().categoryWeights },
+          state,
+          useDjWeights.getState().categoryWeights,
           { track, analysis: getAnalysis(track.id) },
           { track: nextTrack, analysis: getAnalysis(nextTrack.id) },
           { currentElapsedSec: currentTime, ignoreOverrides: true }
@@ -2995,7 +2996,8 @@ export function DualDeckStage() {
       const nextAnalysis = getAnalysis(nextTrack.id);
       const plan = planTransition(
         planArgsFromState(
-          { ...state, categoryWeights: useDjWeights.getState().categoryWeights },
+          state,
+          useDjWeights.getState().categoryWeights,
           { track, analysis: currentAnalysis },
           { track: nextTrack, analysis: nextAnalysis },
           { currentElapsedSec: currentTime }
@@ -3214,7 +3216,8 @@ export function DualDeckStage() {
       const activeEl = deckEl(activeDeckRef.current);
       const plan = planTransition(
         planArgsFromState(
-          { ...state, categoryWeights: useDjWeights.getState().categoryWeights },
+          state,
+          useDjWeights.getState().categoryWeights,
           { track, analysis: getAnalysis(track.id) },
           { track: nextTrack, analysis: getAnalysis(nextTrack.id) },
           { currentElapsedSec: activeEl?.currentTime ?? null }

@@ -456,8 +456,8 @@ export function DeckView() {
           djVarietyBias,
           quantizeEnabled,
           recentTransitionIds,
-          categoryWeights,
         },
+        categoryWeights,
         { track: currentTrack, analysis: currentAnalysis ?? fallbackAnalysis() },
         { track: nextTrack, analysis: nextAnalysis ?? fallbackAnalysis() },
         { currentElapsedSec: currentTimeSec }

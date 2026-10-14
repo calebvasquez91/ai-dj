@@ -703,7 +703,8 @@ export const useStore = create<PlayerState>()(
           // engine's, not an estimate.
           const plan = planTransition(
             planArgsFromState(
-              { ...get(), categoryWeights: useDjWeights.getState().categoryWeights },
+              get(),
+              useDjWeights.getState().categoryWeights,
               { track: currentTrack, analysis: currentAnalysis },
               { track: nextTrack, analysis: nextAnalysis }
             )

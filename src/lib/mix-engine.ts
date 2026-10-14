@@ -663,10 +663,10 @@ export interface PlanTransitionArgs {
 export const RECENT_TRANSITIONS_KEPT = 3;
 
 /**
- * The player state a transition plan depends on: the store's fields by name, plus the learned category weights
- * (a separate store). The DJ board preview, the sync readout, the AI FX briefing and DualDeckStage's own planning
- * all build their planTransition arguments from this one shape, so they can't drift apart: an input added here
- * reaches every planner at once.
+ * The player state a transition plan depends on: the store's fields, by name. The DJ board preview, the sync
+ * readout, the AI FX briefing and DualDeckStage's own planning all build their planTransition arguments from this
+ * one shape (plus the learned category weights, which live in a separate store and are passed alongside), so they
+ * can't drift apart: an input added here reaches every planner at once.
  */
 export interface PlanningState {
   styleGenreHint: string | null;
@@ -678,7 +678,6 @@ export interface PlanningState {
   djVarietyBias: boolean;
   quantizeEnabled: boolean;
   recentTransitionIds: string[];
-  categoryWeights: Partial<Record<TransitionCategory, number>>;
 }
 
 /**
@@ -687,6 +686,7 @@ export interface PlanningState {
  */
 export function planArgsFromState(
   state: PlanningState,
+  categoryWeights: Partial<Record<TransitionCategory, number>>,
   current: PlanTransitionArgs["current"],
   next: PlanTransitionArgs["next"],
   opts: { currentElapsedSec?: number | null; ignoreOverrides?: boolean } = {}
@@ -706,7 +706,7 @@ export function planArgsFromState(
     excludeTransitionIds: stemReady ? rerolled : [...rerolled, "vocal-layering"],
     vocalStemReady: stemReady,
     varietyBias: state.djVarietyBias,
-    categoryWeights: state.categoryWeights,
+    categoryWeights,
     quantize: state.quantizeEnabled,
   };
 }
