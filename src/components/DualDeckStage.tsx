@@ -139,6 +139,8 @@ interface ActiveMashup {
   instGain?: GainNode;
   /** Vocal mashup only: the plan its gain/tempo schedule and status come from. */
   vocal?: VocalMashupPlan;
+  /** Vocal mashup only: buffer-cache keys that exist just for this mashup (the incoming mix and the derived instrumental). */
+  releaseKeys?: string[];
 }
 
 /**
@@ -291,6 +293,8 @@ interface DeckNodes {
 const TICK_INTERVAL_MS = 100;
 /** How long the vocal mashup waits for its two buffers (the vocal stem and the incoming mix) before the normal transition takes over. */
 const VOCAL_MASHUP_PREP_TIMEOUT_MS = 10_000;
+/** How often the vocal mashup's status is written to the store (the audio itself updates every tick). */
+const VOCAL_MASHUP_STATUS_INTERVAL_MS = 250;
 const ECHO_DELAY_SEC = 0.22;
 const ECHO_FEEDBACK = 0.35;
 const ECHO_WET_LEVEL = 0.6;
@@ -583,6 +587,7 @@ export function DualDeckStage() {
       m.instGain?.disconnect();
     }
     resetDeckNodes(m.fromDeckId, 1);
+    m.releaseKeys?.forEach((key) => delete mashupBufferCacheRef.current[key]);
     mashupRef.current = null;
     useStore.getState().setVocalMashup(null);
     useStore.getState().setIsTransitioning(false);
@@ -2098,6 +2103,7 @@ export function DualDeckStage() {
           // Already stopped — harmless.
         }
         m.instGain?.disconnect();
+        m.releaseKeys?.forEach((key) => delete mashupBufferCacheRef.current[key]);
         const fromEl = deckEl(fromDeckId);
         if (fromEl) {
           fromEl.pause();
@@ -2120,12 +2126,15 @@ export function DualDeckStage() {
 
     /** The incoming track's first voiced moment, read from its decoded vocal stem (null when it has none). */
     function firstVoiceSec(vocal: AudioBuffer): number | null {
-      const mono = new Float32Array(vocal.length);
+      // Averaged down to a quarter of the rate (plenty for "is there a voice"), so the transient is a fraction of the stem.
+      const DECIMATE = 4;
+      const mono = new Float32Array(Math.ceil(vocal.length / DECIMATE));
+      const weight = 1 / (vocal.numberOfChannels * DECIMATE);
       for (let ch = 0; ch < vocal.numberOfChannels; ch++) {
         const data = vocal.getChannelData(ch);
-        for (let i = 0; i < data.length; i++) mono[i] += data[i] / vocal.numberOfChannels;
+        for (let i = 0; i < data.length; i++) mono[Math.floor(i / DECIMATE)] += data[i] * weight;
       }
-      const first = voiceMapFromStem(mono, vocal.sampleRate).segments[0];
+      const first = voiceMapFromStem(mono, vocal.sampleRate / DECIMATE).segments[0];
       return first ? first[0] : null;
     }
 
@@ -2164,6 +2173,12 @@ export function DualDeckStage() {
           s.queue[0]?.id !== nextTrack.id
         );
       };
+      // What exists only for this mashup, so a failure at any point can put it all back.
+      const instKey = `inst:${nextTrack.id}:${vocalUrl}`;
+      let voicesToStop: TimeStretchVoice[] = [];
+      let gainsToDisconnect: GainNode[] = [];
+      let startedFromDeck: DeckId | null = null;
+      let handedOff = false;
       try {
         const ctx = audioCtxRef.current;
         const masterGain = masterGainRef.current;
@@ -2175,7 +2190,7 @@ export function DualDeckStage() {
           "Vocal mashup buffers"
         );
         if (stale()) return;
-        const instBuf = instrumentalBuffer(ctx, `inst:${nextTrack.id}:${vocalUrl}`, mixBuf, vocalBuf);
+        const instBuf = instrumentalBuffer(ctx, instKey, mixBuf, vocalBuf);
         const nextFirstVoice = firstVoiceSec(vocalBuf);
 
         const fromDeckId = activeDeckRef.current;
@@ -2201,6 +2216,7 @@ export function DualDeckStage() {
         const toDeckId: DeckId = fromDeckId === "A" ? "B" : "A";
         const vocalVoice = createTimeStretchVoice(ctx, vocalBuf, { tempo: plan.tempoRatio, pitchSemitones: plan.pitchSemitones });
         const instVoice = createTimeStretchVoice(ctx, instBuf, { tempo: plan.tempoRatio, pitchSemitones: plan.pitchSemitones });
+        voicesToStop = [vocalVoice, instVoice];
         vocalVoice.setStartFraction(Math.max(0, Math.min(1, plan.entryOffsetSec / vocalBuf.duration)));
         instVoice.setStartFraction(Math.max(0, Math.min(1, plan.entryOffsetSec / instBuf.duration)));
         const vocalGain = ctx.createGain();
@@ -2211,6 +2227,8 @@ export function DualDeckStage() {
         instGain.gain.value = 0;
         instVoice.node.connect(instGain);
         instGain.connect(masterGain);
+        gainsToDisconnect = [vocalGain, instGain];
+        startedFromDeck = fromDeckId;
 
         const now = ctx.currentTime;
         const curves = vocalMashupGainCurves(plan);
@@ -2235,12 +2253,16 @@ export function DualDeckStage() {
           instVoice,
           instGain,
           vocal: plan,
+          releaseKeys: [instKey, nextTrack.sourceUrl],
         };
         mashupRef.current = mashup;
+        handedOff = true;
         useStore.getState().setIsTransitioning(true);
         useStore.getState().setActiveTransitionRationale(plan.rationale);
         useStore.getState().setActiveTransitionShortWhy("Vocal mashup over the instrumental");
 
+        let lastStatusMs = 0;
+        let lastStatusPhase = "";
         const tick = () => {
           const m = mashupRef.current;
           if (!m || !m.vocal || !m.instVoice) return;
@@ -2255,18 +2277,24 @@ export function DualDeckStage() {
           m.instVoice.setTempo(tempo);
           m.voice.setPitchSemitones(pitchSemitones);
           m.instVoice.setPitchSemitones(pitchSemitones);
-          const gains = vocalMashupGainsAt(m.vocal, elapsedSec);
-          useStore.getState().setVocalMashup({
-            nextTitle: m.nextTrack.title,
-            phase: vocalMashupPhase(m.vocal, elapsedSec),
-            elapsedSec,
-            totalSec: m.vocal.totalSec,
-            tempo,
-            pitchSemitones,
-            outGain: gains.out,
-            vocalGain: gains.vocal,
-            instGain: gains.inst,
-          });
+          // The audio runs on every tick; the status the DJ board shows only needs a few updates a second.
+          const phase = vocalMashupPhase(m.vocal, elapsedSec);
+          if (nowMs - lastStatusMs >= VOCAL_MASHUP_STATUS_INTERVAL_MS || phase !== lastStatusPhase) {
+            lastStatusMs = nowMs;
+            lastStatusPhase = phase;
+            const gains = vocalMashupGainsAt(m.vocal, elapsedSec);
+            useStore.getState().setVocalMashup({
+              nextTitle: m.nextTrack.title,
+              phase,
+              elapsedSec,
+              totalSec: m.vocal.totalSec,
+              tempo,
+              pitchSemitones,
+              outGain: gains.out,
+              vocalGain: gains.vocal,
+              instGain: gains.inst,
+            });
+          }
           if (elapsedSec >= m.vocal.totalSec) {
             if (m.tickIntervalId != null) clearInterval(m.tickIntervalId);
             completeMashup(m);
@@ -2278,6 +2306,21 @@ export function DualDeckStage() {
       } finally {
         mashupStartingRef.current = false;
         vocalMashupPrepRef.current = false;
+        if (!handedOff) {
+          // It never started (or failed part-way): stop anything already running, give back the outgoing deck's
+          // gain, and drop the buffers that were decoded only for this attempt.
+          voicesToStop.forEach((v) => {
+            try {
+              v.stop();
+            } catch {
+              // Already stopped — harmless.
+            }
+          });
+          gainsToDisconnect.forEach((g) => g.disconnect());
+          if (startedFromDeck) resetDeckNodes(startedFromDeck, 1);
+          delete mashupBufferCacheRef.current[instKey];
+          delete mashupBufferCacheRef.current[nextTrack.sourceUrl];
+        }
       }
     }
 
@@ -3207,12 +3250,26 @@ export function DualDeckStage() {
         const vocalUrl = state.stemAvailability[nextTrack.id];
         const voicesOverAt = voiceCutoffSec(state.trackVoiceMaps[track.id], duration);
         const pair = `${track.id}>${nextTrack.id}`;
+        // The preparing guard holds the normal exit back, so only raise it when a mashup would still fit AFTER the
+        // longest the preparation can take; otherwise the normal transition must keep its timing.
+        const roomForMashup = () =>
+          voicesOverAt != null &&
+          planVocalMashup({
+            current: { track, analysis: currentAnalysis },
+            next: { track: nextTrack, analysis: nextAnalysis },
+            currentTimeSec: currentTime + VOCAL_MASHUP_PREP_TIMEOUT_MS / 1000,
+            currentDurationSec: duration,
+            voiceCutoffSec: voicesOverAt,
+            nextFirstVoiceSec: null,
+          }) != null;
         if (
           vocalUrl &&
           voicesOverAt != null &&
           currentTime >= voicesOverAt &&
+          !state.forcedTransitionId && // a transition the user pinned for this mix is theirs to have
           vocalMashupTriedRef.current !== pair &&
           mashupBufferCacheRef.current[vocalUrl] &&
+          roomForMashup() &&
           isVocalMashupPair({ track, analysis: currentAnalysis }, { track: nextTrack, analysis: nextAnalysis })
         ) {
           vocalMashupTriedRef.current = pair;
