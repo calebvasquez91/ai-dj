@@ -32,7 +32,7 @@ export const TRACK_FADE_IN_SEC = 1.5;
 export const TRACK_FADE_OUT_SEC = 2.5;
 
 /** How close (fractional, after best-octave adjustment) two BPMs need to be to tempo-sync, roughly a real turntable's pitch-fader range. */
-const TEMPO_SYNC_MAX_DELTA = 0.08;
+export const TEMPO_SYNC_MAX_DELTA = 0.08;
 
 /**
  * How confident the tempo estimate needs to be before we bet a

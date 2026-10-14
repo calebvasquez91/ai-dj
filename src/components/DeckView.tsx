@@ -4,7 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useStore } from "@/lib/store";
 import { camelotCompatibility, planTransition, type DjSetMode } from "@/lib/mix-engine";
 import { fallbackAnalysis, type TrackAnalysis } from "@/lib/audio-analysis";
-import { buildSyncReport, describeBpm, describeKey, describeSyncReport } from "@/lib/syncEngine";
+import { buildSyncReport, describeKey, describeSyncReport } from "@/lib/syncEngine";
 import { useDjWeights } from "@/lib/dj-weights";
 import { useTapTempo } from "@/lib/tapTempo";
 import { submitYoutubeTapTempo } from "@/lib/youtubeBpm";
@@ -20,6 +20,8 @@ import { CloseIcon } from "@/components/Icons";
 import type { AmbienceFrequency } from "@/lib/ambience";
 import { HalloweenLayers } from "@/components/HalloweenLayers";
 import { StemsPanel } from "@/components/StemsPanel";
+import { STEM_FEATURES_ENABLED } from "@/lib/featureFlags";
+import { voiceCutoffSec } from "@/lib/voiceMap";
 import { EnergyGraph } from "@/components/EnergyGraph";
 import { resampleBuckets } from "@/lib/resample";
 import type { Track, DeckId } from "@/types/music";
@@ -418,6 +420,8 @@ export function DeckView() {
   const setQuantizeEnabled = useStore((s) => s.setQuantizeEnabled);
   const categoryWeights = useDjWeights((s) => s.categoryWeights);
   const stemAvailability = useStore((s) => s.stemAvailability);
+  const voiceCutEnabled = useStore((s) => s.voiceCut.enabled);
+  const currentVoiceMap = useStore((s) => (s.currentTrack ? s.trackVoiceMaps[s.currentTrack.id] : undefined));
   const aiNextPickTrackId = useStore((s) => s.aiNextPickTrackId);
   const aiNextPickTransitionNote = useStore((s) => s.aiNextPickTransitionNote);
 
@@ -446,7 +450,9 @@ export function DeckView() {
       currentElapsedSec: currentTimeSec,
       djMode,
       forceTransitionId: forcedTransitionId,
-      excludeTransitionIds: rerolledTransitionIds,
+      // Same stem rules as DualDeckStage's plan, so the preview shows the transition that will actually run.
+      excludeTransitionIds: stemAvailability[nextTrack.id] ? rerolledTransitionIds : [...rerolledTransitionIds, "vocal-layering"],
+      vocalStemReady: Boolean(stemAvailability[nextTrack.id]),
       varietyBias: djVarietyBias,
       categoryWeights,
       quantize: quantizeEnabled,
@@ -465,6 +471,7 @@ export function DeckView() {
     djVarietyBias,
     categoryWeights,
     quantizeEnabled,
+    stemAvailability,
   ]);
 
   // The sync engine's read of this mix (lib/syncEngine.ts) — only worth showing when both tracks have real analysis.
@@ -476,10 +483,12 @@ export function DeckView() {
       next: { track: nextTrack, analysis: nextAnalysis },
       plan: preview,
       currentElapsedSec: currentTimeSec,
+      // When the singing is done the DJ leaves early (DualDeckStage's voicesDone trigger), so say that time.
+      mixOutSec: voiceCutEnabled ? voiceCutoffSec(currentVoiceMap, currentTrack.durationSec) : null,
       incomingStemsReady: Boolean(stemAvailability[nextTrack.id]),
       outgoingStemsReady: Boolean(stemAvailability[currentTrack.id]),
     });
-  }, [currentTrack, nextTrack, preview, currentAnalysis, nextAnalysis, currentTimeSec, stemAvailability]);
+  }, [currentTrack, nextTrack, preview, currentAnalysis, nextAnalysis, currentTimeSec, stemAvailability, voiceCutEnabled, currentVoiceMap]);
 
   if (!open) return null;
 
@@ -587,7 +596,7 @@ export function DeckView() {
 
         <HalloweenLayers />
 
-        <StemsPanel />
+        {STEM_FEATURES_ENABLED && <StemsPanel />}
 
         <div className="flex flex-wrap items-center gap-2">
           <select
@@ -679,13 +688,10 @@ export function DeckView() {
                 <p className="font-semibold text-foreground">{describeSyncReport(syncReport, nextTrack.title)}</p>
                 <p className="text-muted">
                   BPM {syncReport.trackA_bpm.toFixed(2)} ↔ {syncReport.trackB_bpm.toFixed(2)}
-                  {syncReport.bpmStrategy === "stretch" ||
-                  syncReport.bpmStrategy === "halftime" ||
-                  syncReport.bpmStrategy === "doubletime"
-                    ? ` (${describeBpm(syncReport)}, to ${syncReport.trackA_bpm.toFixed(2)})`
+                  {Math.abs(syncReport.trackB_bpmMatched - syncReport.trackB_bpm) > 0.5
+                    ? ` (read as ${syncReport.trackB_bpmMatched.toFixed(2)} to match)`
                     : ""}
-                  {" · "}Key {syncReport.trackA_key} → {syncReport.trackB_key} ({describeKey(syncReport)}
-                  {syncReport.pitchShiftSemitones !== 0 ? ", melody & vocals shifted" : ""})
+                  {" · "}Key {syncReport.trackA_key} → {syncReport.trackB_key} ({describeKey(syncReport)})
                 </p>
                 <p className="text-muted">
                   Energy {syncReport.energyStrategy}
@@ -693,7 +699,11 @@ export function DeckView() {
                     ? ` (${syncReport.trackA_energyAtMixOut.toFixed(2)} → ${syncReport.trackB_energyAtMixIn.toFixed(2)})`
                     : ""}
                   {" · "}Crossfade {Math.round(syncReport.crossfadeDurationMs / 1000)}s
-                  {" · "}Stem hand-over {syncReport.stemSwapAvailable ? "ready" : "needs both tracks' stems"}
+                  {STEM_FEATURES_ENABLED && (
+                    <>
+                      {" · "}Stem hand-over {syncReport.stemSwapAvailable ? "ready" : "needs both tracks' stems"}
+                    </>
+                  )}
                 </p>
                 {aiNextPickTrackId === nextTrack.id && aiNextPickTransitionNote && (
                   <p className="text-accent-purple">🤖 {aiNextPickTransitionNote}</p>

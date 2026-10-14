@@ -83,7 +83,7 @@ describe("pickNextTrackWithAI", () => {
     global.fetch = fetchMock as unknown as typeof fetch;
     const synced: AiNextTrackCandidate = {
       ...candidate("b", 132),
-      sync: { bpmStrategy: "stretch", bpmDelta: 4.4, stretchPercent: -3.1, keyCompatibility: "tension", pitchShiftSemitones: -2 },
+      sync: { bpmStrategy: "stretch", bpmDelta: 4.4, stretchPercent: -3.1, keyCompatibility: "tension", suggestedPitchShiftSemitones: -2 },
     };
     await pickNextTrackWithAI(candidate("cur", 128), [candidate("a", 100), synced], boardState);
     const init = fetchMock.mock.calls[0] as unknown as [string, { body: string }];
@@ -91,7 +91,7 @@ describe("pickNextTrackWithAI", () => {
     const sent = JSON.parse(body.messages[0].content) as { remainingUnplayedTracks: AiNextTrackCandidate[] };
     expect(sent.remainingUnplayedTracks[1].sync).toEqual(synced.sync);
     expect(body.system).toMatch(/sync engine/);
-    expect(body.system).toMatch(/pitchShiftSemitones/);
+    expect(body.system).toMatch(/suggestedPitchShiftSemitones/);
   });
 
   it("strips a markdown code fence around the JSON response", async () => {

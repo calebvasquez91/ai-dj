@@ -23,6 +23,7 @@ import {
   type AiNextTrackCandidate,
 } from "@/lib/ai-dj";
 import { pickFallbackTransitionFx, type AiFxBoardState, type AiFxCandidate, type AiFxTrackProfile } from "@/lib/ai-fx";
+import { planTransition } from "@/lib/mix-engine";
 import { buildSyncReport, candidateSyncSummary } from "@/lib/syncEngine";
 import { jsonInit, syncRequest } from "@/lib/syncRequest";
 import { hasHalloweenAffinity } from "@/lib/fxAffinity";
@@ -655,8 +656,21 @@ export const useStore = create<PlayerState>()(
       },
 
       requestAiFxPick: async () => {
-        const { currentTrack, queue, trackAnalysis, fxLibrary, djMode, crossfadeOverrideSec, activePlaylistTheme } =
-          get();
+        const {
+          currentTrack,
+          queue,
+          trackAnalysis,
+          fxLibrary,
+          djMode,
+          crossfadeOverrideSec,
+          activePlaylistTheme,
+          styleGenreHint,
+          forcedTransitionId,
+          rerolledTransitionIds,
+          djVarietyBias,
+          quantizeEnabled,
+          stemAvailability,
+        } = get();
         const nextTrack = queue[0];
         if (!currentTrack || !nextTrack) return;
 
@@ -693,14 +707,29 @@ export const useStore = create<PlayerState>()(
         const nextAnalysis = trackAnalysis[nextTrack.id];
         let sync: AiFxBoardState["sync"];
         if (currentAnalysis && !currentAnalysis.fallback && nextAnalysis && !nextAnalysis.fallback) {
+          // Planned the way DualDeckStage plans it, so the window and tempo are the engine's, not an estimate.
+          const stemReady = Boolean(stemAvailability[nextTrack.id]);
+          const plan = planTransition({
+            current: { track: currentTrack, analysis: currentAnalysis },
+            next: { track: nextTrack, analysis: nextAnalysis },
+            genreHint: styleGenreHint,
+            overrideSec: crossfadeOverrideSec,
+            djMode,
+            forceTransitionId: forcedTransitionId,
+            excludeTransitionIds: stemReady ? rerolledTransitionIds : [...rerolledTransitionIds, "vocal-layering"],
+            vocalStemReady: stemReady,
+            varietyBias: djVarietyBias,
+            quantize: quantizeEnabled,
+          });
           const report = buildSyncReport({
             current: { track: currentTrack, analysis: currentAnalysis },
             next: { track: nextTrack, analysis: nextAnalysis },
+            plan,
           });
           sync = {
             bpmStrategy: report.bpmStrategy,
             keyCompatibility: report.keyCompatibility,
-            pitchShiftSemitones: report.pitchShiftSemitones,
+            suggestedPitchShiftSemitones: report.suggestedPitchShiftSemitones,
             energyStrategy: report.energyStrategy,
             crossfadeSeconds: crossfadeOverrideSec ?? Math.round(report.crossfadeDurationMs / 1000),
           };

@@ -3,6 +3,10 @@
  * has to happen to the incoming track for the two to mix cleanly (tempo strategy, key shift), where to leave and
  * enter, the energy arc and how the stems would hand over. Pure; the audio itself is still DualDeckStage's.
  *
+ * The report must never claim more than the player does: the tempo numbers are the ones the mix engine itself uses
+ * (octave-folded, bestTempoRatio), the window and mix-out point are the engine's own, and a key shift is only ever a
+ * SUGGESTION until DualDeckStage can pitch-shift (PITCH_SHIFT_APPLIED).
+ *
  * It sits between the audio engineer's measurements (TrackAnalysis, song map, energy profile) and the DJ (the mix
  * engine's planTransition and the AI next-pick): the DJ board shows its one-line summary, and the AI is briefed
  * with it. It reuses, rather than replaces, the existing tempo/key rules (bestTempoRatio's octave handling,
@@ -16,6 +20,8 @@ import type { Track } from "@/types/music";
 import {
   MIN_KEY_CONFIDENCE_FOR_SCORING,
   MIN_TEMPO_CONFIDENCE_FOR_TRUST,
+  TEMPO_SYNC_MAX_DELTA,
+  bestTempoRatio,
   camelotCompatibility,
   snapToBeatGrid,
   type TransitionPlan,
@@ -30,33 +36,34 @@ import { formatTime } from "@/lib/format";
 
 export type BpmStrategy = "exact" | "stretch" | "halftime" | "doubletime" | "freeform";
 
-/** Up to this many BPM apart the two share a grid with no stretch. */
+/** Up to this many BPM apart (after folding to the nearest octave) the two share a grid and need no real stretch. */
 export const EXACT_MAX_BPM_DELTA = 2;
-/** Up to this many BPM apart the incoming track is time-stretched to the outgoing tempo. */
-export const STRETCH_MAX_BPM_DELTA = 8;
-/** How close to exactly double/half a tempo counts as a half/double-time fit. */
-export const HALF_DOUBLE_TOLERANCE = 0.03;
-/** The long, FX-masked crossfade used when the tempos can't be reconciled. */
-export const FREEFORM_CROSSFADE_MS = 24_000;
 
 export interface BpmPlan {
   trackA_bpm: number;
   trackB_bpm: number;
+  /** B's tempo after folding to the octave nearest A's (what the engine actually matches against); equals trackB_bpm when no fold. */
+  trackB_bpmMatched: number;
+  /** BPM apart after the octave fold. */
   bpmDelta: number;
-  /** B / A. */
+  /** B / A, before folding. */
   bpmRatio: number;
   bpmStrategy: BpmStrategy;
-  /** Playback-rate multiplier for track B (1 = untouched). */
+  /** Playback rate of track B at the start of the mix (1 = untouched): the engine's bestTempoRatio when it syncs tempo. */
   stretchAmount: number;
   /** False when either tempo reading is the neutral fallback or too uncertain to act on. */
   tempoConfident: boolean;
 }
 
+/**
+ * Tempo strategy for A -> B, mirroring the mix engine: B's tempo is folded to the octave nearest A's (a track read at
+ * half or double its real tempo still matches), and the pair is syncable within the engine's TEMPO_SYNC_MAX_DELTA
+ * (8%). Beyond that the engine leaves B at its own tempo: "freeform".
+ */
 export function planBpm(a: Pick<TrackAnalysis, "bpm" | "bpmConfidence">, b: Pick<TrackAnalysis, "bpm" | "bpmConfidence">): BpmPlan {
   const base = {
     trackA_bpm: a.bpm,
     trackB_bpm: b.bpm,
-    bpmDelta: Math.abs(a.bpm - b.bpm),
     bpmRatio: a.bpm > 0 ? b.bpm / a.bpm : 1,
   };
   const tempoConfident =
@@ -64,21 +71,30 @@ export function planBpm(a: Pick<TrackAnalysis, "bpm" | "bpmConfidence">, b: Pick
     b.bpm > 0 &&
     a.bpmConfidence >= MIN_TEMPO_CONFIDENCE_FOR_TRUST &&
     b.bpmConfidence >= MIN_TEMPO_CONFIDENCE_FOR_TRUST;
-  // Never stretch toward a tempo that is really the 120 BPM fallback.
-  if (!tempoConfident) return { ...base, bpmStrategy: "freeform", stretchAmount: 1, tempoConfident };
+  if (!tempoConfident) {
+    // Never stretch toward a tempo that is really the 120 BPM fallback.
+    return {
+      ...base,
+      trackB_bpmMatched: b.bpm,
+      bpmDelta: Math.abs(a.bpm - b.bpm),
+      bpmStrategy: "freeform",
+      stretchAmount: 1,
+      tempoConfident,
+    };
+  }
 
-  const toA = a.bpm / b.bpm;
-  if (base.bpmDelta <= EXACT_MAX_BPM_DELTA) return { ...base, bpmStrategy: "exact", stretchAmount: 1, tempoConfident };
-  if (Math.abs(b.bpm / (a.bpm * 2) - 1) <= HALF_DOUBLE_TOLERANCE) {
-    return { ...base, bpmStrategy: "halftime", stretchAmount: toA, tempoConfident };
-  }
-  if (Math.abs(b.bpm / (a.bpm / 2) - 1) <= HALF_DOUBLE_TOLERANCE) {
-    return { ...base, bpmStrategy: "doubletime", stretchAmount: toA, tempoConfident };
-  }
-  // The spec's 8–15 BPM band has no rule of its own; stretching that far is where time-stretch artifacts become
-  // audible, so it is treated as freeform (long fade) rather than stretched.
-  if (base.bpmDelta <= STRETCH_MAX_BPM_DELTA) return { ...base, bpmStrategy: "stretch", stretchAmount: toA, tempoConfident };
-  return { ...base, bpmStrategy: "freeform", stretchAmount: 1, tempoConfident };
+  const ratio = bestTempoRatio(a.bpm, b.bpm); // a / (b folded)
+  const matchedB = a.bpm / ratio;
+  const bpmDelta = Math.abs(a.bpm - matchedB);
+  const folded = { ...base, trackB_bpmMatched: matchedB, bpmDelta, tempoConfident };
+  if (Math.abs(ratio - 1) > TEMPO_SYNC_MAX_DELTA) return { ...folded, bpmStrategy: "freeform", stretchAmount: 1 };
+
+  const fold = matchedB / b.bpm; // 0.5: B is double A's tempo, 2: B is half of it
+  let bpmStrategy: BpmStrategy;
+  if (Math.abs(fold - 0.5) < 1e-6) bpmStrategy = "halftime";
+  else if (Math.abs(fold - 2) < 1e-6) bpmStrategy = "doubletime";
+  else bpmStrategy = bpmDelta <= EXACT_MAX_BPM_DELTA ? "exact" : "stretch";
+  return { ...folded, bpmStrategy, stretchAmount: ratio };
 }
 
 // ---------------------------------------------------------------------------
@@ -89,6 +105,12 @@ export type KeyCompatibility = "perfect" | "compatible" | "tension" | "clash" | 
 
 /** Largest pitch shift the engine will recommend: past a few semitones the stretch/shift artifacts outweigh the key gain. */
 export const MAX_PITCH_SHIFT_SEMITONES = 3;
+
+/**
+ * Whether playback actually pitch-shifts the incoming track. It does not yet (DualDeckStage only changes playback
+ * rate), so a "shift" in the report is advice, and every place that words it must say so.
+ */
+export const PITCH_SHIFT_APPLIED = false;
 
 interface Camelot {
   number: number;
@@ -127,9 +149,9 @@ export interface KeyPlan {
   /** Signed semitones from B's tonic to A's, folded to -6..+5 (informational). 0 when a key is unknown. */
   semitoneDelta: number;
   keyCompatibility: KeyCompatibility;
-  /** Semitones to shift B so its key sits on or next to A's; 0 when already compatible, unknown, or no shift within the limit helps. */
-  pitchShiftSemitones: number;
-  /** Per-stem shift: drums never, bass half (warmth), melody and vocals fully. */
+  /** Semitones that WOULD bring B's key onto or next to A's; 0 when already compatible, unknown, or no shift within the limit helps. Advice only: see PITCH_SHIFT_APPLIED. */
+  suggestedPitchShiftSemitones: number;
+  /** Per-stem shift for the planned stem swap (drums never, bass half, melody and vocals fully). Not applied yet either. */
   stemPitchShifts: { drums: number; bass: number; melody: number; vocals: number };
   keyConfident: boolean;
 }
@@ -154,7 +176,7 @@ export function planKey(
       trackB_key: label(b),
       semitoneDelta: 0,
       keyCompatibility: "unknown",
-      pitchShiftSemitones: 0,
+      suggestedPitchShiftSemitones: 0,
       stemPitchShifts: shifts(0),
       keyConfident: false,
     };
@@ -171,7 +193,7 @@ export function planKey(
     keyCompatibility = (!sameLetter && d === 1) || (sameLetter && d === 2) ? "tension" : "clash";
   }
 
-  let pitchShiftSemitones = 0;
+  let suggestedPitchShiftSemitones = 0;
   if (keyCompatibility === "tension" || keyCompatibility === "clash") {
     for (let magnitude = 1; magnitude <= MAX_PITCH_SHIFT_SEMITONES; magnitude++) {
       const hit = [magnitude, -magnitude].find((s) => {
@@ -179,7 +201,7 @@ export function planKey(
         return shifted != null && camelotCompatibility(a.camelotKey, shifted) >= 1;
       });
       if (hit != null) {
-        pitchShiftSemitones = hit;
+        suggestedPitchShiftSemitones = hit;
         break;
       }
     }
@@ -192,8 +214,8 @@ export function planKey(
     trackB_key: label(b),
     semitoneDelta,
     keyCompatibility,
-    pitchShiftSemitones,
-    stemPitchShifts: shifts(pitchShiftSemitones),
+    suggestedPitchShiftSemitones,
+    stemPitchShifts: shifts(suggestedPitchShiftSemitones),
     keyConfident: true,
   };
 }
@@ -253,8 +275,8 @@ export interface SyncReport extends BpmPlan, KeyPlan {
   // timing
   /** When to start leaving track A, ms into A. */
   mixOutMs: number;
-  /** True when mixOutMs is on one of A's bar lines (a trustworthy song map), false when only on its beat grid. */
-  mixOutOnDownbeat: boolean;
+  /** How mixOutMs sits against A's grid: on a bar line (trustworthy song map), on a beat, or between beats. The engine doesn't snap its trigger, so this describes, it doesn't promise. */
+  mixOutAlignment: "downbeat" | "beat" | "off-grid";
   /** Where to enter track B, ms into B. */
   mixInMs: number;
   crossfadeDurationMs: number;
@@ -279,7 +301,7 @@ export interface SyncReportInput {
   current: SyncInputTrack;
   next: SyncInputTrack;
   /** The mix engine's plan for this pair, when there is one: supplies the entry point, window and style. */
-  plan?: Pick<TransitionPlan, "windowSec" | "windowBeats" | "incomingEntryOffsetSec" | "transitionId"> | null;
+  plan?: Pick<TransitionPlan, "windowSec" | "windowBeats" | "incomingEntryOffsetSec" | "transitionId" | "tempoRatioStart"> | null;
   /** Where the outgoing track is now; the mix-out point is never earlier than this. */
   currentElapsedSec?: number | null;
   /** When the DJ means to start leaving the outgoing track, if known (e.g. a voice cut-off); defaults to the natural end. */
@@ -294,6 +316,9 @@ function defaultWindowSec(bpm: number): number {
   return Math.min(16, Math.max(8, sec));
 }
 
+/** How close the mix-out must be to a bar line / beat to be described as being on it. */
+const ALIGN_TOLERANCE_SEC = 0.1;
+
 export function buildSyncReport({
   current,
   next,
@@ -306,19 +331,39 @@ export function buildSyncReport({
   const bpm = planBpm(current.analysis, next.analysis);
   const key = planKey(current.analysis, next.analysis);
 
-  const windowSec = bpm.bpmStrategy === "freeform" ? FREEFORM_CROSSFADE_MS / 1000 : (plan?.windowSec ?? defaultWindowSec(current.analysis.bpm));
+  // The engine's own numbers where it has made a plan: its entry point and window. DualDeckStage clamps the window
+  // to half the outgoing track and to what is left of the incoming one, repeated here so the times agree.
+  const durationA = current.track.durationSec;
+  const mixInSec = plan?.incomingEntryOffsetSec ?? next.analysis.energyOnsetSec;
+  const plannedWindowSec = plan?.windowSec ?? defaultWindowSec(current.analysis.bpm);
+  const windowSec = Math.min(plannedWindowSec, durationA / 2, Math.max(1, next.track.durationSec - mixInSec));
   const bpmForBeats = current.analysis.bpm > 0 ? current.analysis.bpm : 120;
   const windowBeats = plan?.windowBeats && plan.windowBeats > 0 ? plan.windowBeats : (windowSec * bpmForBeats) / 60;
 
-  // Mix-out: the requested point (or the natural end minus the window), never before where the track is now,
-  // snapped onto a bar line when the song map can be trusted, otherwise onto the beat grid.
-  const durationA = current.track.durationSec;
+  // A plan that ramps tempo through a wide gap (a Tempo Ramp transition) is the engine's decision, so it wins over
+  // the plain sync rule.
+  let { bpmStrategy, stretchAmount } = bpm;
+  if (plan?.tempoRatioStart != null && bpm.tempoConfident) {
+    stretchAmount = plan.tempoRatioStart;
+    if (bpmStrategy === "freeform" && stretchAmount !== 1) bpmStrategy = "stretch";
+  }
+
+  // Mix-out: where the engine starts leaving the track (the end minus the window, or a requested point), never
+  // before where the track is now. It is not snapped to the grid; the alignment is only reported.
   const wanted = Math.max(currentElapsedSec ?? 0, mixOutSec ?? Math.max(0, durationA - windowSec));
-  const barLine = snapToDownbeatOrPhrase(current.analysis.songMap, wanted, { preferPhrase: false });
-  const snapped =
-    barLine ?? snapToBeatGrid(wanted, current.analysis.beatGridOffsetSec, current.analysis.bpm > 0 ? current.analysis.bpm : 0);
-  const mixOutSecFinal = Math.min(Math.max(snapped, currentElapsedSec ?? 0), Math.max(0, durationA));
-  const mixInSec = plan?.incomingEntryOffsetSec ?? next.analysis.energyOnsetSec;
+  const mixOutSecFinal = Math.min(wanted, Math.max(0, durationA));
+  const barLine = snapToDownbeatOrPhrase(current.analysis.songMap, mixOutSecFinal, { preferPhrase: false });
+  const beatGrid = snapToBeatGrid(
+    mixOutSecFinal,
+    current.analysis.beatGridOffsetSec,
+    current.analysis.bpm > 0 ? current.analysis.bpm : 0
+  );
+  const mixOutAlignment: SyncReport["mixOutAlignment"] =
+    barLine != null && Math.abs(barLine - mixOutSecFinal) <= ALIGN_TOLERANCE_SEC
+      ? "downbeat"
+      : Math.abs(beatGrid - mixOutSecFinal) <= ALIGN_TOLERANCE_SEC
+        ? "beat"
+        : "off-grid";
 
   const outEnergy = energyAt(current.analysis, mixOutSecFinal, durationA);
   const inEnergy = energyAt(next.analysis, mixInSec, next.track.durationSec);
@@ -326,8 +371,10 @@ export function buildSyncReport({
   return {
     ...bpm,
     ...key,
+    bpmStrategy,
+    stretchAmount,
     mixOutMs: Math.round(mixOutSecFinal * 1000),
-    mixOutOnDownbeat: barLine != null,
+    mixOutAlignment,
     mixInMs: Math.round(mixInSec * 1000),
     crossfadeDurationMs: Math.round(windowSec * 1000),
     transitionStyle: plan?.transitionId ?? "blend",
@@ -351,35 +398,44 @@ function signed(value: number, digits: number): string {
 
 /** The report's tempo wording for the DJ board. */
 export function describeBpm(r: Pick<SyncReport, "bpmStrategy" | "stretchAmount" | "bpmDelta">): string {
+  const stretch = `stretch ${signed((r.stretchAmount - 1) * 100, 1)}%`;
+  const hasStretch = Math.abs(r.stretchAmount - 1) >= 0.0005;
   switch (r.bpmStrategy) {
     case "exact":
       return r.bpmDelta < 0.1 ? "BPM matched" : `BPM within ${r.bpmDelta.toFixed(1)}`;
     case "stretch":
-      return `BPM stretch ${signed((r.stretchAmount - 1) * 100, 1)}%`;
+      return `BPM ${stretch}`;
     case "halftime":
-      return "half-time";
+      return hasStretch ? `half-time, ${stretch}` : "half-time";
     case "doubletime":
-      return "double-time";
+      return hasStretch ? `double-time, ${stretch}` : "double-time";
     case "freeform":
-      return "BPM gap, long fade";
+      return "BPM gap, no tempo match";
   }
 }
 
-/** The report's key wording for the DJ board. */
-export function describeKey(r: Pick<SyncReport, "keyCompatibility" | "pitchShiftSemitones">): string {
+/** The report's key wording for the DJ board. A suggested shift is described as advice, never as something done. */
+export function describeKey(r: Pick<SyncReport, "keyCompatibility" | "suggestedPitchShiftSemitones">): string {
   if (r.keyCompatibility === "unknown") return "key unknown";
-  if (r.pitchShiftSemitones !== 0) {
-    const n = Math.abs(r.pitchShiftSemitones);
-    return `Key shift ${signed(r.pitchShiftSemitones, 0)} semitone${n === 1 ? "" : "s"}`;
-  }
-  if (r.keyCompatibility === "perfect") return "same key";
-  if (r.keyCompatibility === "compatible") return "keys compatible";
-  return r.keyCompatibility === "tension" ? "keys in tension" : "keys clash";
+  const base =
+    r.keyCompatibility === "perfect"
+      ? "same key"
+      : r.keyCompatibility === "compatible"
+        ? "keys compatible"
+        : r.keyCompatibility === "tension"
+          ? "keys in tension"
+          : "keys clash";
+  const shift = r.suggestedPitchShiftSemitones;
+  if (shift === 0) return base;
+  const n = Math.abs(shift);
+  const words = `${signed(shift, 0)} semitone${n === 1 ? "" : "s"}`;
+  return PITCH_SHIFT_APPLIED ? `${base}, shifted ${words}` : `${base} (a ${words} shift would help; not applied)`;
 }
 
-/** "Next: Title — BPM stretch +3.2% — Key shift +2 semitones — Mix out at 3:12 on downbeat" */
+/** "Next: Title - BPM stretch +3.2% - keys clash (a -2 semitones shift would help; not applied) - Mix out at 3:12 on beat" */
 export function describeSyncReport(report: SyncReport, nextTitle: string): string {
-  const mixOut = `Mix out at ${formatTime(report.mixOutMs / 1000)} on ${report.mixOutOnDownbeat ? "downbeat" : "beat"}`;
+  const align = report.mixOutAlignment === "off-grid" ? "" : ` on ${report.mixOutAlignment}`;
+  const mixOut = `Mix out at ${formatTime(report.mixOutMs / 1000)}${align}`;
   return `Next: ${nextTitle} — ${describeBpm(report)} — ${describeKey(report)} — ${mixOut}`;
 }
 
@@ -390,7 +446,8 @@ export interface CandidateSyncSummary {
   /** Percent change applied to the candidate's speed (+3.2 = plays 3.2% faster); 0 when none. */
   stretchPercent: number;
   keyCompatibility: KeyCompatibility;
-  pitchShiftSemitones: number;
+  /** What would fix the key clash: NOT something the player does (see PITCH_SHIFT_APPLIED). */
+  suggestedPitchShiftSemitones: number;
 }
 
 export function candidateSyncSummary(
@@ -404,6 +461,6 @@ export function candidateSyncSummary(
     bpmDelta: bpm.tempoConfident ? Math.round(bpm.bpmDelta * 10) / 10 : null,
     stretchPercent: Math.round((bpm.stretchAmount - 1) * 1000) / 10,
     keyCompatibility: key.keyCompatibility,
-    pitchShiftSemitones: key.pitchShiftSemitones,
+    suggestedPitchShiftSemitones: key.suggestedPitchShiftSemitones,
   };
 }

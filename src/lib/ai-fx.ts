@@ -43,7 +43,8 @@ export interface AiFxBoardState {
   sync?: {
     bpmStrategy: string;
     keyCompatibility: string;
-    pitchShiftSemitones: number;
+    /** What would fix a key clash. The player does not pitch-shift, so this is advice only. */
+    suggestedPitchShiftSemitones: number;
     /** build = energy rises into the next track, release = falls, sustain = holds, contrast = a big swing. */
     energyStrategy: string;
     crossfadeSeconds: number;
