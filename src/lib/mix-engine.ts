@@ -635,7 +635,7 @@ export interface TransitionPlan {
   shortWhy: string;
 }
 
-interface PlanTransitionArgs {
+export interface PlanTransitionArgs {
   current: { track: Track; analysis: TrackAnalysis };
   next: { track: Track; analysis: TrackAnalysis };
   genreHint?: string | null;
@@ -657,6 +657,58 @@ interface PlanTransitionArgs {
   quantize?: boolean;
   /** The incoming track's isolated vocal stem is ready (store.stemAvailability) — makes "vocal-layering" more attractive. */
   vocalStemReady?: boolean;
+}
+
+/** How many of the most recent transition ids are remembered to discourage repeating a technique back-to-back. */
+export const RECENT_TRANSITIONS_KEPT = 3;
+
+/**
+ * The player state a transition plan depends on: the store's fields, by name. The DJ board preview, the sync
+ * readout, the AI FX briefing and DualDeckStage's own planning all build their planTransition arguments from this
+ * one shape (plus the learned category weights, which live in a separate store and are passed alongside), so they
+ * can't drift apart: an input added here reaches every planner at once.
+ */
+export interface PlanningState {
+  styleGenreHint: string | null;
+  crossfadeOverrideSec: number | null;
+  djMode: DjSetMode;
+  forcedTransitionId: string | null;
+  rerolledTransitionIds: string[];
+  stemAvailability: Record<string, string | null>;
+  djVarietyBias: boolean;
+  quantizeEnabled: boolean;
+  recentTransitionIds: string[];
+}
+
+/**
+ * planTransition's arguments for A -> B under `state`. `ignoreOverrides` drops a pinned or re-rolled pick, giving
+ * "what auto-scoring alone would choose" (used to learn from the user's overrides); the stem rules still apply.
+ */
+export function planArgsFromState(
+  state: PlanningState,
+  categoryWeights: Partial<Record<TransitionCategory, number>>,
+  current: PlanTransitionArgs["current"],
+  next: PlanTransitionArgs["next"],
+  opts: { currentElapsedSec?: number | null; ignoreOverrides?: boolean } = {}
+): PlanTransitionArgs {
+  const stemReady = Boolean(state.stemAvailability[next.track.id]);
+  const rerolled = opts.ignoreOverrides ? [] : state.rerolledTransitionIds;
+  return {
+    current,
+    next,
+    genreHint: state.styleGenreHint,
+    overrideSec: state.crossfadeOverrideSec,
+    currentElapsedSec: opts.currentElapsedSec ?? null,
+    djMode: state.djMode,
+    recentTransitionIds: state.recentTransitionIds,
+    forceTransitionId: opts.ignoreOverrides ? null : state.forcedTransitionId,
+    // vocal-layering needs the incoming track's isolated vocal, so it can't be picked without one
+    excludeTransitionIds: stemReady ? rerolled : [...rerolled, "vocal-layering"],
+    vocalStemReady: stemReady,
+    varietyBias: state.djVarietyBias,
+    categoryWeights,
+    quantize: state.quantizeEnabled,
+  };
 }
 
 function buildRationale(

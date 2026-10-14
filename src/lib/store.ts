@@ -23,7 +23,8 @@ import {
   type AiNextTrackCandidate,
 } from "@/lib/ai-dj";
 import { pickFallbackTransitionFx, type AiFxBoardState, type AiFxCandidate, type AiFxTrackProfile } from "@/lib/ai-fx";
-import { planTransition } from "@/lib/mix-engine";
+import { RECENT_TRANSITIONS_KEPT, planArgsFromState, planTransition } from "@/lib/mix-engine";
+import { useDjWeights } from "@/lib/dj-weights";
 import { buildSyncReport, candidateSyncSummary } from "@/lib/syncEngine";
 import { jsonInit, syncRequest } from "@/lib/syncRequest";
 import { hasHalloweenAffinity } from "@/lib/fxAffinity";
@@ -157,6 +158,8 @@ interface PlayerState {
   forcedTransitionId: string | null;
   /** transitionIds the user has "rerolled" away from for the upcoming mix — cleared automatically once that mix starts. */
   rerolledTransitionIds: string[];
+  /** The last few transition ids actually played, most recent last: fed back into every plan so a technique isn't repeated back-to-back. */
+  recentTransitionIds: string[];
   djVarietyBias: boolean;
   /** Real, visible CDJ-style Quantize toggle — when on (default, matches every prior session's always-on behavior), transitions/mashups/loop starts snap to the beat grid; when off, they use raw unsnapped positions. */
   quantizeEnabled: boolean;
@@ -313,6 +316,7 @@ interface PlayerState {
   setForcedTransitionId: (id: string | null) => void;
   addRerolledTransitionId: (id: string) => void;
   clearRerolledTransitionIds: () => void;
+  pushRecentTransition: (id: string) => void;
   setDjVarietyBias: (enabled: boolean) => void;
   setQuantizeEnabled: (enabled: boolean) => void;
   setActiveTransitionRationale: (rationale: string | null) => void;
@@ -426,6 +430,7 @@ export const useStore = create<PlayerState>()(
       djMode: "auto",
       forcedTransitionId: null,
       rerolledTransitionIds: [],
+      recentTransitionIds: [],
       djVarietyBias: false,
       quantizeEnabled: true,
       activeTransitionRationale: null,
@@ -656,21 +661,8 @@ export const useStore = create<PlayerState>()(
       },
 
       requestAiFxPick: async () => {
-        const {
-          currentTrack,
-          queue,
-          trackAnalysis,
-          fxLibrary,
-          djMode,
-          crossfadeOverrideSec,
-          activePlaylistTheme,
-          styleGenreHint,
-          forcedTransitionId,
-          rerolledTransitionIds,
-          djVarietyBias,
-          quantizeEnabled,
-          stemAvailability,
-        } = get();
+        const { currentTrack, queue, trackAnalysis, fxLibrary, djMode, crossfadeOverrideSec, activePlaylistTheme } =
+          get();
         const nextTrack = queue[0];
         if (!currentTrack || !nextTrack) return;
 
@@ -707,20 +699,16 @@ export const useStore = create<PlayerState>()(
         const nextAnalysis = trackAnalysis[nextTrack.id];
         let sync: AiFxBoardState["sync"];
         if (currentAnalysis && !currentAnalysis.fallback && nextAnalysis && !nextAnalysis.fallback) {
-          // Planned the way DualDeckStage plans it, so the window and tempo are the engine's, not an estimate.
-          const stemReady = Boolean(stemAvailability[nextTrack.id]);
-          const plan = planTransition({
-            current: { track: currentTrack, analysis: currentAnalysis },
-            next: { track: nextTrack, analysis: nextAnalysis },
-            genreHint: styleGenreHint,
-            overrideSec: crossfadeOverrideSec,
-            djMode,
-            forceTransitionId: forcedTransitionId,
-            excludeTransitionIds: stemReady ? rerolledTransitionIds : [...rerolledTransitionIds, "vocal-layering"],
-            vocalStemReady: stemReady,
-            varietyBias: djVarietyBias,
-            quantize: quantizeEnabled,
-          });
+          // Planned from the same state DualDeckStage plans from (planArgsFromState), so the window and tempo are the
+          // engine's, not an estimate.
+          const plan = planTransition(
+            planArgsFromState(
+              get(),
+              useDjWeights.getState().categoryWeights,
+              { track: currentTrack, analysis: currentAnalysis },
+              { track: nextTrack, analysis: nextAnalysis }
+            )
+          );
           const report = buildSyncReport({
             current: { track: currentTrack, analysis: currentAnalysis },
             next: { track: nextTrack, analysis: nextAnalysis },
@@ -883,6 +871,8 @@ export const useStore = create<PlayerState>()(
       addRerolledTransitionId: (id) =>
         set((s) => ({ rerolledTransitionIds: [...s.rerolledTransitionIds, id] })),
       clearRerolledTransitionIds: () => set({ rerolledTransitionIds: [] }),
+      pushRecentTransition: (id) =>
+        set((s) => ({ recentTransitionIds: [...s.recentTransitionIds, id].slice(-RECENT_TRANSITIONS_KEPT) })),
       setDjVarietyBias: (enabled) => set({ djVarietyBias: enabled }),
       setQuantizeEnabled: (enabled) => set({ quantizeEnabled: enabled }),
       setActiveTransitionRationale: (rationale) => set({ activeTransitionRationale: rationale }),

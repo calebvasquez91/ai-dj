@@ -15,6 +15,7 @@ import {
   MIN_TEMPO_CONFIDENCE_FOR_TRUST,
   mashupGainCurves,
   planSimpleFade,
+  planArgsFromState,
   planTransition,
   snapToBeatGrid,
   spinUpGainCurves,
@@ -302,11 +303,6 @@ export function DualDeckStage() {
   } | null>(null);
   const loadedTrackId = useRef<Record<DeckId, string | null>>({ A: null, B: null });
   const transitionRef = useRef<ActiveTransition | null>(null);
-  // Last few transitionIds actually used, most recent last — fed back into
-  // planTransition so it doesn't keep picking the same technique every time
-  // several score similarly (which without this, tends to collapse to
-  // whichever blend-style option wins ties by default).
-  const recentTransitionIdsRef = useRef<string[]>([]);
   // Tracks the last mid-track ambience trigger per-track (reset whenever the
   // active track changes) so shouldTriggerAmbience() can enforce a cooldown.
   const ambienceStateRef = useRef<{ trackId: string | null; lastTriggeredSec: number | null }>({
@@ -1588,7 +1584,7 @@ export function DualDeckStage() {
       const toNodes = deckNodesRef.current[toDeckId];
       if (!ctx || !fromEl || !toEl || !fromNodes || !toNodes) return;
 
-      recentTransitionIdsRef.current = [...recentTransitionIdsRef.current, plan.transitionId].slice(-3);
+      useStore.getState().pushRecentTransition(plan.transitionId);
       // One-shot: a manual pick or reroll only applies to this upcoming mix —
       // Auto-DJ resumes normal automatic variety for the next one unless the
       // user sets a new override.
@@ -1816,16 +1812,16 @@ export function DualDeckStage() {
       plan: TransitionPlan
     ) {
       if (!state.forcedTransitionId && state.rerolledTransitionIds.length === 0) return;
-      const autoPlan = planTransition({
-        current: { track, analysis: getAnalysis(track.id) },
-        next: { track: nextTrack, analysis: getAnalysis(nextTrack.id) },
-        genreHint: state.styleGenreHint,
-        overrideSec: state.crossfadeOverrideSec,
-        currentElapsedSec: currentTime,
-        djMode: state.djMode,
-        recentTransitionIds: recentTransitionIdsRef.current,
-        categoryWeights: useDjWeights.getState().categoryWeights,
-      });
+      // What auto-scoring alone would have picked: the same planning state, minus the user's pin and re-rolls.
+      const autoPlan = planTransition(
+        planArgsFromState(
+          state,
+          useDjWeights.getState().categoryWeights,
+          { track, analysis: getAnalysis(track.id) },
+          { track: nextTrack, analysis: getAnalysis(nextTrack.id) },
+          { currentElapsedSec: currentTime, ignoreOverrides: true }
+        )
+      );
       if (autoPlan.category !== plan.category) {
         useDjWeights.getState().nudge(plan.category, LEARNING_NUDGE_UP);
         useDjWeights.getState().nudge(autoPlan.category, LEARNING_NUDGE_DOWN);
@@ -2998,23 +2994,15 @@ export function DualDeckStage() {
       }
 
       const nextAnalysis = getAnalysis(nextTrack.id);
-      const plan = planTransition({
-        current: { track, analysis: currentAnalysis },
-        next: { track: nextTrack, analysis: nextAnalysis },
-        genreHint: state.styleGenreHint,
-        overrideSec: state.crossfadeOverrideSec,
-        currentElapsedSec: currentTime,
-        djMode: state.djMode,
-        recentTransitionIds: recentTransitionIdsRef.current,
-        forceTransitionId: state.forcedTransitionId,
-        excludeTransitionIds: state.stemAvailability[nextTrack.id]
-          ? state.rerolledTransitionIds
-          : [...state.rerolledTransitionIds, "vocal-layering"],
-        vocalStemReady: Boolean(state.stemAvailability[nextTrack.id]),
-        varietyBias: state.djVarietyBias,
-        categoryWeights: useDjWeights.getState().categoryWeights,
-        quantize: state.quantizeEnabled,
-      });
+      const plan = planTransition(
+        planArgsFromState(
+          state,
+          useDjWeights.getState().categoryWeights,
+          { track, analysis: currentAnalysis },
+          { track: nextTrack, analysis: nextAnalysis },
+          { currentElapsedSec: currentTime }
+        )
+      );
       const clampedWindow = Math.min(
         plan.windowSec,
         duration / 2,
@@ -3226,23 +3214,15 @@ export function DualDeckStage() {
         return;
       }
       const activeEl = deckEl(activeDeckRef.current);
-      const plan = planTransition({
-        current: { track, analysis: getAnalysis(track.id) },
-        next: { track: nextTrack, analysis: getAnalysis(nextTrack.id) },
-        genreHint: state.styleGenreHint,
-        overrideSec: state.crossfadeOverrideSec,
-        currentElapsedSec: activeEl?.currentTime ?? null,
-        djMode: state.djMode,
-        recentTransitionIds: recentTransitionIdsRef.current,
-        forceTransitionId: state.forcedTransitionId,
-        excludeTransitionIds: state.stemAvailability[nextTrack.id]
-          ? state.rerolledTransitionIds
-          : [...state.rerolledTransitionIds, "vocal-layering"],
-        vocalStemReady: Boolean(state.stemAvailability[nextTrack.id]),
-        varietyBias: state.djVarietyBias,
-        categoryWeights: useDjWeights.getState().categoryWeights,
-        quantize: state.quantizeEnabled,
-      });
+      const plan = planTransition(
+        planArgsFromState(
+          state,
+          useDjWeights.getState().categoryWeights,
+          { track, analysis: getAnalysis(track.id) },
+          { track: nextTrack, analysis: getAnalysis(nextTrack.id) },
+          { currentElapsedSec: activeEl?.currentTime ?? null }
+        )
+      );
       applyLearningNudge(track, nextTrack, state, activeEl?.currentTime ?? null, plan);
       startTransition(nextTrack, plan);
     });
