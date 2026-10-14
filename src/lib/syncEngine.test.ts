@@ -218,7 +218,7 @@ describe("buildSyncReport", () => {
     expect(r.stretchAmount).toBeCloseTo(120 / 124);
     expect(r.keyCompatibility).toBe("tension");
     expect(r.suggestedPitchShiftSemitones).toBe(-2);
-    expect(r.mixOutMs).toBe(184_000); // natural end (200) minus the 16 s window
+    expect(r.mixOutMs).toBe(134_000); // the 150 s active-play cap minus the 16 s window (the 200 s file would allow 184)
     expect(r.mixOutAlignment).toBe("beat");
     expect(r.mixInMs).toBe(12_000);
     expect(r.crossfadeDurationMs).toBe(16_000);
@@ -262,6 +262,25 @@ describe("buildSyncReport", () => {
       plan, // enters 12 s into a 20 s track: 8 s left
     });
     expect(tail.crossfadeDurationMs).toBe(8_000);
+  });
+
+  it("leaves at the natural end minus the window on a track shorter than the active-play cap", () => {
+    const r = buildSyncReport({
+      current: { track: makeTrack("a", 120), analysis: makeAnalysis({ bpm: 120 }) },
+      next: { track: makeTrack("b"), analysis: makeAnalysis({ bpm: 120 }) },
+      plan,
+    });
+    expect(r.mixOutMs).toBe(104_000);
+  });
+
+  it("holds a requested mix-out point (e.g. a voice cut-off) to the same cap", () => {
+    const r = buildSyncReport({
+      current: { track: makeTrack("a", 300), analysis: makeAnalysis({ bpm: 120 }) },
+      next: { track: makeTrack("b"), analysis: makeAnalysis({ bpm: 120 }) },
+      plan,
+      mixOutSec: 200,
+    });
+    expect(r.mixOutMs).toBe(134_000);
   });
 
   it("never plans to leave a track before where it already is", () => {
@@ -345,7 +364,7 @@ describe("describeSyncReport", () => {
       mixOutSec: 192,
     });
     expect(describeSyncReport(r, "Midnight Pulse")).toBe(
-      "Next: Midnight Pulse \u2014 BPM stretch -3.0% \u2014 keys in tension (a -2 semitones shift would help; not applied) \u2014 Mix out at 3:12"
+      "Next: Midnight Pulse \u2014 BPM stretch -3.0% \u2014 keys in tension (a -2 semitones shift would help; not applied) \u2014 Mix out by 2:14 on beat"
     );
   });
 
@@ -362,7 +381,7 @@ describe("describeSyncReport", () => {
       current: { track: makeTrack("a"), analysis: makeAnalysis({ bpm: 128 }) },
       next: { track: makeTrack("b"), analysis: makeAnalysis({ bpm: 128 }) },
     });
-    expect(describeSyncReport(r, "T")).toMatch(/^Next: T \u2014 BPM matched \u2014 same key \u2014 Mix out at /);
+    expect(describeSyncReport(r, "T")).toMatch(/^Next: T \u2014 BPM matched \u2014 same key \u2014 Mix out by /);
   });
 
   it("flags that a key shift is only suggested", () => {

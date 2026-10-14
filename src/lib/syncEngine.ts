@@ -19,6 +19,7 @@ import type { TrackAnalysis } from "@/lib/audio-analysis";
 import type { Track } from "@/types/music";
 import {
   MIN_KEY_CONFIDENCE_FOR_SCORING,
+  MAX_ACTIVE_PLAY_SEC,
   MIN_TEMPO_CONFIDENCE_FOR_TRUST,
   TEMPO_SYNC_MAX_DELTA,
   bestTempoRatio,
@@ -274,6 +275,7 @@ export function stemSwapTimings(bpm: number, windowBeats: number): number[] {
 export interface SyncReport extends BpmPlan, KeyPlan {
   // timing
   /** When to start leaving track A, ms into A. */
+  /** The latest point the DJ leaves track A by, ms into A: the end minus the window, but never past the engine's active-play cap. Opportunistic triggers (a breakdown or drop opening after 90 s, a voice cut-off, a mashup) can fire earlier. */
   mixOutMs: number;
   /** How mixOutMs sits against A's grid: on a bar line (trustworthy song map), on a beat, or between beats. The engine doesn't snap its trigger, so this describes, it doesn't promise. */
   mixOutAlignment: "downbeat" | "beat" | "off-grid";
@@ -348,9 +350,11 @@ export function buildSyncReport({
     if (bpmStrategy === "freeform" && stretchAmount !== 1) bpmStrategy = "stretch";
   }
 
-  // Mix-out: where the engine starts leaving the track (the end minus the window, or a requested point), never
+  // Mix-out: the latest the engine starts leaving the track (the end minus the window, or a requested point), and
+  // never later than its active-play cap (DualDeckStage's pastActiveCap: MAX_ACTIVE_PLAY_SEC minus the window), never
   // before where the track is now. It is not snapped to the grid; the alignment is only reported.
-  const wanted = Math.max(currentElapsedSec ?? 0, mixOutSec ?? Math.max(0, durationA - windowSec));
+  const latestExit = Math.min(mixOutSec ?? Math.max(0, durationA - windowSec), Math.max(0, MAX_ACTIVE_PLAY_SEC - windowSec));
+  const wanted = Math.max(currentElapsedSec ?? 0, latestExit);
   const mixOutSecFinal = Math.min(wanted, Math.max(0, durationA));
   const barLine = snapToDownbeatOrPhrase(current.analysis.songMap, mixOutSecFinal, { preferPhrase: false });
   const beatGrid = snapToBeatGrid(
@@ -432,10 +436,10 @@ export function describeKey(r: Pick<SyncReport, "keyCompatibility" | "suggestedP
   return PITCH_SHIFT_APPLIED ? `${base}, shifted ${words}` : `${base} (a ${words} shift would help; not applied)`;
 }
 
-/** "Next: Title - BPM stretch +3.2% - keys clash (a -2 semitones shift would help; not applied) - Mix out at 3:12 on beat" */
+/** "Next: Title - BPM stretch +3.2% - keys clash (a -2 semitones shift would help; not applied) - Mix out by 2:22 on beat" */
 export function describeSyncReport(report: SyncReport, nextTitle: string): string {
   const align = report.mixOutAlignment === "off-grid" ? "" : ` on ${report.mixOutAlignment}`;
-  const mixOut = `Mix out at ${formatTime(report.mixOutMs / 1000)}${align}`;
+  const mixOut = `Mix out by ${formatTime(report.mixOutMs / 1000)}${align}`;
   return `Next: ${nextTitle} — ${describeBpm(report)} — ${describeKey(report)} — ${mixOut}`;
 }
 
