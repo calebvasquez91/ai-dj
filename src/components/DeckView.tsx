@@ -421,6 +421,7 @@ export function DeckView() {
   const categoryWeights = useDjWeights((s) => s.categoryWeights);
   const stemAvailability = useStore((s) => s.stemAvailability);
   const recentTransitionIds = useStore((s) => s.recentTransitionIds);
+  const vocalMashup = useStore((s) => s.vocalMashup);
   const voiceCutEnabled = useStore((s) => s.voiceCut.enabled);
   const currentVoiceMap = useStore((s) => (s.currentTrack ? s.trackVoiceMaps[s.currentTrack.id] : undefined));
   const aiNextPickTrackId = useStore((s) => s.aiNextPickTrackId);
@@ -690,6 +691,22 @@ export function DeckView() {
             <p className="text-xs text-muted">
               {isTransitioning && activeTransitionRationale ? activeTransitionRationale : preview.rationale}
             </p>
+            {vocalMashup && (
+              <p
+                className="text-xs text-accent-purple"
+                data-testid="vocal-mashup-status"
+                data-phase={vocalMashup.phase}
+                data-tempo={vocalMashup.tempo.toFixed(4)}
+                data-pitch={vocalMashup.pitchSemitones.toFixed(3)}
+                data-out-gain={vocalMashup.outGain.toFixed(3)}
+                data-vocal-gain={vocalMashup.vocalGain.toFixed(3)}
+                data-inst-gain={vocalMashup.instGain.toFixed(3)}
+                data-elapsed={vocalMashup.elapsedSec.toFixed(2)}
+              >
+                Vocal mashup · {vocalMashup.phase === "holding" ? "vocal over the instrumental" : "handing off"} ·{" "}
+                {Math.round(vocalMashup.elapsedSec)}s / {Math.round(vocalMashup.totalSec)}s
+              </p>
+            )}
             {syncReport && nextTrack && (
               <div className="flex flex-col gap-0.5 pt-1.5 mt-0.5 border-t border-border/60 text-xs" data-testid="sync-readout">
                 <p className="font-semibold text-foreground">{describeSyncReport(syncReport, nextTrack.title)}</p>

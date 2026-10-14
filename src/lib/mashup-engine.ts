@@ -85,7 +85,7 @@ function parseCamelot(code: string): { number: number; letter: string } | null {
  * shifting those wouldn't make them "more" compatible, just different, so
  * they get 0.
  */
-function camelotSemitoneShift(currentCode: string | null, nextCode: string | null): number {
+export function camelotSemitoneShift(currentCode: string | null, nextCode: string | null): number {
   const a = currentCode ? parseCamelot(currentCode) : null;
   const b = nextCode ? parseCamelot(nextCode) : null;
   if (!a || !b || a.letter !== b.letter || a.number === b.number) return 0;
