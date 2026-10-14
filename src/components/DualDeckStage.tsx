@@ -50,7 +50,7 @@ import { voiceCutoffSec } from "@/lib/voiceMap";
 import { INITIAL_AUTO_FX_STATE, decideAutoFx, type AutoFxState } from "@/lib/autoFx";
 import { effectiveAutoFxChoice } from "@/lib/autoFxSettings";
 import { FX_LOAD_IDLE, beginFxRequest, finishFxRequest, pressFx, resetFxLoad, type FxLoadState } from "@/lib/fxLayer";
-import { energyProfileFromPeaks } from "@/lib/energyProfile";
+import { analyzeEnergy, type EnergyZone } from "@/lib/energyProfile";
 import { hasHalloweenAffinity } from "@/lib/fxAffinity";
 import { requestLoopPick } from "@/lib/loopApi";
 import {
@@ -377,10 +377,10 @@ export function DualDeckStage() {
   } | null>(null);
   const fxLoadRef = useRef<FxLoadState>(FX_LOAD_IDLE);
   // Auto FX (lib/autoFx.ts): the peak/valley tracking state and the current track's energy profile (recomputed when its waveform data changes).
-  const autoFxRef = useRef<{ state: AutoFxState; peaks: number[] | null; profile: number[] }>({
+  const autoFxRef = useRef<{ state: AutoFxState; peaks: number[] | null; zones: EnergyZone[] }>({
     state: INITIAL_AUTO_FX_STATE,
     peaks: null,
-    profile: [],
+    zones: [],
   });
   // Pending `el.pause()` timeouts scheduled by stopAmbientLayer/the
   // crossfade-out below, keyed per slot — must be cancelled whenever that
@@ -1442,13 +1442,13 @@ export function DualDeckStage() {
       const peaks = getAnalysis(track.id).waveformPeaks;
       if (memo.peaks !== peaks) {
         memo.peaks = peaks;
-        memo.profile = energyProfileFromPeaks(peaks);
+        memo.zones = analyzeEnergy(peaks).zones;
       }
       const busy = transitionRef.current || mashupRef.current || loopRef.current || backspinRef.current || tempoRampRef.current;
       const decision = decideAutoFx({
         enabled: state.autoFx.enabled && !busy,
         trackId: track.id,
-        profile: memo.profile,
+        zones: memo.zones,
         currentTimeSec: activeEl.currentTime,
         durationSec: track.durationSec,
         state: memo.state,

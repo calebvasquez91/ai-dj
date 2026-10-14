@@ -1,20 +1,26 @@
 "use client";
 
 import { useMemo } from "react";
-import { energyProfileFromPeaks, zoneOfEnergy } from "@/lib/energyProfile";
+import { analyzeEnergy, zoneEntryEvent } from "@/lib/energyProfile";
 
 /**
  * Mini energy graph shown above a deck's waveform: the track's energy across its length (lib/energyProfile.ts), with
- * peaks (pink) and valleys (teal) marked so you can see them coming, and a playhead. Renders nothing for a track with
- * no usable waveform data, or one too flat to have peaks and valleys.
+ * peaks (pink) and valleys (teal) marked so you can see them coming, a pink tick where the energy comes back up out of
+ * a valley (a drop — where Auto FX also fires its peak effect), and a playhead. Renders nothing for a track with no
+ * usable waveform data, or one too flat to have peaks and valleys.
  */
 export function EnergyGraph({ peaks, progressRatio }: { peaks: number[]; progressRatio?: number }) {
-  const profile = useMemo(() => energyProfileFromPeaks(peaks), [peaks]);
+  const { profile, zones } = useMemo(() => analyzeEnergy(peaks), [peaks]);
+  const hasPeaksOrDrops = zones.some((z, i) => z === "peak" || (z === "mid" && zoneEntryEvent(zones[i - 1] ?? null, z) === "peak"));
+  const hasValleys = zones.includes("valley");
   // The bars depend only on the profile; the playhead moves several times a second, so it is drawn outside this memo.
+  // Bar height is the real energy; the colour is the zone (a peak is the track's loudest fifth, a valley its quietest).
+  // A tick marks each drop: the first non-valley point after a valley.
   const bars = useMemo(
-    () =>
-      profile.map((value, i) => {
-        const zone = zoneOfEnergy(value);
+    () => {
+      return profile.map((value, i) => {
+        const zone = zones[i];
+        const isDrop = zone === "mid" && zoneEntryEvent(zones[i - 1] ?? null, zone) === "peak";
         const height = Math.max(0.6, value * 20);
         return (
           <rect
@@ -24,13 +30,19 @@ export function EnergyGraph({ peaks, progressRatio }: { peaks: number[]; progres
             width={0.9}
             height={height}
             style={{
-              fill: zone === "peak" ? "var(--accent-pink)" : zone === "valley" ? "var(--accent-teal)" : "var(--accent-purple)",
-              opacity: zone === "mid" ? 0.45 : 0.95,
+              fill:
+                zone === "peak" || isDrop
+                  ? "var(--accent-pink)"
+                  : zone === "valley"
+                    ? "var(--accent-teal)"
+                    : "var(--accent-purple)",
+              opacity: zone === "mid" && !isDrop ? 0.45 : 0.95,
             }}
           />
         );
-      }),
-    [profile]
+      });
+    },
+    [profile, zones]
   );
   if (profile.length === 0) return null;
   const playhead = progressRatio != null && Number.isFinite(progressRatio) ? Math.min(1, Math.max(0, progressRatio)) * profile.length : null;
@@ -39,12 +51,17 @@ export function EnergyGraph({ peaks, progressRatio }: { peaks: number[]; progres
       <div className="flex items-center justify-between text-[10px] text-muted">
         <span className="uppercase tracking-wide">Energy</span>
         <span className="flex items-center gap-2">
-          <span className="flex items-center gap-1">
-            <span aria-hidden="true" className="inline-block h-1.5 w-1.5 rounded-full bg-accent-pink" /> peaks
-          </span>
-          <span className="flex items-center gap-1">
-            <span aria-hidden="true" className="inline-block h-1.5 w-1.5 rounded-full bg-accent-teal" /> valleys
-          </span>
+          {hasPeaksOrDrops && (
+            <span className="flex items-center gap-1">
+              <span aria-hidden="true" className="inline-block h-1.5 w-1.5 rounded-full bg-accent-pink" /> peaks &amp; drops
+            </span>
+          )}
+          {hasValleys && (
+            <span className="flex items-center gap-1">
+              <span aria-hidden="true" className="inline-block h-1.5 w-1.5 rounded-full bg-accent-teal" /> valleys
+            </span>
+          )}
+          {!hasPeaksOrDrops && !hasValleys && <span>no stand-out peaks or valleys</span>}
         </span>
       </div>
       <svg
