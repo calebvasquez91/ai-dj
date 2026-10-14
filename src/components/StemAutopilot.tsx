@@ -5,6 +5,8 @@ import { useStore, type StemPick } from "@/lib/store";
 import { reachableTracks } from "@/lib/lookahead";
 import { judgeStemCandidate } from "@/lib/stemPlanner";
 import { planStemAutopilot, stemStateFromJob, type StemJobState } from "@/lib/stemAutopilot";
+import { isVocalMashupPair, vocalMashupBeatsTheCap } from "@/lib/vocalMashup";
+import { voiceCutoffSec } from "@/lib/voiceMap";
 import type { StemSupport } from "@/lib/stemSupport";
 import type { StemCounts } from "@/lib/stemStatus";
 
@@ -27,8 +29,14 @@ interface JobJson {
  * the server enforces (STEM_AUTO_BUDGET_USD). Finished stems are handed to the DJ through the store's
  * stemAvailability, so the next transition decision sees them. Renders nothing; the Stems panel shows its status.
  */
-export function StemAutopilot() {
-  const enabled = useStore((s) => s.stemAuto.enabled);
+export function StemAutopilot({ scope = "window" }: { scope?: "window" | "mashup-next" } = {}) {
+  // "window" is the general autopilot (the paused Stems feature, its own on/off switch). "mashup-next" is the vocal
+  // mashup's on-demand scope: only the NEXT track, only when it and the playing track form a mashable pair whose
+  // outgoing voices end before the engine's active-play cap, and only while Mashups are switched on.
+  const stemAutoEnabled = useStore((s) => s.stemAuto.enabled);
+  const mashupEnabled = useStore((s) => s.mashupEnabled);
+  const voiceMaps = useStore((s) => s.trackVoiceMaps);
+  const enabled = scope === "mashup-next" ? mashupEnabled : stemAutoEnabled;
   const currentTrack = useStore((s) => s.currentTrack);
   const queue = useStore((s) => s.queue);
   const trackAnalysis = useStore((s) => s.trackAnalysis);
@@ -133,14 +141,33 @@ export function StemAutopilot() {
 
   // Decide: judge the upcoming tracks, publish the status, and (when on) look things up and start one job.
   useEffect(() => {
-    const window = reachableTracks(currentTrack, queue, STEM_LOOKAHEAD);
-    const verdicts = window.map((track) =>
-      judgeStemCandidate({
+    let window = reachableTracks(currentTrack, queue, STEM_LOOKAHEAD);
+    if (scope === "mashup-next") {
+      const next = queue[0];
+      const currentAnalysis = currentTrack ? trackAnalysis[currentTrack.id] : undefined;
+      const nextAnalysis = next ? trackAnalysis[next.id] : undefined;
+      const mashable =
+        currentTrack != null &&
+        next != null &&
+        currentTrack.source === "local" &&
+        next.source === "local" &&
+        currentAnalysis != null &&
+        !currentAnalysis.fallback &&
+        nextAnalysis != null &&
+        !nextAnalysis.fallback &&
+        isVocalMashupPair({ track: currentTrack, analysis: currentAnalysis }, { track: next, analysis: nextAnalysis }) &&
+        vocalMashupBeatsTheCap(voiceCutoffSec(voiceMaps[currentTrack.id], currentTrack.durationSec));
+      window = mashable ? [next] : [];
+    }
+    const verdicts = window.map((track) => {
+      const verdict = judgeStemCandidate({
         track,
         analysis: trackAnalysis[track.id],
         hasLyrics: (fingerprints[track.id]?.words?.size ?? 0) > 0,
-      })
-    );
+      });
+      // The mashup scope doesn't need the engineer's "suits stems" score, only that the track is separable at all.
+      return scope === "mashup-next" ? { ...verdict, worthIt: verdict.score > 0 } : verdict;
+    });
     const titleOf = new Map(window.map((t) => [t.id, t.title]));
     const picks: StemPick[] = verdicts
       .filter((v) => v.worthIt)
@@ -191,7 +218,7 @@ export function StemAutopilot() {
     if (plan.start && !unavailable && Date.now() >= busyUntilRef.current) void start(plan.start);
     // lookUp/start are stable closures over refs
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [enabled, currentTrack, queue, trackAnalysis, fingerprints, tick]);
+  }, [enabled, scope, voiceMaps, currentTrack, queue, trackAnalysis, fingerprints, tick]);
 
   // Poll running jobs: the GET both reports and advances a job.
   useEffect(() => {

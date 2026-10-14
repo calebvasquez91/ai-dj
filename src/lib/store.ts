@@ -66,6 +66,21 @@ export interface StemAutopilotStatus {
   counts: StemCounts | null;
 }
 
+/** A vocal mashup in progress (components/DualDeckStage.tsx): what the DJ board shows, and what the live test reads. */
+export interface VocalMashupStatus {
+  nextTitle: string;
+  phase: "holding" | "handoff";
+  elapsedSec: number;
+  totalSec: number;
+  /** The incoming vocal's tempo ratio and pitch shift right now (they ease home during the hand-off). */
+  tempo: number;
+  pitchSemitones: number;
+  /** The gains the player is applying: the outgoing deck, the incoming vocal and the incoming instrumental. */
+  outGain: number;
+  vocalGain: number;
+  instGain: number;
+}
+
 export const INITIAL_STEM_AUTOPILOT_STATUS: StemAutopilotStatus = {
   state: "off",
   message: null,
@@ -188,6 +203,8 @@ interface PlayerState {
   trackVoiceMaps: Record<string, VoiceMap | null>;
   /** Live status of the stem autopilot, written by StemAutopilot and read by the Stems panel. */
   stemAutopilot: StemAutopilotStatus;
+  /** The vocal mashup in progress, or null. Written by DualDeckStage. */
+  vocalMashup: VocalMashupStatus | null;
   /** Opportunistic tempo/key-matched dual-track mashup moments — a distinct, rarer "special moment" from ambience FX. */
   mashupEnabled: boolean;
 
@@ -339,6 +356,7 @@ interface PlayerState {
   /** Reads the saved stem-autopilot setting (browser only; called once on app load). */
   loadStemAuto: () => void;
   setStemAutopilotStatus: (status: StemAutopilotStatus) => void;
+  setVocalMashup: (status: VocalMashupStatus | null) => void;
   /** Reads the saved Auto FX settings (browser only; called once on app load). */
   loadAutoFx: () => void;
   requestFx: () => void;
@@ -449,6 +467,7 @@ export const useStore = create<PlayerState>()(
       voiceCut: VOICE_CUT_DEFAULTS,
       trackVoiceMaps: {},
       stemAutopilot: INITIAL_STEM_AUTOPILOT_STATUS,
+      vocalMashup: null,
       mashupEnabled: true,
 
       mixerPanelOpen: false,
@@ -912,6 +931,7 @@ export const useStore = create<PlayerState>()(
       loadVoiceCut: () => set({ voiceCut: loadVoiceCutSettings() }),
       setTrackVoiceMap: (trackId, map) => set((s) => ({ trackVoiceMaps: { ...s.trackVoiceMaps, [trackId]: map } })),
       setStemAutopilotStatus: (stemAutopilot) => set({ stemAutopilot }),
+      setVocalMashup: (vocalMashup) => set({ vocalMashup }),
       requestFx: () => set((s) => ({ fxRequestId: s.fxRequestId + 1 })),
       setMashupEnabled: (enabled) => set({ mashupEnabled: enabled }),
       // Only localLibrary is the source of truth for curation flags, but
