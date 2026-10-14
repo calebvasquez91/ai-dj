@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useStore } from "@/lib/store";
-import { camelotCompatibility, planTransition, type DjSetMode } from "@/lib/mix-engine";
+import { camelotCompatibility, planArgsFromState, planTransition, type DjSetMode } from "@/lib/mix-engine";
 import { fallbackAnalysis, type TrackAnalysis } from "@/lib/audio-analysis";
 import { buildSyncReport, describeKey, describeSyncReport } from "@/lib/syncEngine";
 import { useDjWeights } from "@/lib/dj-weights";
@@ -420,6 +420,7 @@ export function DeckView() {
   const setQuantizeEnabled = useStore((s) => s.setQuantizeEnabled);
   const categoryWeights = useDjWeights((s) => s.categoryWeights);
   const stemAvailability = useStore((s) => s.stemAvailability);
+  const recentTransitionIds = useStore((s) => s.recentTransitionIds);
   const voiceCutEnabled = useStore((s) => s.voiceCut.enabled);
   const currentVoiceMap = useStore((s) => (s.currentTrack ? s.trackVoiceMaps[s.currentTrack.id] : undefined));
   const aiNextPickTrackId = useStore((s) => s.aiNextPickTrackId);
@@ -442,21 +443,26 @@ export function DeckView() {
 
   const preview = useMemo(() => {
     if (!currentTrack || !nextTrack) return null;
-    return planTransition({
-      current: { track: currentTrack, analysis: currentAnalysis ?? fallbackAnalysis() },
-      next: { track: nextTrack, analysis: nextAnalysis ?? fallbackAnalysis() },
-      genreHint: styleGenreHint,
-      overrideSec: crossfadeOverrideSec,
-      currentElapsedSec: currentTimeSec,
-      djMode,
-      forceTransitionId: forcedTransitionId,
-      // Same stem rules as DualDeckStage's plan, so the preview shows the transition that will actually run.
-      excludeTransitionIds: stemAvailability[nextTrack.id] ? rerolledTransitionIds : [...rerolledTransitionIds, "vocal-layering"],
-      vocalStemReady: Boolean(stemAvailability[nextTrack.id]),
-      varietyBias: djVarietyBias,
-      categoryWeights,
-      quantize: quantizeEnabled,
-    });
+    // The same arguments DualDeckStage plans with (planArgsFromState), so the preview is the transition that runs.
+    return planTransition(
+      planArgsFromState(
+        {
+          styleGenreHint,
+          crossfadeOverrideSec,
+          djMode,
+          forcedTransitionId,
+          rerolledTransitionIds,
+          stemAvailability,
+          djVarietyBias,
+          quantizeEnabled,
+          recentTransitionIds,
+          categoryWeights,
+        },
+        { track: currentTrack, analysis: currentAnalysis ?? fallbackAnalysis() },
+        { track: nextTrack, analysis: nextAnalysis ?? fallbackAnalysis() },
+        { currentElapsedSec: currentTimeSec }
+      )
+    );
   }, [
     currentTrack,
     nextTrack,
@@ -472,6 +478,7 @@ export function DeckView() {
     categoryWeights,
     quantizeEnabled,
     stemAvailability,
+    recentTransitionIds,
   ]);
 
   // The sync engine's read of this mix (lib/syncEngine.ts) — only worth showing when both tracks have real analysis.
