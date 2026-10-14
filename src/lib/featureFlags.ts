@@ -9,7 +9,8 @@ export const STEM_FEATURES_ENABLED = process.env.NEXT_PUBLIC_STEM_FEATURES === "
 /**
  * The vocal mashup (lib/vocalMashup.ts): when the playing track's singing is over, the next track's vocal rides its
  * instrumental. Independent of the paused stem features above: it separates only the one next track of a mashable
- * pair, on demand, under the same server-side budget, and builds voice maps only to know when singing has ended. On
- * by default (it also needs the "Mashups" toggle on the DJ board); set NEXT_PUBLIC_VOCAL_MASHUP="off" to disable.
+ * pair, on demand, under the same server-side budget, and builds voice maps only to know when singing has ended. Off
+ * by default until a real stem separation has been run end to end; set NEXT_PUBLIC_VOCAL_MASHUP="on" to enable (it
+ * also needs the "Mashups" toggle on the DJ board).
  */
-export const VOCAL_MASHUP_ENABLED = process.env.NEXT_PUBLIC_VOCAL_MASHUP !== "off";
+export const VOCAL_MASHUP_ENABLED = process.env.NEXT_PUBLIC_VOCAL_MASHUP === "on";
