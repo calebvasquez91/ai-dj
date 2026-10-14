@@ -2,6 +2,9 @@ import { redirect } from "next/navigation";
 import { auth } from "@/auth";
 import { AuthSessionProvider } from "@/components/AuthSessionProvider";
 import { AppDataLoader } from "@/components/AppDataLoader";
+import { StemAutopilot } from "@/components/StemAutopilot";
+import { VoiceMapLoader } from "@/components/VoiceMapLoader";
+import { STEM_FEATURES_ENABLED } from "@/lib/featureFlags";
 import { MusicWaveBackground } from "@/components/MusicWaveBackground";
 import { SpookyBackdrop } from "@/components/SpookyBackdrop";
 import { Sidebar } from "@/components/Sidebar";
@@ -20,6 +23,8 @@ export default async function AppLayout({ children }: { children: React.ReactNod
   return (
     <AuthSessionProvider>
       <AppDataLoader />
+      {STEM_FEATURES_ENABLED && <StemAutopilot />}
+      {STEM_FEATURES_ENABLED && <VoiceMapLoader />}
       <KeyboardShortcuts />
       <SpookyBackdrop />
       <MusicWaveBackground />

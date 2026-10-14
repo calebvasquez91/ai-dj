@@ -32,7 +32,7 @@ export const TRACK_FADE_IN_SEC = 1.5;
 export const TRACK_FADE_OUT_SEC = 2.5;
 
 /** How close (fractional, after best-octave adjustment) two BPMs need to be to tempo-sync, roughly a real turntable's pitch-fader range. */
-const TEMPO_SYNC_MAX_DELTA = 0.08;
+export const TEMPO_SYNC_MAX_DELTA = 0.08;
 
 /**
  * How confident the tempo estimate needs to be before we bet a
@@ -490,6 +490,8 @@ export interface TransitionContext {
   categoryWeights?: Partial<Record<TransitionCategory, number>>;
   /** Whether both decks have a real Hot Cue drop placed (auto or manual) — the only thing that makes "drop-swap" a selectable candidate at all. Computed by planTransition from the actual tracks; never set by hand. */
   cueDropSwapEligible?: boolean;
+  /** The incoming track's isolated vocal stem has been separated and is ready — gives "vocal-layering" a bonus so the stems the audio engineer got made actually get used. */
+  vocalStemReady?: boolean;
 }
 
 /**
@@ -523,6 +525,8 @@ export interface ScoreBreakdown {
   repetitionPenalty: number;
   /** Bonus for "drop-swap" specifically, only when both decks actually have a real Hot Cue drop placed — see cueDropSwapEligible. Zero for every other transition. */
   cueBonus: number;
+  /** Bonus for "vocal-layering" specifically, only when the incoming track's vocal stem is ready — see vocalStemReady. Zero for every other transition. */
+  stemBonus: number;
   total: number;
 }
 
@@ -535,11 +539,14 @@ const EXCLUDED_BREAKDOWN: ScoreBreakdown = {
   learnedWeight: 0,
   repetitionPenalty: 0,
   cueBonus: 0,
+  stemBonus: 0,
   total: -Infinity,
 };
 
 /** How much "drop-swap" outscores its unconfirmed twin "double-drop" when both decks have a real Hot Cue drop placed — comparable to personaMatch's flat bonus, enough to reliably win the tie without overriding a strong genre/mode/learned preference for something else entirely. */
 const CUE_DROP_SWAP_BONUS = 8;
+/** How much "vocal-layering" gains when the incoming track's vocal stem is ready — enough to win a close call (like the persona bonus), not enough to override a strong genre, mode or learned preference for something else. */
+const STEM_LAYER_BONUS = 8;
 
 function scoreTransition(t: TransitionEntry, ctx: TransitionContext): ScoreBreakdown {
   if (!t.executable) return EXCLUDED_BREAKDOWN;
@@ -563,14 +570,15 @@ function scoreTransition(t: TransitionEntry, ctx: TransitionContext): ScoreBreak
   const modeBias = MODE_CATEGORY_BIAS[ctx.djMode ?? "auto"][t.category] ?? 0;
   const learnedWeight = ctx.categoryWeights?.[t.category] ?? 0;
   const cueBonus = t.id === "drop-swap" && ctx.cueDropSwapEligible ? CUE_DROP_SWAP_BONUS : 0;
+  const stemBonus = t.id === "vocal-layering" && ctx.vocalStemReady ? STEM_LAYER_BONUS : 0;
   let repetitionPenalty = 0;
   if (ctx.varietyBias && t.category === "cut") repetitionPenalty -= VARIETY_CUT_PENALTY;
   if (ctx.recentTransitionIds?.includes(t.id)) {
     repetitionPenalty -= ctx.varietyBias ? REPETITION_PENALTY_VARIETY : REPETITION_PENALTY;
   }
   const total =
-    bpmFit + genreMatch + personaMatch + harmonicMatch + modeBias + learnedWeight + cueBonus + repetitionPenalty;
-  return { bpmFit, genreMatch, personaMatch, harmonicMatch, modeBias, learnedWeight, cueBonus, repetitionPenalty, total };
+    bpmFit + genreMatch + personaMatch + harmonicMatch + modeBias + learnedWeight + cueBonus + stemBonus + repetitionPenalty;
+  return { bpmFit, genreMatch, personaMatch, harmonicMatch, modeBias, learnedWeight, cueBonus, stemBonus, repetitionPenalty, total };
 }
 
 function bestScoringTransition(ctx: TransitionContext): { entry: TransitionEntry; breakdown: ScoreBreakdown } {
@@ -647,6 +655,8 @@ interface PlanTransitionArgs {
   categoryWeights?: Partial<Record<TransitionCategory, number>>;
   /** Whether the incoming track's entry point (and the outgoing-phase-lock nudge) snaps to the beat grid. Defaults true — this is a real, user-visible toggle (DJ Decks panel), not always-on internal behavior. */
   quantize?: boolean;
+  /** The incoming track's isolated vocal stem is ready (store.stemAvailability) — makes "vocal-layering" more attractive. */
+  vocalStemReady?: boolean;
 }
 
 function buildRationale(
@@ -720,6 +730,7 @@ function buildShortWhy(
     return `Leaning into your usual pick for ${MODE_WHY_CONTEXT[djMode]}`;
   }
   if (breakdown.cueBonus > 0) return "Landing both drops on confirmed Hot Cues";
+  if (breakdown.stemBonus > 0) return "Layering the incoming vocal from its separated stems";
   if (tempoSync && camelotScore >= 1) return "Blending on tempo + key match";
   if (tempoSync) return "Blending on a tempo match";
   if (camelotScore >= 1) return "Matched on key compatibility";
@@ -754,6 +765,7 @@ export function planTransition({
   varietyBias = false,
   categoryWeights = {},
   quantize = true,
+  vocalStemReady = false,
 }: PlanTransitionArgs): TransitionPlan {
   const bpmDelta = Math.abs(bestTempoRatio(current.analysis.bpm, next.analysis.bpm) - 1);
   // Two tracks that both fell back to the same neutral 120 BPM (low
@@ -802,6 +814,7 @@ export function planTransition({
     varietyBias,
     categoryWeights,
     cueDropSwapEligible,
+    vocalStemReady,
   });
   const wasForced = Boolean(forceTransitionId) && transition.id === forceTransitionId;
 

@@ -162,7 +162,9 @@ const SHORT: SynthSection[] = [
   { bars: 16, layers: ["kick", "snare", "hat", "bass", "pad", "lead"], gain: 1.15 },
 ];
 
-describe("buildSongMap on synthetic songs", () => {
+// These render and analyse whole synthetic songs (seconds each), so they are given room beyond the 5 s default:
+// under the full suite running in parallel they were timing out, unrelated to what they assert.
+describe("buildSongMap on synthetic songs", { timeout: 30_000 }, () => {
   const song = renderSynthSong({ bpm: 128, sections: SHORT, seed: 3 });
   const map = buildSongMap(song.samples, song.sampleRate, song.truth.durationSec)!;
 
@@ -200,7 +202,7 @@ describe("buildSongMap on synthetic songs", () => {
   });
 });
 
-describe("buildSongMap across tempos and patterns", () => {
+describe("buildSongMap across tempos and patterns", { timeout: 30_000 }, () => {
   const cases: { name: string; bpm: number; opts: Parameters<typeof renderSynthSong>[0] extends infer T ? Partial<T> : never }[] = [
     { name: "90 BPM four-on-the-floor", bpm: 90, opts: {} },
     { name: "140 BPM four-on-the-floor", bpm: 140, opts: {} },

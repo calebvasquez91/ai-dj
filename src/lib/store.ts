@@ -22,7 +22,9 @@ import {
   pickByBpmProximity,
   type AiNextTrackCandidate,
 } from "@/lib/ai-dj";
-import { pickFallbackTransitionFx, type AiFxCandidate, type AiFxTrackProfile } from "@/lib/ai-fx";
+import { pickFallbackTransitionFx, type AiFxBoardState, type AiFxCandidate, type AiFxTrackProfile } from "@/lib/ai-fx";
+import { planTransition } from "@/lib/mix-engine";
+import { buildSyncReport, candidateSyncSummary } from "@/lib/syncEngine";
 import { jsonInit, syncRequest } from "@/lib/syncRequest";
 import { hasHalloweenAffinity } from "@/lib/fxAffinity";
 import {
@@ -32,8 +34,45 @@ import {
   clampFxLevel,
 } from "@/lib/layerMix";
 import { AUTO_FX_DEFAULTS, loadAutoFxSettings, saveAutoFxSettings, type AutoFxSettings } from "@/lib/autoFxSettings";
+import { loadStemAutoSettings, saveStemAutoSettings, type StemAutoSettings } from "@/lib/stemAutoSettings";
+import type { StemJobState } from "@/lib/stemAutopilot";
+import type { StemCounts } from "@/lib/stemStatus";
+import { judgeStemCandidate } from "@/lib/stemPlanner";
+import { VOICE_CUT_DEFAULTS, loadVoiceCutSettings, saveVoiceCutSettings, type VoiceCutSettings } from "@/lib/voiceCutSettings";
+import type { VoiceMap } from "@/lib/voiceMap";
 
 const MAX_HISTORY = 50;
+
+/** One upcoming track the audio engineer has judged for stems, and where its separation stands. */
+export interface StemPick {
+  trackId: string;
+  title: string;
+  score: number;
+  worthIt: boolean;
+  reasons: string[];
+  state: StemJobState;
+}
+
+export interface StemAutopilotStatus {
+  /** off: switched off. idle: on, nothing to do right now. working: a separation is running or being started. paused: stopped by a problem (budget reached, ...) — see `message`. unavailable: this server can't separate stems at all (local storage backend, no Replicate token) — see `message`. */
+  state: "off" | "idle" | "working" | "paused" | "unavailable";
+  message: string | null;
+  /** The engineer's verdicts for the upcoming tracks, nearest first. */
+  picks: StemPick[];
+  spentUsd: number | null;
+  budgetUsd: number | null;
+  /** The user's library-wide job counts; null until the summary has loaded. */
+  counts: StemCounts | null;
+}
+
+export const INITIAL_STEM_AUTOPILOT_STATUS: StemAutopilotStatus = {
+  state: "off",
+  message: null,
+  picks: [],
+  spentUsd: null,
+  budgetUsd: null,
+  counts: null,
+};
 
 /** Maps a track over every place a Track object lives in the store (library, playlists, queue, current) — the one patch shape the optimistic curation setters and their rollbacks share. */
 function patchTrackEverywhere(s: PlayerState, trackId: string, fn: (t: Track) => Track) {
@@ -138,6 +177,14 @@ interface PlayerState {
   fxLayerActive: boolean;
   /** Auto FX: fire a chosen effect when playback enters an energy peak or valley (lib/autoFx.ts). Saved in localStorage. */
   autoFx: AutoFxSettings;
+  /** Automatic stem separation (components/StemAutopilot.tsx): on by default under a server-side spending budget. Saved in localStorage; starts off here so nothing runs before the saved choice is loaded. */
+  stemAuto: StemAutoSettings;
+  /** Move on 10 s after a track's last voice (lib/voiceMap.ts). On by default; only ever acts on tracks that have voice data. Saved in localStorage. */
+  voiceCut: VoiceCutSettings;
+  /** Voice maps (when the singing happens), built ahead of time by VoiceMapLoader: absent = not tried yet, null = tried and nothing usable. In-memory only — they are cheap to rebuild and hold times, never words. */
+  trackVoiceMaps: Record<string, VoiceMap | null>;
+  /** Live status of the stem autopilot, written by StemAutopilot and read by the Stems panel. */
+  stemAutopilot: StemAutopilotStatus;
   /** Opportunistic tempo/key-matched dual-track mashup moments — a distinct, rarer "special moment" from ambience FX. */
   mashupEnabled: boolean;
 
@@ -278,6 +325,14 @@ interface PlayerState {
   setFxPlaying: (playing: boolean) => void;
   setFxLayerActive: (active: boolean) => void;
   setAutoFx: (patch: Partial<AutoFxSettings>) => void;
+  setStemAuto: (patch: Partial<StemAutoSettings>) => void;
+  setVoiceCut: (patch: Partial<VoiceCutSettings>) => void;
+  /** Reads the saved voice-cut setting (browser only; called once on app load). */
+  loadVoiceCut: () => void;
+  setTrackVoiceMap: (trackId: string, map: VoiceMap | null) => void;
+  /** Reads the saved stem-autopilot setting (browser only; called once on app load). */
+  loadStemAuto: () => void;
+  setStemAutopilotStatus: (status: StemAutopilotStatus) => void;
   /** Reads the saved Auto FX settings (browser only; called once on app load). */
   loadAutoFx: () => void;
   requestFx: () => void;
@@ -383,6 +438,10 @@ export const useStore = create<PlayerState>()(
       fxPlaying: false,
       fxLayerActive: false,
       autoFx: AUTO_FX_DEFAULTS,
+      stemAuto: { enabled: false },
+      voiceCut: VOICE_CUT_DEFAULTS,
+      trackVoiceMaps: {},
+      stemAutopilot: INITIAL_STEM_AUTOPILOT_STATUS,
       mashupEnabled: true,
 
       mixerPanelOpen: false,
@@ -466,6 +525,8 @@ export const useStore = create<PlayerState>()(
           queue,
           shuffleSession,
           trackAnalysis,
+          stemAvailability,
+          trackLyricalFingerprints,
           djMode,
           crossfadeOverrideSec,
           styleGenreHint,
@@ -485,7 +546,26 @@ export const useStore = create<PlayerState>()(
             camelotKey: analysis?.camelotKey ?? null,
             energy: analysis ? meanEnergy(analysis.waveformPeaks) : null,
             hasRealAnalysis: analysis != null && !analysis.fallback,
+            stems: stemAvailability[t.id] ? "ready" : "none",
+            engineerStemScore:
+              analysis && !analysis.fallback
+                ? judgeStemCandidate({
+                    track: t,
+                    analysis,
+                    hasLyrics: (trackLyricalFingerprints[t.id]?.words?.size ?? 0) > 0,
+                  }).score
+                : null,
           };
+        };
+
+        // Each candidate also carries how it would sync after the playing track (tempo strategy, key shift), so the
+        // AI can prefer a pick the sync engine can mix cleanly. Needs real analysis of both sides.
+        const currentAnalysis = trackAnalysis[currentTrack.id];
+        const toSyncedCandidate = (t: Track): AiNextTrackCandidate => {
+          const candidate = toCandidate(t);
+          const analysis = trackAnalysis[t.id];
+          if (!currentAnalysis || currentAnalysis.fallback || !analysis || analysis.fallback) return candidate;
+          return { ...candidate, sync: candidateSyncSummary(currentAnalysis, analysis) };
         };
 
         // Candidate pool for the AI: everything already queued, topped up
@@ -511,7 +591,7 @@ export const useStore = create<PlayerState>()(
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
               currentTrack: toCandidate(currentTrack),
-              candidates: candidateTracks.map(toCandidate),
+              candidates: candidateTracks.map(toSyncedCandidate),
               boardState: {
                 mixMode: djMode,
                 mixModeDescription: DJ_MODE_DESCRIPTIONS[djMode],
@@ -576,8 +656,21 @@ export const useStore = create<PlayerState>()(
       },
 
       requestAiFxPick: async () => {
-        const { currentTrack, queue, trackAnalysis, fxLibrary, djMode, crossfadeOverrideSec, activePlaylistTheme } =
-          get();
+        const {
+          currentTrack,
+          queue,
+          trackAnalysis,
+          fxLibrary,
+          djMode,
+          crossfadeOverrideSec,
+          activePlaylistTheme,
+          styleGenreHint,
+          forcedTransitionId,
+          rerolledTransitionIds,
+          djVarietyBias,
+          quantizeEnabled,
+          stemAvailability,
+        } = get();
         const nextTrack = queue[0];
         if (!currentTrack || !nextTrack) return;
 
@@ -609,6 +702,39 @@ export const useStore = create<PlayerState>()(
         });
         const fxCandidates = eligibleFx.map(toCandidate);
 
+        // How this mix will go, for choosing an FX that fits it (needs real analysis of both tracks).
+        const currentAnalysis = trackAnalysis[currentTrack.id];
+        const nextAnalysis = trackAnalysis[nextTrack.id];
+        let sync: AiFxBoardState["sync"];
+        if (currentAnalysis && !currentAnalysis.fallback && nextAnalysis && !nextAnalysis.fallback) {
+          // Planned the way DualDeckStage plans it, so the window and tempo are the engine's, not an estimate.
+          const stemReady = Boolean(stemAvailability[nextTrack.id]);
+          const plan = planTransition({
+            current: { track: currentTrack, analysis: currentAnalysis },
+            next: { track: nextTrack, analysis: nextAnalysis },
+            genreHint: styleGenreHint,
+            overrideSec: crossfadeOverrideSec,
+            djMode,
+            forceTransitionId: forcedTransitionId,
+            excludeTransitionIds: stemReady ? rerolledTransitionIds : [...rerolledTransitionIds, "vocal-layering"],
+            vocalStemReady: stemReady,
+            varietyBias: djVarietyBias,
+            quantize: quantizeEnabled,
+          });
+          const report = buildSyncReport({
+            current: { track: currentTrack, analysis: currentAnalysis },
+            next: { track: nextTrack, analysis: nextAnalysis },
+            plan,
+          });
+          sync = {
+            bpmStrategy: report.bpmStrategy,
+            keyCompatibility: report.keyCompatibility,
+            suggestedPitchShiftSemitones: report.suggestedPitchShiftSemitones,
+            energyStrategy: report.energyStrategy,
+            crossfadeSeconds: crossfadeOverrideSec ?? Math.round(report.crossfadeDurationMs / 1000),
+          };
+        }
+
         const trackIdAtStart = currentTrack.id;
         const nextTrackIdAtStart = nextTrack.id;
         set({ aiFxPickLoading: true });
@@ -622,7 +748,7 @@ export const useStore = create<PlayerState>()(
               currentTrack: toProfile(currentTrack),
               nextTrack: toProfile(nextTrack),
               fxLibrary: fxCandidates,
-              boardState: { mixMode: djMode, crossfadeSeconds: crossfadeOverrideSec },
+              boardState: { mixMode: djMode, crossfadeSeconds: crossfadeOverrideSec, sync },
             }),
           });
           picked = res.ok ? await res.json() : pickFallbackTransitionFx(toProfile(currentTrack), fxCandidates);
@@ -774,6 +900,20 @@ export const useStore = create<PlayerState>()(
         saveAutoFxSettings(autoFx);
       },
       loadAutoFx: () => set({ autoFx: loadAutoFxSettings() }),
+      setStemAuto: (patch) => {
+        const stemAuto = { ...get().stemAuto, ...patch };
+        set({ stemAuto });
+        saveStemAutoSettings(stemAuto);
+      },
+      loadStemAuto: () => set({ stemAuto: loadStemAutoSettings() }),
+      setVoiceCut: (patch) => {
+        const voiceCut = { ...get().voiceCut, ...patch };
+        set({ voiceCut });
+        saveVoiceCutSettings(voiceCut);
+      },
+      loadVoiceCut: () => set({ voiceCut: loadVoiceCutSettings() }),
+      setTrackVoiceMap: (trackId, map) => set((s) => ({ trackVoiceMaps: { ...s.trackVoiceMaps, [trackId]: map } })),
+      setStemAutopilotStatus: (stemAutopilot) => set({ stemAutopilot }),
       requestFx: () => set((s) => ({ fxRequestId: s.fxRequestId + 1 })),
       setMashupEnabled: (enabled) => set({ mashupEnabled: enabled }),
       // Only localLibrary is the source of truth for curation flags, but

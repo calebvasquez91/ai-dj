@@ -17,6 +17,7 @@
  */
 import type { DjSetMode } from "@/lib/mix-engine";
 import { extractJsonObject } from "@/lib/json-extract";
+import type { CandidateSyncSummary } from "@/lib/syncEngine";
 
 export interface AiNextTrackCandidate {
   id: string;
@@ -30,6 +31,12 @@ export interface AiNextTrackCandidate {
   energy: number | null;
   /** false for a YouTube track (no raw audio buffer access, so bpm/key/energy above are a best-effort metadata match or a structural estimate, never real per-sample analysis) or a local track that hasn't been analyzed yet. Told to Claude explicitly so it can weigh these fields' reliability, not just their presence. */
   hasRealAnalysis: boolean;
+  /** "ready" when this track's isolated vocal stem has already been separated, so a vocal-layering transition into it is possible; "none" otherwise. Optional so older callers still work. */
+  stems?: "ready" | "none";
+  /** The audio engineer's 0-100 rating of how well this track suits stem treatment (lib/stemPlanner.ts); null when it can't be rated yet (not analysed), absent for older callers. */
+  engineerStemScore?: number | null;
+  /** How this candidate would sync after the CURRENT track (lib/syncEngine.ts): tempo strategy, key compatibility and any pitch shift the sync engine would apply. Absent when either track is unanalysed, and on the current track itself. */
+  sync?: CandidateSyncSummary;
 }
 
 export interface AiDjBoardState {
@@ -66,7 +73,7 @@ export const DJ_MODE_DESCRIPTIONS: Record<DjSetMode, string> = {
 export const AI_CANDIDATE_CAP = 60;
 
 const SYSTEM_PROMPT =
-  "You are an AI DJ. Given the current track and the remaining unplayed tracks, choose the single best next track for a seamless mix. Consider BPM compatibility (prefer within 6 BPM or exact double/half), key compatibility (same key, relative major/minor, or adjacent on the circle of fifths), energy arc (build, sustain, or release depending on DJ board energy setting), and the active mix mode. Each candidate has hasRealAnalysis: true (real per-track BPM/key/energy detection) or false (a rough metadata-based or estimated guess, less trustworthy) — when two candidates are otherwise close, prefer the one with hasRealAnalysis: true. Return only a JSON object: { trackId: string, transitionNote: string, recommendedCrossfadeSeconds: number }";
+  "You are an AI DJ. Given the current track and the remaining unplayed tracks, choose the single best next track for a seamless mix. Consider BPM compatibility (prefer within 6 BPM or exact double/half), key compatibility (same key, relative major/minor, or adjacent on the circle of fifths), energy arc (build, sustain, or release depending on DJ board energy setting), and the active mix mode. Each candidate has hasRealAnalysis: true (real per-track BPM/key/energy detection) or false (a rough metadata-based or estimated guess, less trustworthy) — when two candidates are otherwise close, prefer the one with hasRealAnalysis: true. Each candidate also has stems: \"ready\" when its isolated vocal stem has been separated (so a vocal-layering transition into it is possible) and engineerStemScore, the audio engineer's 0-100 rating of how well the track suits stem treatment — when candidates are otherwise close, prefer one with stems ready, and say so in transitionNote. Each candidate may also have sync, the sync engine's verdict on mixing it after the current track: bpmStrategy (exact = same tempo grid, stretch = the engine time-stretches it by stretchPercent, halftime/doubletime = half/double-tempo fit, freeform = tempos can't be reconciled so a long masked fade is needed), keyCompatibility (perfect, compatible, tension, clash, unknown) and suggestedPitchShiftSemitones (what would fix the key; the player does NOT pitch-shift, so a non-zero value marks a key problem it cannot fix). When candidates are otherwise close prefer exact or stretch tempo and perfect or compatible keys over freeform, tension or clash — a different track with better sync beats one with a key clash. Make recommendedCrossfadeSeconds longer (up to 30) for tension, clash or freeform pairs and shorter for perfect or compatible ones. Write transitionNote as one sentence about the mix: name the tempo stretch when there is one, but never claim a pitch or key shift (none is applied), e.g. 'Stretching Solar Drift -3.2% onto Midnight Pulse's tempo for a clean blend.' Return only a JSON object: { trackId: string, transitionNote: string, recommendedCrossfadeSeconds: number }";
 
 // The originally-specified "claude-sonnet-4-20250514" 404s on the current
 // Anthropic API (confirmed in production logs — not_found_error) — that

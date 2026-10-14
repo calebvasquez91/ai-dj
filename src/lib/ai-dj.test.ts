@@ -77,6 +77,23 @@ describe("pickNextTrackWithAI", () => {
     });
   });
 
+  it("briefs Claude with each candidate's sync verdict and the sync guidance", async () => {
+    process.env.ANTHROPIC_API_KEY = "test-key";
+    const fetchMock = vi.fn(async () => anthropicResponse(JSON.stringify({ trackId: "b", transitionNote: "n", recommendedCrossfadeSeconds: 12 })));
+    global.fetch = fetchMock as unknown as typeof fetch;
+    const synced: AiNextTrackCandidate = {
+      ...candidate("b", 132),
+      sync: { bpmStrategy: "stretch", bpmDelta: 4.4, stretchPercent: -3.1, keyCompatibility: "tension", suggestedPitchShiftSemitones: -2 },
+    };
+    await pickNextTrackWithAI(candidate("cur", 128), [candidate("a", 100), synced], boardState);
+    const init = fetchMock.mock.calls[0] as unknown as [string, { body: string }];
+    const body = JSON.parse(init[1].body) as { system: string; messages: { content: string }[] };
+    const sent = JSON.parse(body.messages[0].content) as { remainingUnplayedTracks: AiNextTrackCandidate[] };
+    expect(sent.remainingUnplayedTracks[1].sync).toEqual(synced.sync);
+    expect(body.system).toMatch(/sync engine/);
+    expect(body.system).toMatch(/suggestedPitchShiftSemitones/);
+  });
+
   it("strips a markdown code fence around the JSON response", async () => {
     process.env.ANTHROPIC_API_KEY = "test-key";
     global.fetch = vi.fn(async () =>

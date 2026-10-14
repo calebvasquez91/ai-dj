@@ -4,11 +4,13 @@ import {
   brakeGainCurves,
   camelotCompatibility,
   chooseTransition,
+  chooseTransitionWithBreakdown,
   mashupGainCurves,
   planTransition,
   spinUpGainCurves,
   stutterGateCurves,
 } from "./mix-engine";
+import { transitions } from "@/data/transitions";
 import type { TrackAnalysis } from "./audio-analysis";
 import type { Track } from "@/types/music";
 
@@ -923,5 +925,41 @@ describe("planTransition with song maps", () => {
       forceTransitionId: "long-blend",
     });
     expect(bothButUntrusted.incomingEntryOffsetSec).toBeCloseTo(without.incomingEntryOffsetSec, 6);
+  });
+});
+
+describe("chooseTransition — vocal stem bonus", () => {
+  // Everything but Vocal Layering is excluded, so its own breakdown is what comes back.
+  const allOthers = transitions.filter((t) => t.executable && t.id !== "vocal-layering").map((t) => t.id);
+  const base = { bpmDelta: 0.02, tempoSync: true, genreHint: "house", personaDjNames: [], excludeTransitionIds: allOthers };
+
+  it("gives Vocal Layering a bonus only when the incoming vocal stem is ready", () => {
+    const withStem = chooseTransitionWithBreakdown({ ...base, vocalStemReady: true });
+    const withoutStem = chooseTransitionWithBreakdown({ ...base, vocalStemReady: false });
+    expect(withStem.entry.id).toBe("vocal-layering");
+    expect(withStem.breakdown?.stemBonus).toBeGreaterThan(0);
+    expect(withoutStem.breakdown?.stemBonus).toBe(0);
+    expect(withStem.breakdown!.total).toBeGreaterThan(withoutStem.breakdown!.total);
+  });
+
+  it("gives no stem bonus to any other transition, ready or not", () => {
+    const others = transitions.filter((t) => t.executable && t.id !== "vocal-layering").map((t) => t.id);
+    for (const id of others.slice(0, 6)) {
+      const exclude = transitions.filter((t) => t.executable && t.id !== id).map((t) => t.id);
+      const result = chooseTransitionWithBreakdown({ ...base, excludeTransitionIds: exclude, vocalStemReady: true });
+      expect(result.breakdown?.stemBonus).toBe(0);
+    }
+  });
+
+  it("explains the pick in Que's short why when the stem bonus decided it", () => {
+    const plan = planTransition({
+      current: { track: makeTrack("a", 240), analysis: makeAnalysis({ bpm: 124 }) },
+      next: { track: makeTrack("b", 240), analysis: makeAnalysis({ bpm: 125, energyOnsetSec: 8 }) },
+      genreHint: "house",
+      excludeTransitionIds: allOthers,
+      vocalStemReady: true,
+    });
+    expect(plan.transitionId).toBe("vocal-layering");
+    expect(plan.shortWhy).toMatch(/vocal/i);
   });
 });
