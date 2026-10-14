@@ -122,7 +122,7 @@ function PlaylistContent() {
             </button>
             <button
               type="button"
-              onClick={() => startShuffle(playlist.tracks)}
+              onClick={() => startShuffle(playlist.tracks, playlist.theme)}
               disabled={playlist.tracks.filter((t) => t.playPreference !== "do-not").length < 2}
               className="btn-outline self-start"
               title="Play this playlist ordered by tempo/key/energy/theme compatibility — skips Do-Not-Play tracks, puts Must-Play tracks first"

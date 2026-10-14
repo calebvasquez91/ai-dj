@@ -222,7 +222,7 @@ interface PlayerState {
   /** FX Library upload option: tag new uploads "spooky, halloween" so Spooky Music can pick them. Kept here (not in the panel) so it survives the panel remounting on tab switches. */
   tagNewFxForSpooky: boolean;
   setTagNewFxForSpooky: (tag: boolean) => void;
-  /** The `theme` of whichever playlist the current queue was sourced from (playTrackList's `sourcePlaylistTheme` param) — e.g. "spooky" while playing the Spooky Music playlist, null otherwise. Drives all Halloween theming/audio. Cleared by any non-playlist playback (direct track click, Shuffle Play) the same way aiNextPickTrackId is. */
+  /** The `theme` of whichever playlist the current queue was sourced from (playTrackList's `sourcePlaylistTheme` param) — e.g. "spooky" while playing the Spooky Music playlist, null otherwise. Drives all Halloween theming/audio. Cleared by any non-playlist playback (direct track click, a Shuffle Play over the whole library) the same way aiNextPickTrackId is; Shuffle Play on a themed playlist keeps it. */
   activePlaylistTheme: string | null;
   libraryLoaded: boolean;
   /** The most recent failed background save (an optimistic change that the server rejected and the store rolled back) — surfaced as a toast by TopBar. Null when there is nothing to report. */
@@ -244,7 +244,7 @@ interface PlayerState {
   /** `sourcePlaylistTheme` is the playlist's `theme` field when playback was started from a themed playlist (e.g. "spooky"), omitted/null for any other playback — sets activePlaylistTheme so Halloween theming/audio knows to engage. */
   playTrackList: (tracks: Track[], startIndex: number, sourcePlaylistTheme?: string | null) => void;
   /** Starts a true, DJ-driven shuffle session: queues an initial compatibility-aware, non-repeating batch and marks the session active so `next()` keeps extending it as it runs low. See lib/shuffle.ts. */
-  startShuffle: (tracks: Track[]) => void;
+  startShuffle: (tracks: Track[], sourcePlaylistTheme?: string | null) => void;
   /**
    * Asks the Anthropic API (via /api/dj/next-track) to pick the best next
    * track for a shuffle session, then reorders it to the front of the
@@ -512,11 +512,11 @@ export const useStore = create<PlayerState>()(
         });
       },
 
-      startShuffle: (tracks) => {
+      startShuffle: (tracks, sourcePlaylistTheme = null) => {
         const { trackAnalysis, trackLyricalFingerprints, recentShuffleOpeningIds, playTrackList: play } = get();
         const pool = buildShuffleSessionPool(tracks);
         const batch = buildInitialShuffleBatch(pool, trackAnalysis, trackLyricalFingerprints, recentShuffleOpeningIds);
-        play(batch, 0);
+        play(batch, 0, sourcePlaylistTheme);
         const batchIds = new Set(batch.map((t) => t.id));
         set({
           shuffleSession: { pool, unplayedIds: pool.filter((t) => !batchIds.has(t.id)).map((t) => t.id) },

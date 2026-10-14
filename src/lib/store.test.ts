@@ -40,6 +40,21 @@ describe("startShuffle", () => {
   });
 });
 
+describe("startShuffle on a themed playlist", () => {
+  it("keeps the playlist's theme, so Halloween theming engages for Shuffle Play too", () => {
+    const tracks = Array.from({ length: 15 }, (_, i) => makeTrack(`t${i}`));
+    useStore.getState().startShuffle(tracks, "spooky");
+    expect(useStore.getState().activePlaylistTheme).toBe("spooky");
+  });
+
+  it("clears a previous theme when the shuffle isn't from a themed playlist", () => {
+    const tracks = Array.from({ length: 15 }, (_, i) => makeTrack(`t${i}`));
+    useStore.getState().playTrackList(tracks, 0, "spooky");
+    useStore.getState().startShuffle(tracks);
+    expect(useStore.getState().activePlaylistTheme).toBeNull();
+  });
+});
+
 describe("playTrackList", () => {
   it("clears an active shuffle session (manual play always ends shuffle mode)", () => {
     const tracks = Array.from({ length: 15 }, (_, i) => makeTrack(`t${i}`));
