@@ -538,6 +538,31 @@ export function camelotForKey(key: string | null): string | null {
 // ---------------------------------------------------------------------------
 
 const MIN_TEMPO_CONFIDENCE = 0.15;
+/** How close (as a ratio) two tempo readings must be, at the same tempo or an octave apart, to count as the same tempo. */
+const TEMPO_AGREEMENT_TOLERANCE = 0.03;
+
+/**
+ * The track's tempo and how far to trust it, from two independent estimators. The simple autocorrelation above is
+ * good at telling whether there is a steady pulse at all (white noise scores about 0 on it) but has no tempo prior and
+ * stops at MIN_BPM, so a 120 BPM track with a kick every two beats reads as exactly 60 (all but one of a real 8-song
+ * dancehall playlist did). The song map's estimator (song-map.ts) weighs half, same and double speed against a prior
+ * around 120 BPM, so it picks the right octave, but its confidence alone cannot tell music from noise (40 noise
+ * signals measured a median 0.23 and up to 0.66). So the two vouch for each other: when the simple estimate has real
+ * confidence and lands on the same tempo or an octave of the map's, the map's tempo is used with the higher of the two
+ * confidences. When the simple estimate is unsure or disagrees, nothing corroborates the map, so the simple estimate
+ * is returned unchanged, as is the case without a map (short audio, no steady tempo, or the main-thread fallback that
+ * skips it).
+ */
+export function reconcileTempo(
+  simple: { bpm: number; confidence: number },
+  songMap: Pick<SongMap, "bpm" | "tempoConfidence"> | null | undefined
+): { bpm: number; confidence: number } {
+  if (!songMap || !(songMap.bpm > 0) || !(simple.bpm > 0) || simple.confidence < MIN_TEMPO_CONFIDENCE) return simple;
+  const ratio = simple.bpm / songMap.bpm;
+  const agrees = [0.5, 1, 2].some((octave) => Math.abs(ratio / octave - 1) <= TEMPO_AGREEMENT_TOLERANCE);
+  if (!agrees) return simple;
+  return { bpm: songMap.bpm, confidence: Math.max(songMap.tempoConfidence, simple.confidence) };
+}
 
 export function analyzeSamples(
   samples: Float32Array,
@@ -550,8 +575,7 @@ export function analyzeSamples(
   const envelopeRateHz = 1 / ENVELOPE_HOP_SEC;
   const onsetEnvelope = computeOnsetEnvelope(envelope);
 
-  const { bpm: rawBpm, confidence: bpmConfidence } = estimateTempo(onsetEnvelope, envelopeRateHz);
-  const usableBpm = bpmConfidence >= MIN_TEMPO_CONFIDENCE ? rawBpm : FALLBACK_BPM;
+  const simpleTempo = estimateTempo(onsetEnvelope, envelopeRateHz);
 
   const beatGridOffsetSec = findBeatGridOffset(onsetEnvelope, envelopeRateHz);
   const energyOnsetSec = findEnergyOnset(envelope, envelopeRateHz);
@@ -569,6 +593,9 @@ export function analyzeSamples(
       songMap = null;
     }
   }
+
+  const { bpm: rawBpm, confidence: bpmConfidence } = reconcileTempo(simpleTempo, songMap);
+  const usableBpm = bpmConfidence >= MIN_TEMPO_CONFIDENCE ? rawBpm : FALLBACK_BPM;
 
   return {
     bpm: usableBpm,

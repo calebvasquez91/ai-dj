@@ -30,6 +30,25 @@ export interface NextAnalysisJob<T> {
   kind: "fresh" | "upgrade";
 }
 
+/** A tempo reading (BPM and how far to trust it) as the analysis stores it. */
+export interface TempoReading {
+  bpm: number;
+  bpmConfidence: number;
+  fallback?: boolean;
+}
+
+/**
+ * Whether an upgrade run's tempo should replace the persisted one: the BPM moved by more than 1% (the persisted
+ * estimator read most 120 BPM tracks as 60), or the trust moved by more than 0.1 (a 120 that was only the
+ * low-confidence fallback is now a measured 121). A fresh run that itself fell back to the neutral 120 never replaces a
+ * persisted reading, since it knows less than what is already saved.
+ */
+export function tempoChanged(saved: TempoReading, fresh: TempoReading): boolean {
+  if (fresh.fallback || !(fresh.bpm > 0)) return false;
+  if (!(saved.bpm > 0)) return true;
+  return Math.abs(fresh.bpm / saved.bpm - 1) > 0.01 || Math.abs(fresh.bpmConfidence - saved.bpmConfidence) > 0.1;
+}
+
 export function pickNextAnalysisJob<T extends JobTrack>({
   currentTrack,
   queue,

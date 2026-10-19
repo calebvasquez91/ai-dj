@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { analyzeSamples, camelotForKey } from "./audio-analysis";
+import { reconcileTempo } from "./audio-analysis-core";
 
 const SAMPLE_RATE = 11025;
 
@@ -189,6 +190,76 @@ describe("analyzeSamples", () => {
     const samples = buildClickTrack(128, 20);
     const analysis = analyzeSamples(samples, SAMPLE_RATE, 20);
     expect(analysis.buildDropPairs).toEqual([]);
+  });
+});
+
+/** A 120 BPM groove whose kick lands only on beats 1 and 3 (loud) with a lighter snare on 2 and 4 and offbeat hats: the shape that reads as 60 BPM when the tempo is picked by raw autocorrelation. Deterministic noise. */
+function buildHalfTimeKickGroove(bpm: number, durationSec: number, sampleRate = SAMPLE_RATE): Float32Array {
+  const n = Math.floor(durationSec * sampleRate);
+  const samples = new Float32Array(n);
+  const beatSec = 60 / bpm;
+  let seed = 12345;
+  const noise = () => {
+    seed = (seed * 1664525 + 1013904223) >>> 0;
+    return seed / 0xffffffff - 0.5;
+  };
+  for (let i = 0; i < n; i++) {
+    const t = i / sampleRate;
+    const beat = Math.floor(t / beatSec);
+    const inBeat = t - beat * beatSec;
+    let v = noise() * 0.01;
+    if (inBeat < 0.08) {
+      const decay = Math.exp(-inBeat / 0.02);
+      v += beat % 2 === 0 ? decay * Math.sin(2 * Math.PI * 60 * t) * 0.9 : decay * noise() * 0.5;
+    }
+    const inOff = (inBeat + beatSec / 2) % beatSec;
+    if (inOff < 0.015) v += Math.exp(-inOff / 0.004) * noise() * 0.25;
+    samples[i] = v;
+  }
+  return samples;
+}
+
+describe("analyzeSamples tempo octave", () => {
+  it("reads a 120 BPM groove with the kick on 1 and 3 as 120, not 60", () => {
+    const samples = buildHalfTimeKickGroove(120, 40);
+    const analysis = analyzeSamples(samples, SAMPLE_RATE, 40);
+    expect(analysis.bpm).toBeGreaterThan(115);
+    expect(analysis.bpm).toBeLessThan(125);
+    expect(analysis.fallback).toBe(false);
+  });
+});
+
+describe("reconcileTempo", () => {
+  const map = (bpm: number, tempoConfidence: number) => ({ bpm, tempoConfidence });
+
+  it("uses the song map's tempo when the simple estimate confirms it an octave away (the real playlist case)", () => {
+    expect(reconcileTempo({ bpm: 60, confidence: 0.45 }, map(120, 0.34))).toEqual({ bpm: 120, confidence: 0.45 });
+    expect(reconcileTempo({ bpm: 60.6, confidence: 0.53 }, map(120.9, 0.69))).toEqual({ bpm: 120.9, confidence: 0.69 });
+  });
+
+  it("accepts the same tempo or a doubled one as confirmation too", () => {
+    expect(reconcileTempo({ bpm: 120.5, confidence: 0.5 }, map(120, 0.34))).toEqual({ bpm: 120, confidence: 0.5 });
+    expect(reconcileTempo({ bpm: 240, confidence: 0.5 }, map(120, 0.34))).toEqual({ bpm: 120, confidence: 0.5 });
+  });
+
+  it("never lowers the map's confidence on agreement", () => {
+    expect(reconcileTempo({ bpm: 60, confidence: 0.2 }, map(120, 0.8)).confidence).toBe(0.8);
+  });
+
+  it("returns the simple estimate unchanged when there is no song map", () => {
+    expect(reconcileTempo({ bpm: 60, confidence: 0.45 }, null)).toEqual({ bpm: 60, confidence: 0.45 });
+    expect(reconcileTempo({ bpm: 60, confidence: 0.45 }, undefined)).toEqual({ bpm: 60, confidence: 0.45 });
+  });
+
+  it("does not let a map the simple estimate disagrees with override it (4:3 is not an octave)", () => {
+    expect(reconcileTempo({ bpm: 90, confidence: 0.9 }, map(120, 0.8))).toEqual({ bpm: 90, confidence: 0.9 });
+    expect(reconcileTempo({ bpm: 100, confidence: 0.4 }, map(120, 0.8))).toEqual({ bpm: 100, confidence: 0.4 });
+  });
+
+  it("does not trust a map-only confidence: a simple estimate with no pulse leaves the neutral reading alone", () => {
+    // A noise-like signal: the simple estimate has ~0 confidence while the map still reports 0.5.
+    expect(reconcileTempo({ bpm: 120, confidence: 0.02 }, map(99, 0.54))).toEqual({ bpm: 120, confidence: 0.02 });
+    expect(reconcileTempo({ bpm: 120, confidence: 0.1 }, map(120, 0.66))).toEqual({ bpm: 120, confidence: 0.1 });
   });
 });
 
