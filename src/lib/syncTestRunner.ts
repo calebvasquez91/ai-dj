@@ -57,6 +57,8 @@ const SETTLE_MS = 1500;
 const REANALYSIS_TIMEOUT_MS = 90_000;
 
 let activeRun = 0;
+/** Set once the runner has started playback itself; only then does restore() pause it. */
+let playbackTakenOver = false;
 
 const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
 
@@ -101,7 +103,8 @@ async function observeMorph(b: LocalTrack, run: number): Promise<Observation> {
   let started = false;
   let cancelledMorph = 0;
 
-  const elements = [...document.querySelectorAll("audio")];
+  // Only the two decks (data-deck): any other audio element on the page is not part of the morph.
+  const elements = [...document.querySelectorAll("audio[data-deck]")];
   const handlers = (["waiting", "stalled", "seeking", "error"] as const).map((type) => {
     const handler = () => events.push({ tMs: Date.now() - t0, type, phase: lastPhase });
     for (const el of elements) el.addEventListener(type, handler);
@@ -200,9 +203,8 @@ async function runPair(a: LocalTrack, b: LocalTrack, kind: PairKind, index: numb
     };
   };
 
-  const store = useStore.getState();
-  store.clearSyncError();
-  store.playTrackList([a, b], 0);
+  playbackTakenOver = true;
+  useStore.getState().playTrackList([a, b], 0);
 
   const ready = await waitFor(
     () => {
@@ -249,6 +251,9 @@ async function runPair(a: LocalTrack, b: LocalTrack, kind: PairKind, index: numb
   const evalA = evaluateReport(report, planned, aAnalysis, bAnalysis, kind);
   const bpm = { from: report.trackA_bpm, to: report.trackB_bpmMatched };
 
+  // Cleared here, not at the start of the pair: the readiness wait above can take minutes, and an unrelated error
+  // reported meanwhile would otherwise read as the player refusing this SYNC.
+  useStore.getState().clearSyncError();
   useStore.getState().requestSongSync();
   const obs = await observeMorph(b, run);
 
@@ -289,12 +294,8 @@ async function runPair(a: LocalTrack, b: LocalTrack, kind: PairKind, index: numb
   return done("morphed", stages, { from: plan.bpmFrom, to: plan.bpmTo }, evalA.fix);
 }
 
-function currentPairResults(): PairResult[] {
-  return ui().pairs;
-}
-
 function setPair(result: PairResult) {
-  const pairs = [...currentPairResults()];
+  const pairs = [...ui().pairs];
   const at = pairs.findIndex((p) => p.index === result.index);
   if (at >= 0) pairs[at] = result;
   else pairs.push(result);
@@ -302,11 +303,16 @@ function setPair(result: PairResult) {
   ui().patch({ pairs });
 }
 
-/** Puts the player back the way the test found it: the Auto switch as it was (set in memory only), and paused. */
+/**
+ * Puts the player back the way the test found it: the Auto switch as it was (set in memory only), and paused, but only
+ * when the test itself started the playback. A run that failed before playing anything (no playlist, fewer than two
+ * tracks) leaves whatever the person was listening to alone.
+ */
 function restore(savedAuto: boolean) {
   useStore.setState({ songSyncAuto: savedAuto });
   const s = useStore.getState();
-  if (s.isPlaying) s.togglePlay();
+  if (playbackTakenOver && s.isPlaying) s.togglePlay();
+  playbackTakenOver = false;
 }
 
 export function cancelSyncTest() {
@@ -316,6 +322,7 @@ export function cancelSyncTest() {
 export async function startSyncTest(): Promise<void> {
   if (ui().phase === "running" || ui().fixing) return;
   const run = ++activeRun;
+  playbackTakenOver = false;
   ui().patch({
     phase: "running",
     label: "Starting…",
@@ -397,6 +404,7 @@ export async function fixIssuesAutomatically(): Promise<void> {
   if (ui().phase === "running" || ui().fixing) return;
   const plan = planFixes(ui().pairs);
   const run = ++activeRun;
+  playbackTakenOver = false;
   const log: string[] = [];
   ui().patch({ fixing: true, cancelRequested: false, error: null, label: "Fixing…" });
   const savedAuto = useStore.getState().songSyncAuto;

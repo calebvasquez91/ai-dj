@@ -8,7 +8,6 @@ import {
   SYNC_TEST_PLAYLIST_NAME,
   summarize,
   type PairResult,
-  type PairStatus,
   type StageResult,
   type StageStatus,
 } from "@/lib/syncTest";
@@ -184,10 +183,6 @@ export function SyncTestPanel() {
   );
 }
 
-function pairColor(status: PairStatus): string {
-  return STATUS_COLOR[status];
-}
-
 function PairCard({ pair }: { pair: PairResult }) {
   const [open, setOpen] = useState(pair.status !== "pass");
   return (
@@ -204,7 +199,7 @@ function PairCard({ pair }: { pair: PairResult }) {
             {pair.before ? ` · was ${pair.before.status.toUpperCase()}` : ""}
           </span>
         </span>
-        <span className={`shrink-0 text-xs font-bold ${pairColor(pair.status)}`}>{STATUS_TEXT[pair.status]}</span>
+        <span className={`shrink-0 text-xs font-bold ${STATUS_COLOR[pair.status]}`}>{STATUS_TEXT[pair.status]}</span>
       </button>
       {open && (
         <ul className="mt-1.5 flex flex-col gap-1 border-t border-border/50 pt-1.5">
