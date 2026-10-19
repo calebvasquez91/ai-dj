@@ -19,8 +19,10 @@ import { CROSSFADE_PRESETS, DJ_MODES } from "@/components/PlayerBar";
 import { CloseIcon } from "@/components/Icons";
 import type { AmbienceFrequency } from "@/lib/ambience";
 import { HalloweenLayers } from "@/components/HalloweenLayers";
+import { SongSyncPanel } from "@/components/SongSyncPanel";
+import { describeSongSyncPlanLine, planSongSync, songSyncMixOutSec } from "@/lib/songSync";
 import { StemsPanel } from "@/components/StemsPanel";
-import { STEM_FEATURES_ENABLED } from "@/lib/featureFlags";
+import { SONG_SYNC_ENABLED, STEM_FEATURES_ENABLED } from "@/lib/featureFlags";
 import { voiceCutoffSec } from "@/lib/voiceMap";
 import { EnergyGraph } from "@/components/EnergyGraph";
 import { resampleBuckets } from "@/lib/resample";
@@ -426,6 +428,7 @@ export function DeckView() {
   const currentVoiceMap = useStore((s) => (s.currentTrack ? s.trackVoiceMaps[s.currentTrack.id] : undefined));
   const aiNextPickTrackId = useStore((s) => s.aiNextPickTrackId);
   const aiNextPickTransitionNote = useStore((s) => s.aiNextPickTransitionNote);
+  const songSyncAuto = useStore((s) => s.songSyncAuto);
 
   const nextTrack = queue[0] ?? null;
   const currentAnalysis = currentTrack ? trackAnalysis[currentTrack.id] : undefined;
@@ -497,6 +500,14 @@ export function DeckView() {
       outgoingStemsReady: Boolean(stemAvailability[currentTrack.id]),
     });
   }, [currentTrack, nextTrack, preview, currentAnalysis, nextAnalysis, currentTimeSec, stemAvailability, voiceCutEnabled, currentVoiceMap]);
+
+  // With Song Sync Mode on, the next mix is the morph (lib/songSync.ts), so the readout says what the morph will do,
+  // not the ordinary transition's "a shift would help; not applied" advice. A pair with nothing to morph keeps the ordinary readout.
+  const songSyncPreview = useMemo(() => {
+    if (!SONG_SYNC_ENABLED || !songSyncAuto || !syncReport) return null;
+    const planned = planSongSync(syncReport);
+    return planned.ok ? planned.plan : null;
+  }, [syncReport, songSyncAuto]);
 
   if (!open) return null;
 
@@ -604,6 +615,8 @@ export function DeckView() {
 
         <HalloweenLayers />
 
+        {SONG_SYNC_ENABLED && <SongSyncPanel />}
+
         {STEM_FEATURES_ENABLED && <StemsPanel />}
 
         <div className="flex flex-wrap items-center gap-2">
@@ -709,20 +722,31 @@ export function DeckView() {
             )}
             {syncReport && nextTrack && (
               <div className="flex flex-col gap-0.5 pt-1.5 mt-0.5 border-t border-border/60 text-xs" data-testid="sync-readout">
-                <p className="font-semibold text-foreground">{describeSyncReport(syncReport, nextTrack.title)}</p>
+                <p className="font-semibold text-foreground">
+                  {songSyncPreview && currentTrack
+                    ? `Next: ${nextTrack.title} — ${describeSongSyncPlanLine(songSyncPreview).replace(/^Plan: /, "")} — Mix out by ${formatTime(songSyncMixOutSec(currentTrack.durationSec))}`
+                    : describeSyncReport(syncReport, nextTrack.title)}
+                </p>
                 <p className="text-muted">
                   BPM {syncReport.trackA_bpm.toFixed(2)} ↔ {syncReport.trackB_bpm.toFixed(2)}
                   {Math.abs(syncReport.trackB_bpmMatched - syncReport.trackB_bpm) > 0.5
                     ? ` (read as ${syncReport.trackB_bpmMatched.toFixed(2)} to match)`
                     : ""}
-                  {" · "}Key {syncReport.trackA_key} → {syncReport.trackB_key} ({describeKey(syncReport)})
+                  {" · "}Key {syncReport.trackA_key} → {syncReport.trackB_key} (
+                  {songSyncPreview
+                    ? songSyncPreview.pitchTargetSemitones === 0
+                      ? "no shift needed"
+                      : `the playing track shifts ${songSyncPreview.pitchTargetSemitones > 0 ? "+" : ""}${songSyncPreview.pitchTargetSemitones} semitones to match`
+                    : describeKey(syncReport)}
+                  )
                 </p>
                 <p className="text-muted">
                   Energy {syncReport.energyStrategy}
                   {syncReport.trackA_energyAtMixOut != null && syncReport.trackB_energyAtMixIn != null
                     ? ` (${syncReport.trackA_energyAtMixOut.toFixed(2)} → ${syncReport.trackB_energyAtMixIn.toFixed(2)})`
                     : ""}
-                  {" · "}Crossfade {Math.round(syncReport.crossfadeDurationMs / 1000)}s
+                  {" · "}
+                  {songSyncPreview ? "4-bar crossfade after the morph" : `Crossfade ${Math.round(syncReport.crossfadeDurationMs / 1000)}s`}
                   {STEM_FEATURES_ENABLED && (
                     <>
                       {" · "}Stem hand-over {syncReport.stemSwapAvailable ? "ready" : "needs both tracks' stems"}

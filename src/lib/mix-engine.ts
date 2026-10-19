@@ -6,6 +6,7 @@ import { resolveHotCues, upcomingDropCueAtSec } from "@/lib/hot-cues";
 import { snapToBeatGrid } from "@/lib/beat-grid";
 import { alignEntryToBar, songMapMatchesBpm } from "@/lib/phrase-align";
 import { estimateStructuralCues } from "@/lib/structural-estimate";
+import { TRANSITION_FX_ENABLED } from "@/lib/transitionFx";
 
 export { snapToBeatGrid } from "@/lib/beat-grid";
 
@@ -680,6 +681,11 @@ export interface PlanningState {
   recentTransitionIds: string[];
 }
 
+/** Transition ids whose effect is an overlay SOUND (a riser, scratch chirps, a tag stab, spoken or random words) rather than a way of moving between the two tracks: none of them is planned while TRANSITION_FX_ENABLED is off. */
+export const FX_SOUND_TRANSITION_IDS: readonly string[] = Object.entries(TRANSITION_EFFECT_BY_ID)
+  .filter(([, effect]) => effect === "riser" || effect === "scratch-chirp" || effect === "tag-sample" || effect === "word-play")
+  .map(([id]) => id);
+
 /**
  * planTransition's arguments for A -> B under `state`. `ignoreOverrides` drops a pinned or re-rolled pick, giving
  * "what auto-scoring alone would choose" (used to learn from the user's overrides); the stem rules still apply.
@@ -703,7 +709,11 @@ export function planArgsFromState(
     recentTransitionIds: state.recentTransitionIds,
     forceTransitionId: opts.ignoreOverrides ? null : state.forcedTransitionId,
     // vocal-layering needs the incoming track's isolated vocal, so it can't be picked without one
-    excludeTransitionIds: stemReady ? rerolled : [...rerolled, "vocal-layering"],
+    excludeTransitionIds: [
+      ...rerolled,
+      ...(stemReady ? [] : ["vocal-layering"]),
+      ...(TRANSITION_FX_ENABLED ? [] : FX_SOUND_TRANSITION_IDS),
+    ],
     vocalStemReady: stemReady,
     varietyBias: state.djVarietyBias,
     categoryWeights,

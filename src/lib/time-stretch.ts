@@ -3,7 +3,7 @@
  * party time-stretch/pitch-shift dependency behind a small interface — the
  * same way audio-analysis.ts isolates its WASM/worker fast paths behind
  * analyzeTrackFromUrl(). Only the mashup pathway in DualDeckStage.tsx
- * should import this.
+ * (and the Song Sync morph) should import this.
  *
  * SoundTouchJS runs a WSOLA algorithm via a ScriptProcessorNode
  * (deprecated but functional in every browser) — real, non-trivial
@@ -25,6 +25,8 @@ export interface TimeStretchVoice {
   setPitchSemitones(semitones: number): void;
   /** Seeks to a fractional position (0-1) within the source buffer before/while playing. */
   setStartFraction(fraction: number): void;
+  /** Where in the SOURCE buffer the voice has read up to, seconds (updated every audio block, ~23 ms). Its output lags this by the stretcher's own buffering. */
+  getPositionSec(): number;
   /** Releases listeners and disconnects the node — call once the voice is done playing. */
   stop(): void;
 }
@@ -59,6 +61,7 @@ export function createTimeStretchVoice(
     setStartFraction: (fraction) => {
       shifter.percentagePlayed = fraction;
     },
+    getPositionSec: () => shifter.timePlayed,
     stop: () => {
       shifter.off();
       shifter.disconnect();
