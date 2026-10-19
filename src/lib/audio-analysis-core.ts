@@ -23,6 +23,7 @@
  */
 
 import { buildSongMap, type SongMap } from "@/lib/song-map";
+import { bestTempoRatio } from "@/lib/tempoRatio";
 
 export interface TrackAnalysis {
   bpm: number;
@@ -558,9 +559,7 @@ export function reconcileTempo(
   songMap: Pick<SongMap, "bpm" | "tempoConfidence"> | null | undefined
 ): { bpm: number; confidence: number } {
   if (!songMap || !(songMap.bpm > 0) || !(simple.bpm > 0) || simple.confidence < MIN_TEMPO_CONFIDENCE) return simple;
-  const ratio = simple.bpm / songMap.bpm;
-  const agrees = [0.5, 1, 2].some((octave) => Math.abs(ratio / octave - 1) <= TEMPO_AGREEMENT_TOLERANCE);
-  if (!agrees) return simple;
+  if (Math.abs(bestTempoRatio(simple.bpm, songMap.bpm) - 1) > TEMPO_AGREEMENT_TOLERANCE) return simple;
   return { bpm: songMap.bpm, confidence: Math.max(songMap.tempoConfidence, simple.confidence) };
 }
 

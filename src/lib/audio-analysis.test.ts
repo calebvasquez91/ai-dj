@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { analyzeSamples, camelotForKey } from "./audio-analysis";
 import { reconcileTempo } from "./audio-analysis-core";
+import { buildSongMap } from "./song-map";
+import { bestTempoRatio } from "./tempoRatio";
 
 const SAMPLE_RATE = 11025;
 
@@ -18,6 +20,29 @@ function buildClickTrack(bpm: number, durationSec: number, sampleRate = SAMPLE_R
     } else {
       samples[i] = (Math.random() - 0.5) * 0.01;
     }
+  }
+  return samples;
+}
+
+/** Deterministic 0-1 pseudo-random numbers (a linear congruential generator), so signals built from them are repeatable. */
+function lcg(seed: number): () => number {
+  let state = seed >>> 0;
+  return () => {
+    state = (state * 1664525 + 1013904223) >>> 0;
+    return state / 0xffffffff;
+  };
+}
+
+/** Noise whose loudness jumps to a new random level every `stepSamples` samples: a weak, irregular pulse the two tempo estimators read differently. Repeatable. */
+function buildSteppedNoise(stepSamples: number, seed: number, durationSec: number, sampleRate = SAMPLE_RATE): Float32Array {
+  const rand = lcg(seed);
+  const n = Math.floor(durationSec * sampleRate);
+  const samples = new Float32Array(n);
+  let amp = 1;
+  for (let i = 0; i < n; i++) {
+    const v = rand();
+    if (i % stepSamples === 0) amp = 0.3 + rand();
+    samples[i] = (v - 0.5) * 0.5 * amp;
   }
   return samples;
 }
@@ -61,13 +86,16 @@ describe("analyzeSamples", () => {
 
   it("falls back to a neutral BPM with low confidence for pure noise (no periodicity)", () => {
     const durationSec = 10;
-    const samples = new Float32Array(Math.floor(durationSec * SAMPLE_RATE)).map(
-      () => (Math.random() - 0.5) * 0.1
-    );
-    const analysis = analyzeSamples(samples, SAMPLE_RATE, durationSec);
-    expect(analysis.fallback).toBe(true);
-    expect(analysis.bpm).toBe(120);
-    expect(analysis.bpmConfidence).toBeLessThan(0.15);
+    // Seeded, so the test cannot fail on an unlucky draw (the song map, whose own confidence is not noise-proof, now
+    // takes part in the tempo decision).
+    for (const seed of [1, 2, 3, 4, 5]) {
+      const rand = lcg(seed);
+      const samples = new Float32Array(Math.floor(durationSec * SAMPLE_RATE)).map(() => (rand() - 0.5) * 0.1);
+      const analysis = analyzeSamples(samples, SAMPLE_RATE, durationSec);
+      expect(analysis.fallback).toBe(true);
+      expect(analysis.bpm).toBe(120);
+      expect(analysis.bpmConfidence).toBeLessThan(0.15);
+    }
   });
 
   it("returns a non-negative, finite beat grid offset", () => {
@@ -226,6 +254,62 @@ describe("analyzeSamples tempo octave", () => {
     expect(analysis.bpm).toBeGreaterThan(115);
     expect(analysis.bpm).toBeLessThan(125);
     expect(analysis.fallback).toBe(false);
+  });
+});
+
+describe("analyzeSamples tempo: how the two estimators are combined", () => {
+  const DURATION = 20;
+  // Each case first asserts its premise by running both estimators on the signal, so a deliberate change to either
+  // estimator fails here with a clear message instead of quietly testing nothing.
+  const both = (samples: Float32Array) => {
+    const simple = analyzeSamples(samples, SAMPLE_RATE, DURATION, { songMap: false });
+    const map = buildSongMap(samples, SAMPLE_RATE, DURATION);
+    return { simple, map };
+  };
+
+  it("uses the song map's tempo when the simple estimate is confident and an octave away from it", () => {
+    const samples = buildSteppedNoise(5513, 101, DURATION);
+    const { simple, map } = both(samples);
+    expect(simple.bpmConfidence).toBeGreaterThanOrEqual(0.15);
+    expect(map).not.toBeNull();
+    expect(Math.abs(bestTempoRatio(simple.bpm, map!.bpm) - 1)).toBeLessThan(0.03);
+    expect(Math.abs(simple.bpm - map!.bpm)).toBeGreaterThan(10); // not the same number: an octave apart
+
+    const analysis = analyzeSamples(samples, SAMPLE_RATE, DURATION);
+    expect(analysis.bpm).toBeCloseTo(map!.bpm, 5);
+    expect(analysis.bpmConfidence).toBeGreaterThanOrEqual(Math.max(simple.bpmConfidence, map!.tempoConfidence));
+  });
+
+  it("keeps the simple estimate when it is confident but the song map reads a different tempo", () => {
+    const samples = buildSteppedNoise(3000, 303, DURATION);
+    const { simple, map } = both(samples);
+    expect(simple.bpmConfidence).toBeGreaterThanOrEqual(0.15);
+    expect(map).not.toBeNull();
+    expect(Math.abs(bestTempoRatio(simple.bpm, map!.bpm) - 1)).toBeGreaterThan(0.03);
+
+    const analysis = analyzeSamples(samples, SAMPLE_RATE, DURATION);
+    expect(analysis.bpm).toBeCloseTo(simple.bpm, 5);
+    expect(analysis.bpmConfidence).toBeCloseTo(simple.bpmConfidence, 5);
+  });
+
+  it("does not trust a confident-looking song map when the simple estimate hears no pulse", () => {
+    const samples = buildSteppedNoise(2205, 101, DURATION);
+    const { simple, map } = both(samples);
+    expect(simple.bpmConfidence).toBeLessThan(0.15);
+    expect(map).not.toBeNull();
+    expect(map!.tempoConfidence).toBeGreaterThan(0.35); // above the planner's trust line, on a signal with no steady beat
+
+    const analysis = analyzeSamples(samples, SAMPLE_RATE, DURATION);
+    expect(analysis.fallback).toBe(true);
+    expect(analysis.bpm).toBe(120);
+    expect(analysis.bpmConfidence).toBeLessThan(0.15);
+  });
+
+  it("returns the simple estimate when the song map is skipped", () => {
+    const samples = buildSteppedNoise(5513, 101, DURATION);
+    const analysis = analyzeSamples(samples, SAMPLE_RATE, DURATION, { songMap: false });
+    expect(analysis.songMap).toBeUndefined();
+    expect(analysis.bpm).toBeLessThan(65); // the simple estimator's half-time reading, uncorrected
   });
 });
 
