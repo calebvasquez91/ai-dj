@@ -1,4 +1,4 @@
-import { describe, expect, it, beforeEach } from "vitest";
+import { describe, expect, it, beforeEach, vi, afterEach } from "vitest";
 import { useStore } from "./store";
 import type { Track } from "@/types/music";
 
@@ -158,5 +158,52 @@ describe("next() with an active shuffle session", () => {
       const state = useStore.getState();
       if (state.currentTrack) expect(state.queue.length).toBeGreaterThan(0);
     }
+  });
+});
+
+describe("Song Sync Mode state", () => {
+  it("starts with Auto on, no morph running and no request", () => {
+    const state = useStore.getState();
+    expect(state.songSyncAuto).toBe(true);
+    expect(state.songSync).toBeNull();
+    expect(state.songSyncRequestId).toBe(0);
+  });
+
+  it("counts SYNC presses, so two quick presses can't collide into no change", () => {
+    useStore.getState().requestSongSync();
+    useStore.getState().requestSongSync();
+    expect(useStore.getState().songSyncRequestId).toBe(2);
+  });
+
+  it("switches Auto off and on", () => {
+    useStore.getState().setSongSyncAuto(false);
+    expect(useStore.getState().songSyncAuto).toBe(false);
+    useStore.getState().setSongSyncAuto(true);
+    expect(useStore.getState().songSyncAuto).toBe(true);
+  });
+});
+
+describe("transition FX are off (Song Sync Mode)", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("makes no AI FX-pick request and leaves no pick standing", async () => {
+    const fetchSpy = vi.fn();
+    vi.stubGlobal("fetch", fetchSpy);
+    const tracks = [makeTrack("a"), makeTrack("b")];
+    useStore.getState().playTrackList(tracks, 0);
+    useStore.setState({
+      aiFxPickId: "stale-pick",
+      aiFxPickStartOffsetSec: 3,
+      aiFxPickVolumeMultiplier: 0.5,
+      aiFxPickReason: "old",
+      aiFxPickLoading: true,
+    });
+    await useStore.getState().requestAiFxPick();
+    expect(fetchSpy).not.toHaveBeenCalled();
+    const state = useStore.getState();
+    expect(state.aiFxPickId).toBeNull();
+    expect(state.aiFxPickLoading).toBe(false);
   });
 });

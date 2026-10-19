@@ -30,6 +30,11 @@ import {
 import { energyProfileFromPeaks } from "@/lib/energyProfile";
 import { snapToDownbeatOrPhrase } from "@/lib/phrase-align";
 import { formatTime } from "@/lib/format";
+import { TRANSITION_FX_ENABLED } from "@/lib/transitionFx";
+
+// Song Sync Mode's one switch for everything that isn't the two songs (see lib/transitionFx.ts for what it silences).
+// Defined in a leaf module so the mix engine can read it too; this is where the rest of the app imports it from.
+export { TRANSITION_FX_ENABLED };
 
 // ---------------------------------------------------------------------------
 // Tempo
@@ -154,7 +159,15 @@ export interface KeyPlan {
   suggestedPitchShiftSemitones: number;
   /** Per-stem shift for the planned stem swap (drums never, bass half, melody and vocals fully). Not applied yet either. */
   stemPitchShifts: { drums: number; bass: number; melody: number; vocals: number };
+  /** Semitones to bend track A by so its key lands exactly on B's (shortest way round the wheel, -6..+6); 0 when the keys already agree, are compatible, or are unknown. This is what Song Sync Mode's morph applies to A. */
+  morphPitchShiftSemitones: number;
   keyConfident: boolean;
+}
+
+/** Shortest signed shift (-6..+6) that moves A's Camelot number onto B's: each semitone moves a key 7 numbers round the wheel, and 7 is its own inverse mod 12. */
+export function semitonesToMatchCamelotNumber(aNumber: number, bNumber: number): number {
+  const s = ((((bNumber - aNumber) * 7) % 12) + 12) % 12;
+  return s > 6 ? s - 12 : s;
 }
 
 export function planKey(
@@ -179,6 +192,7 @@ export function planKey(
       keyCompatibility: "unknown",
       suggestedPitchShiftSemitones: 0,
       stemPitchShifts: shifts(0),
+      morphPitchShiftSemitones: 0,
       keyConfident: false,
     };
   }
@@ -217,6 +231,12 @@ export function planKey(
     keyCompatibility,
     suggestedPitchShiftSemitones,
     stemPitchShifts: shifts(suggestedPitchShiftSemitones),
+    // Only a pair that isn't already harmonically compatible is worth bending: shifting a fifth to land "exactly" on
+    // a neighbouring key that already mixes cleanly would cost more in artifacts than it gains.
+    morphPitchShiftSemitones:
+      keyCompatibility === "tension" || keyCompatibility === "clash"
+        ? semitonesToMatchCamelotNumber(pa.number, pb.number)
+        : 0,
     keyConfident: true,
   };
 }

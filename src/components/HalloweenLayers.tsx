@@ -2,6 +2,7 @@
 
 import { useStore } from "@/lib/store";
 import { AMBIENCE_MAX_LEVEL, FX_MAX_LEVEL } from "@/lib/layerMix";
+import { TRANSITION_FX_ENABLED } from "@/lib/syncEngine";
 
 /**
  * "Halloween Layers" mini mixer for the DJ Decks panel — only shown while
@@ -32,6 +33,11 @@ export function HalloweenLayers() {
     >
       <h3 className="text-xs font-semibold" style={{ color: "#ff8a3d" }}>
         🎃 Halloween Layers
+        {!TRANSITION_FX_ENABLED && (
+          <span className="ml-2 font-normal text-muted" data-testid="layers-paused-note">
+            Paused — Song Sync Mode
+          </span>
+        )}
       </h3>
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-x-4 gap-y-1.5">
         <LayerSlider
@@ -43,17 +49,19 @@ export function HalloweenLayers() {
         />
         <LayerSlider
           label="Ambience"
-          title="Background loop volume (0–0.5)"
+          title={TRANSITION_FX_ENABLED ? "Background loop volume (0–0.5)" : "Paused — Song Sync Mode"}
           value={ambienceLevel}
           max={AMBIENCE_MAX_LEVEL}
           onChange={setAmbienceLevel}
+          disabled={!TRANSITION_FX_ENABLED}
         />
         <LayerSlider
           label="FX"
-          title="Transition FX volume"
+          title={TRANSITION_FX_ENABLED ? "Transition FX volume" : "Paused — Song Sync Mode"}
           value={fxLevel}
           max={FX_MAX_LEVEL}
           onChange={setFxLevel}
+          disabled={!TRANSITION_FX_ENABLED}
         />
       </div>
     </section>
@@ -66,15 +74,22 @@ function LayerSlider({
   value,
   max,
   onChange,
+  disabled = false,
 }: {
   label: string;
   title: string;
   value: number;
   max: number;
   onChange: (value: number) => void;
+  /** Grayed out and not adjustable (Song Sync Mode pauses the layers it controls). */
+  disabled?: boolean;
 }) {
   return (
-    <label className="flex items-center gap-2 text-xs text-muted min-w-0" title={title}>
+    <label
+      className={`flex items-center gap-2 text-xs text-muted min-w-0 ${disabled ? "opacity-40 cursor-not-allowed" : ""}`}
+      title={title}
+      aria-disabled={disabled}
+    >
       <span className="w-16 shrink-0">{label}</span>
       <input
         type="range"
@@ -82,6 +97,7 @@ function LayerSlider({
         max={max}
         step={0.01}
         value={value}
+        disabled={disabled}
         onChange={(e) => onChange(Number(e.target.value))}
         aria-label={`${label} volume`}
         className="flex-1 min-w-0 accent-accent-purple"

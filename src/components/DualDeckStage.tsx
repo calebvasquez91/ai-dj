@@ -47,10 +47,29 @@ import { ANALYSIS_JOB_TIMEOUT_MS, pickNextAnalysisJob } from "@/lib/analysisJobs
 import { LOOKUP_LOOKAHEAD, reachableTracks } from "@/lib/lookahead";
 import { withTimeout } from "@/lib/withTimeout";
 import { voiceCutoffSec, voiceMapFromStem } from "@/lib/voiceMap";
-import { STEM_FEATURES_ENABLED, VOCAL_MASHUP_ENABLED } from "@/lib/featureFlags";
+import { SONG_SYNC_ENABLED, STEM_FEATURES_ENABLED, VOCAL_MASHUP_ENABLED } from "@/lib/featureFlags";
+import { TRANSITION_FX_ENABLED, buildSyncReport } from "@/lib/syncEngine";
+import {
+  SONG_SYNC_CROSSFADE_BARS,
+  beatsUntilMixOut,
+  fitMorphToRoom,
+  initialSongSyncStatus,
+  morphRealSeconds,
+  planSongSync,
+  sectionLabelAt,
+  songSyncCrossfadeCurves,
+  songSyncStateAt,
+  songSyncTrigger,
+  type SongSyncPhase,
+  type SongSyncPlan,
+  type SongSyncStatus,
+} from "@/lib/songSync";
+import { overridesFromReview } from "@/lib/ai-sync";
+import { requestSyncReview } from "@/lib/syncReviewClient";
 import {
   instrumentalFromMixAndVocal,
   isVocalMashupPair,
+  nextGridPointAfter,
   planVocalMashup,
   toMashupPlan,
   vocalMashupGainCurves,
@@ -176,6 +195,84 @@ interface ActiveTempoRamp {
 
 /** How long the pre-transition tempo ramp takes — matches tempo-ramp's own MIN_WINDOW_SEC_BY_CATEGORY floor in mix-engine.ts. */
 const TEMPO_RAMP_PRE_WINDOW_SEC = 8;
+
+// ---- Song Sync morph (lib/songSync.ts) ----
+/** How often the morph's own loop runs: it reads the playing voice's position, ramps tempo/pitch, and nudges the pre-rolled incoming track into phase. */
+const SONG_SYNC_TICK_MS = 50;
+/** The wait for the playing track's next bar line polls its <audio> clock this often. */
+const SONG_SYNC_POLL_MS = 10;
+/** The earliest bar line the morph can start on: far enough off for the swap to be set up. */
+const SONG_SYNC_MIN_LEAD_SEC = 0.4;
+/** While waiting for that bar line, a playhead this far outside the range it should be creeping through means the user sought, and the morph is dropped. */
+const SONG_SYNC_JUMP_TOLERANCE_SEC = 0.5;
+/** Overlap while the buffer-voice takes over from the deck's <audio> element (both play the same audio, so it is not heard). */
+const SONG_SYNC_SWAP_FADE_SEC = 0.03;
+const SONG_SYNC_SWAP_OVERLAP_MS = 120;
+/** The voice starts this far past the swap position, to land where the <audio> element will be by the time the voice is heard (its first audible output comes about this long after it starts). Measured against the real output: the hand-over lands within a few ms. */
+const SONG_SYNC_START_LEAD_SEC = 0.027;
+/** The stretcher's output trails the position it has read by this much of the TRACK's own time (its read-ahead is a fixed span of the source, so on the clock it is this divided by the tempo ratio). Measured by lining the incoming deck's kicks up against the playing voice's, speeding up and slowing down. */
+const SONG_SYNC_VOICE_LAG_SEC = 0.2;
+/** The incoming track pre-rolls silently for this many bars of the playing one (at least the minimum) before the crossfade: long enough to measure its phase and nudge it into place. */
+const SONG_SYNC_PREROLL_BARS = 3;
+const SONG_SYNC_MIN_PREROLL_SEC = 3;
+/** Phase error, seconds, under which the incoming track counts as lined up; over the nudge threshold it is moved. */
+const SONG_SYNC_LOCK_TOLERANCE_SEC = 0.02;
+const SONG_SYNC_NUDGE_THRESHOLD_SEC = 0.02;
+const SONG_SYNC_NUDGE_COOLDOWN_MS = 400;
+/** Consecutive in-tolerance ticks that make the phase "locked". */
+const SONG_SYNC_LOCK_STREAK = 4;
+/** The incoming track enters on its first bar line at least this far into the file, so there is room to pre-roll and phase-lock it. */
+const SONG_SYNC_MIN_ENTRY_SEC = 4;
+/** If the phase hasn't locked when the morph arrives, the crossfade waits a bar, at most this many times, then goes anyway. */
+const SONG_SYNC_MAX_LOCK_EXTENSIONS = 2;
+/** The incoming deck's play() is retried this many times when the browser refuses it, then the morph stands down instead of fading into a silent deck. */
+const SONG_SYNC_MAX_PLAY_FAILURES = 3;
+const SONG_SYNC_DECODE_TIMEOUT_MS = 8000;
+/** How long "DONE" stays on the board after the hand-over. */
+const SONG_SYNC_DONE_LINGER_MS = 2500;
+/** After a morph or crossfade, the Halloween loop waits this long before it comes back (the new track "fully playing"). */
+const AMBIENT_RESUME_SETTLE_MS = 1500;
+
+/**
+ * A Song Sync morph in progress. The playing track's own <audio> element is swapped, on one of its bar lines, for a
+ * SoundTouchJS voice (real tempo/pitch control, unlike playbackRate), whose tempo and pitch are walked, bar by bar,
+ * onto the incoming track's. The incoming track pre-rolls silently on the idle deck and is nudged into phase; then a
+ * four-bar volume hand-over runs and the incoming deck carries on at its own tempo and key.
+ */
+interface ActiveSongSync {
+  fromDeckId: DeckId;
+  toDeckId: DeckId;
+  fromTrackId: string;
+  nextTrack: LocalTrack;
+  plan: SongSyncPlan;
+  voice: TimeStretchVoice;
+  voiceGain: GainNode;
+  /** The playing track's bar line (seconds into it) the morph counts its bars from, and the length of one bar in the track's own time. */
+  morphStartSrcSec: number;
+  barSrcSec: number;
+  /** The incoming track's bar line (seconds into it) that lands on the playing track's bar line when the crossfade starts. */
+  entryB: number;
+  /** The voice's current tempo ratio and pitch shift, as last applied. */
+  rate: number;
+  pitch: number;
+  /** Smoothed wall-clock (performance.now) estimate of when the crossfade starts. Frozen once the crossfade is scheduled. */
+  tXfWallMs: number | null;
+  /** The incoming deck is loaded (silent, paused); it starts playing once its position would be at or past the top of the file. */
+  bStarted: boolean;
+  bPlaying: boolean;
+  /** Times the incoming deck's play() was refused; past SONG_SYNC_MAX_PLAY_FAILURES it isn't retried. */
+  bPlayFailures: number;
+  lockedStreak: number;
+  lastNudgeMs: number;
+  extensions: number;
+  crossfadeScheduled: boolean;
+  crossfadeStartMs: number;
+  crossfadeEndMs: number;
+  status: SongSyncStatus;
+  lastBar: number;
+  lastStatusMs: number;
+  tickIntervalId: ReturnType<typeof setInterval> | null;
+}
 /** A playing FX registered so the FX slider can rescale it and the "FX Playing" indicator can follow it (see trackLiveFx). */
 type LiveFx = { gain: GainNode; base: number; audible: boolean; timer: ReturnType<typeof setTimeout> | null };
 /** How long the FX layer's sound takes to fade out when the FX button is pressed again, or another effect replaces it. */
@@ -453,6 +550,15 @@ export function DualDeckStage() {
   // the eventual startTransition() call knows the outgoing deck already did
   // the tempo-matching work and skips re-ramping the incoming deck on top of it.
   const tempoRampCompletedPairRef = useRef<string | null>(null);
+  // Song Sync Mode: the morph in progress; true synchronously from the moment one begins analysing (before the ref is
+  // populated, same reason as mashupStartingRef); the last pair an AUTOMATIC sync was attempted for (one attempt per
+  // pair — a pair that can't be morphed gets the ordinary transition); the memoized plan per pair for the trigger;
+  // and the wall-clock time before which the Halloween loop stays paused after a crossfade.
+  const songSyncRef = useRef<ActiveSongSync | null>(null);
+  const songSyncStartingRef = useRef(false);
+  const songSyncTriedRef = useRef<string | null>(null);
+  const songSyncPlanCacheRef = useRef<{ key: string; plan: SongSyncPlan | null } | null>(null);
+  const ambientResumeAfterRef = useRef(0);
   // A local track ending into a YouTube track (or vice versa) has no shared
   // audio graph to blend through, so instead of an overlapping crossfade the
   // outgoing local deck just fades to silence over the normal transition
@@ -656,6 +762,41 @@ export function DualDeckStage() {
     }
     reverseRef.current = null;
   }, [deckEl]);
+
+  /** Tears down an in-progress Song Sync morph (the user skipped, sought or paused mid-morph): the voice stops, the playing track's own <audio> element takes back playback at the position the voice reached (native tempo and pitch), and the pre-rolled incoming deck is released — abrupt, like every other mid-transition interruption. */
+  const cancelSongSync = useCallback(() => {
+    const s = songSyncRef.current;
+    if (!s) return;
+    if (s.tickIntervalId != null) clearInterval(s.tickIntervalId);
+    songSyncRef.current = null;
+    const store = useStore.getState();
+    let position: number | null = null;
+    try {
+      position = Math.max(0, s.voice.getPositionSec() - SONG_SYNC_VOICE_LAG_SEC);
+      s.voice.stop();
+    } catch {
+      // Already stopped — harmless.
+    }
+    s.voiceGain.disconnect();
+    const fromEl = deckEl(s.fromDeckId);
+    if (fromEl && store.currentTrack?.id === s.fromTrackId) {
+      if (position != null) fromEl.currentTime = position;
+      fromEl.playbackRate = 1;
+      if (store.isPlaying) fromEl.play().catch(() => {});
+    }
+    const toEl = deckEl(s.toDeckId);
+    if (toEl) {
+      toEl.pause();
+      toEl.playbackRate = 1;
+    }
+    resetDeckNodes(s.fromDeckId, 1);
+    resetDeckNodes(s.toDeckId, 0);
+    loadedTrackId.current[s.toDeckId] = null;
+    store.setSongSync(null);
+    store.setIsTransitioning(false);
+    store.setActiveTransitionRationale(null);
+    store.setActiveTransitionShortWhy(null);
+  }, [deckEl, resetDeckNodes]);
 
   // Background analysis: the playing track and the next few queued LOCAL tracks (lib/analysisJobs.ts), estimating BPM /
   // beat grid / energy onset / key so a mix engine decision is ready before Mix Now or an auto-transition needs it.
@@ -1471,6 +1612,7 @@ export function DualDeckStage() {
 
     /** Called every tick: when Auto FX is on and playback has just entered an energy peak or valley of the current track (lib/autoFx.ts), plays the effect chosen for it. Tracks the zone silently otherwise (and during transitions), so nothing fires late. */
     function tryAutoFx() {
+      if (!TRANSITION_FX_ENABLED) return; // Song Sync Mode: only the music
       const state = useStore.getState();
       const track = state.currentTrack;
       const activeEl = deckEl(activeDeckRef.current);
@@ -1481,7 +1623,14 @@ export function DualDeckStage() {
         memo.peaks = peaks;
         memo.profile = energyProfileFromPeaks(peaks);
       }
-      const busy = transitionRef.current || mashupRef.current || loopRef.current || backspinRef.current || tempoRampRef.current;
+      const busy =
+        transitionRef.current ||
+        mashupRef.current ||
+        loopRef.current ||
+        backspinRef.current ||
+        tempoRampRef.current ||
+        songSyncRef.current ||
+        songSyncStartingRef.current;
       const decision = decideAutoFx({
         enabled: state.autoFx.enabled && !busy,
         trackId: track.id,
@@ -1661,11 +1810,11 @@ export function DualDeckStage() {
       toNodes.gain.gain.setValueCurveAtTime(inCurve, now, plan.windowSec);
       applyTransitionEffect(plan, fromDeckId, toDeckId);
       const overlayNodes =
-        plan.effect === "riser"
+        TRANSITION_FX_ENABLED && plan.effect === "riser"
           ? startRiserLayer(ctx, plan.windowSec)
-          : plan.effect === "tag-sample"
+          : TRANSITION_FX_ENABLED && plan.effect === "tag-sample"
             ? startTagSampleStab(ctx, plan.windowSec)
-            : plan.effect === "scratch-chirp"
+            : TRANSITION_FX_ENABLED && plan.effect === "scratch-chirp"
               ? startScratchChirpLayer(ctx, plan.windowSec)
               : plan.effect === "vocal-layer"
                 ? (() => {
@@ -1695,6 +1844,7 @@ export function DualDeckStage() {
       // yet, or its buffer hasn't finished decoding, the transition simply
       // has no FX layer.
       const fxOverlayNodes = (() => {
+        if (!TRANSITION_FX_ENABLED) return null; // Song Sync Mode: only the music
         const { aiFxPickId, aiFxPickStartOffsetSec, aiFxPickVolumeMultiplier, fxLibrary } = useStore.getState();
         if (!aiFxPickId) return null;
         const fx = fxLibrary.find((f) => f.id === aiFxPickId);
@@ -1704,7 +1854,7 @@ export function DualDeckStage() {
           : null;
       })();
 
-      if (plan.effect === "word-play") {
+      if (TRANSITION_FX_ENABLED && plan.effect === "word-play") {
         // Fire-and-forget: SpeechSynthesis doesn't route through this
         // component's Web Audio graph, so it can't be volume-matched or
         // ducked under the music — it just speaks over whatever's playing.
@@ -2324,6 +2474,413 @@ export function DualDeckStage() {
       }
     }
 
+    /** The playing track's position, seconds into it, while a Song Sync morph is carrying playback on its voice: the stretcher's read position minus its output lag. */
+    function songSyncPlayheadSec(s: ActiveSongSync): number {
+      return Math.max(0, s.voice.getPositionSec() - SONG_SYNC_VOICE_LAG_SEC);
+    }
+
+    function writeSongSyncStatus(s: ActiveSongSync, patch: Partial<SongSyncStatus>) {
+      s.status = { ...s.status, ...patch };
+      useStore.getState().setSongSync(s.status);
+    }
+
+    /**
+     * Song Sync Mode (lib/songSync.ts): the playing track becomes the next one. A fresh SyncReport is built and the AI
+     * DJ confirms or overrides the plan while the playing track's buffer decodes; then, on the playing track's next
+     * bar line, its <audio> element is swapped for a SoundTouchJS voice whose tempo and pitch are walked, bar by bar,
+     * onto the incoming track's (songSyncTick), the incoming track is pre-rolled silently and nudged into phase, and a
+     * plain four-bar volume hand-over finishes it (completeSongSync). Resolves true once the morph is running, false
+     * when there was no morph to do (no plan, stale, nothing decoded, no room): the caller then uses the ordinary
+     * transition.
+     */
+    async function startSongSync(nextTrack: LocalTrack): Promise<boolean> {
+      if (
+        songSyncRef.current ||
+        songSyncStartingRef.current ||
+        transitionRef.current ||
+        mashupRef.current ||
+        mashupStartingRef.current ||
+        tempoRampRef.current ||
+        tempoRampStartingRef.current ||
+        loopRef.current ||
+        backspinRef.current ||
+        reverseRef.current ||
+        vocalMashupPrepRef.current
+      ) {
+        return false;
+      }
+      const ctx = audioCtxRef.current;
+      const masterGain = masterGainRef.current;
+      const fromDeckId = activeDeckRef.current;
+      const toDeckId: DeckId = fromDeckId === "A" ? "B" : "A";
+      const fromEl = deckEl(fromDeckId);
+      const toEl = deckEl(toDeckId);
+      const fromNodes = deckNodesRef.current[fromDeckId];
+      const toNodes = deckNodesRef.current[toDeckId];
+      const track = useStore.getState().currentTrack;
+      if (!ctx || !masterGain || !fromEl || !toEl || !fromNodes || !toNodes || !track) return false;
+      if (track.source !== "local" || fromEl.paused || !Number.isFinite(fromEl.duration) || fromEl.duration <= 0) return false;
+
+      songSyncStartingRef.current = true;
+      const fromTrackId = track.id;
+      const stale = () => {
+        const s = useStore.getState();
+        return (
+          transitionRef.current != null ||
+          mashupRef.current != null ||
+          s.currentTrack?.id !== fromTrackId ||
+          s.queue[0]?.id !== nextTrack.id ||
+          !s.isPlaying
+        );
+      };
+      let voice: TimeStretchVoice | null = null;
+      let voiceGain: GainNode | null = null;
+      let running = false;
+      try {
+        const aAnalysis = getAnalysis(track.id);
+        const bAnalysis = getAnalysis(nextTrack.id);
+        const report = buildSyncReport({
+          current: { track, analysis: aAnalysis },
+          next: { track: nextTrack, analysis: bAnalysis },
+          currentElapsedSec: fromEl.currentTime,
+        });
+        const first = planSongSync(report);
+        if (!first.ok) return false;
+        let plan = first.plan;
+        useStore.getState().setSongSync(initialSongSyncStatus(plan, nextTrack.title, "analyzing"));
+
+        // The audio engineer's report is built; the AI DJ confirms or overrides it while A's buffer decodes.
+        const [bufA, review] = await Promise.all([
+          withTimeout(decodeTrackBuffer(ctx, track.sourceUrl), SONG_SYNC_DECODE_TIMEOUT_MS, "Song sync buffer"),
+          requestSyncReview({ currentTitle: track.title, nextTitle: nextTrack.title, report, plan }),
+        ]);
+        if (stale()) return false;
+        const overrides = overridesFromReview(review);
+        if (Object.keys(overrides).length > 0) {
+          const again = planSongSync(report, overrides);
+          if (again.ok) plan = again.plan;
+        }
+
+        // Start on A's next bar line, and make the whole morph + crossfade fit in what is left of A and of B.
+        const startAt = nextGridPointAfter(aAnalysis, fromEl.currentTime + SONG_SYNC_MIN_LEAD_SEC);
+        const fitted = fitMorphToRoom(plan, fromEl.duration - startAt);
+        if (!fitted) return false;
+        plan = fitted;
+        const barSrcSec = (4 * 60) / plan.bpmFrom;
+        const entryRaw = report.mixInMs / 1000;
+        const entryB = nextGridPointAfter(bAnalysis, Math.max(entryRaw, SONG_SYNC_MIN_ENTRY_SEC) - 0.01);
+        const crossfadeSec = (SONG_SYNC_CROSSFADE_BARS * 4 * 60) / plan.bpmTo;
+        if (nextTrack.durationSec - entryB < crossfadeSec + 10) return false; // not enough of B left after the entry
+        const note = review.listenerNote;
+        useStore.getState().setSongSync({ ...initialSongSyncStatus(plan, nextTrack.title, "analyzing"), listenerNote: note });
+        useStore.getState().setActiveTransitionRationale(note);
+        useStore.getState().setActiveTransitionShortWhy(`Morphing into ${nextTrack.title}`);
+
+        // While waiting for the bar line the playhead should only creep up to it. A seek (the seek effect can't cancel a
+        // morph that hasn't started) shows as a jump out of that range: the plan was made for another place in the song, so give up.
+        const waitFromSec = fromEl.currentTime;
+        let jumped = false;
+        await new Promise<void>((resolve) => {
+          const id = setInterval(() => {
+            const t = fromEl.currentTime;
+            if (t < waitFromSec - SONG_SYNC_JUMP_TOLERANCE_SEC || t > startAt + SONG_SYNC_JUMP_TOLERANCE_SEC) jumped = true;
+            if (stale() || jumped || fromEl.paused || t >= startAt - SONG_SYNC_START_LEAD_SEC) {
+              clearInterval(id);
+              resolve();
+            }
+          }, SONG_SYNC_POLL_MS);
+        });
+        if (stale() || jumped || fromEl.paused) return false;
+
+        // The swap: the deck's <audio> element hands over to a stretcher voice at the same spot in the song.
+        const swapAt = fromEl.currentTime;
+        voice = createTimeStretchVoice(ctx, bufA, { tempo: 1, pitchSemitones: 0 });
+        voice.setStartFraction(Math.max(0, Math.min(1, (swapAt + SONG_SYNC_START_LEAD_SEC) / bufA.duration)));
+        voiceGain = ctx.createGain();
+        voiceGain.gain.value = 0;
+        voice.node.connect(voiceGain);
+        voiceGain.connect(masterGain);
+        const now = ctx.currentTime;
+        voiceGain.gain.setValueAtTime(0, now);
+        voiceGain.gain.linearRampToValueAtTime(1, now + SONG_SYNC_SWAP_FADE_SEC);
+        fromNodes.gain.gain.cancelScheduledValues(now);
+        fromNodes.gain.gain.setValueAtTime(fromNodes.gain.gain.value, now);
+        fromNodes.gain.gain.linearRampToValueAtTime(0, now + SONG_SYNC_SWAP_FADE_SEC);
+        setTimeout(() => {
+          if (songSyncRef.current?.fromDeckId === fromDeckId) fromEl.pause();
+        }, SONG_SYNC_SWAP_OVERLAP_MS);
+
+        const status: SongSyncStatus = { ...initialSongSyncStatus(plan, nextTrack.title, "morphing"), listenerNote: note };
+        const s: ActiveSongSync = {
+          fromDeckId,
+          toDeckId,
+          fromTrackId,
+          nextTrack,
+          plan,
+          voice,
+          voiceGain,
+          morphStartSrcSec: startAt,
+          barSrcSec,
+          entryB,
+          rate: 1,
+          pitch: 0,
+          tXfWallMs: null,
+          bStarted: false,
+          bPlaying: false,
+          bPlayFailures: 0,
+          lockedStreak: 0,
+          lastNudgeMs: 0,
+          extensions: 0,
+          crossfadeScheduled: false,
+          crossfadeStartMs: 0,
+          crossfadeEndMs: 0,
+          status,
+          lastBar: 0,
+          lastStatusMs: 0,
+          tickIntervalId: null,
+        };
+        songSyncRef.current = s;
+        running = true;
+        useStore.getState().setIsTransitioning(true);
+        useStore.getState().setSongSync(status);
+        s.tickIntervalId = setInterval(songSyncTick, SONG_SYNC_TICK_MS);
+      } catch {
+        // Decode/fetch/timeout/SoundTouchJS failure: no morph, the ordinary transition takes the exit.
+      } finally {
+        songSyncStartingRef.current = false;
+        if (!running) {
+          try {
+            voice?.stop();
+          } catch {
+            // Already stopped — harmless.
+          }
+          voiceGain?.disconnect();
+          useStore.getState().setSongSync(null);
+          // Only clear the board's text if nothing else owns it.
+          if (!transitionRef.current && !mashupRef.current) {
+            useStore.getState().setActiveTransitionRationale(null);
+            useStore.getState().setActiveTransitionShortWhy(null);
+          }
+        }
+      }
+      return running;
+    }
+
+    /** Loads the incoming track on the idle deck, silent and paused. songSyncTick starts it playing the moment it would be at (or past) the top of the file, positioned so that its bar line `entryB` reaches the speakers exactly when the playing track's bar line does at the crossfade start, then measures how close that is and nudges it. */
+    function armSongSyncIncoming(s: ActiveSongSync) {
+      const ctx = audioCtxRef.current;
+      const toEl = deckEl(s.toDeckId);
+      const toNodes = deckNodesRef.current[s.toDeckId];
+      if (!ctx || !toEl || !toNodes) return;
+      loadedTrackId.current[s.toDeckId] = s.nextTrack.id;
+      toEl.pause();
+      toEl.src = s.nextTrack.sourceUrl;
+      toEl.currentTime = 0;
+      toEl.playbackRate = 1;
+      toNodes.gain.gain.cancelScheduledValues(ctx.currentTime);
+      toNodes.gain.gain.setValueAtTime(0, ctx.currentTime);
+      s.bStarted = true;
+    }
+
+    /** Schedules the four-bar hand-over as native gain curves starting at the estimated crossfade start: the playing voice falls, the incoming deck rises, on the table in lib/songSync.ts. */
+    function scheduleSongSyncCrossfade(s: ActiveSongSync, nowMs: number) {
+      const ctx = audioCtxRef.current;
+      const toNodes = deckNodesRef.current[s.toDeckId];
+      if (!ctx || !toNodes || s.tXfWallMs == null) return;
+      const crossfadeSec = (SONG_SYNC_CROSSFADE_BARS * 4 * 60) / s.plan.bpmTo;
+      const delaySec = Math.max(0.01, (s.tXfWallMs - nowMs) / 1000);
+      const t0 = ctx.currentTime + delaySec;
+      const curves = songSyncCrossfadeCurves();
+      s.voiceGain.gain.cancelScheduledValues(ctx.currentTime);
+      s.voiceGain.gain.setValueAtTime(1, ctx.currentTime);
+      s.voiceGain.gain.setValueCurveAtTime(curves.a, t0, crossfadeSec);
+      toNodes.gain.gain.cancelScheduledValues(ctx.currentTime);
+      toNodes.gain.gain.setValueAtTime(0, ctx.currentTime);
+      toNodes.gain.gain.setValueCurveAtTime(curves.b, t0, crossfadeSec);
+      s.crossfadeScheduled = true;
+      s.crossfadeStartMs = nowMs + delaySec * 1000;
+      s.crossfadeEndMs = s.crossfadeStartMs + crossfadeSec * 1000;
+    }
+
+    function songSyncTick() {
+      const s = songSyncRef.current;
+      const ctx = audioCtxRef.current;
+      if (!s || !ctx) return;
+      const store = useStore.getState();
+      // The user moved on (skipped, picked something else) or paused: stand down.
+      if (store.currentTrack?.id !== s.fromTrackId || store.queue[0]?.id !== s.nextTrack.id || !store.isPlaying) {
+        cancelSongSync();
+        return;
+      }
+      const nowMs = performance.now();
+      const plan = s.plan;
+
+      // Where the playing track is in the morph, in its own bars; tempo and pitch follow it.
+      const barsElapsed = (songSyncPlayheadSec(s) - s.morphStartSrcSec) / s.barSrcSec;
+      const morph = songSyncStateAt(plan, barsElapsed);
+      if (Math.abs(morph.rate - s.rate) > 1e-5) {
+        s.voice.setTempo(morph.rate);
+        s.rate = morph.rate;
+      }
+      if (Math.abs(morph.pitchSemitones - s.pitch) > 1e-3) {
+        s.voice.setPitchSemitones(morph.pitchSemitones);
+        s.pitch = morph.pitchSemitones;
+      }
+      const morphDone = barsElapsed >= plan.morphBars;
+      const barRealSec = s.barSrcSec / Math.max(0.5, morph.rate);
+
+      // When the crossfade will start: the end of the morph on the clock, smoothed so the position's block-sized steps
+      // don't jitter it. Once the morph has arrived it is fixed (a late phase lock only ever pushes it a bar later).
+      if (!s.crossfadeScheduled && !morphDone) {
+        const realToEnd = morphRealSeconds(plan, Math.min(Math.max(barsElapsed, 0), plan.morphBars), plan.morphBars, s.barSrcSec);
+        const estimate = nowMs + realToEnd * 1000;
+        s.tXfWallMs = s.tXfWallMs == null ? estimate : s.tXfWallMs * 0.7 + estimate * 0.3;
+      } else if (!s.crossfadeScheduled && s.tXfWallMs == null) {
+        s.tXfWallMs = nowMs;
+      }
+      const untilCrossfadeSec = s.tXfWallMs == null ? Infinity : (s.tXfWallMs - nowMs) / 1000;
+
+      // Load the incoming track a few bars early, silently.
+      if (!s.bStarted && !s.crossfadeScheduled && untilCrossfadeSec <= Math.max(SONG_SYNC_MIN_PREROLL_SEC, SONG_SYNC_PREROLL_BARS * barRealSec)) {
+        armSongSyncIncoming(s);
+      }
+
+      // Where the incoming track should be right now: its entry bar line lands on the crossfade start. It starts playing
+      // once that is at or past the top of the file, then is measured against it and nudged into phase (silent, so a seek is free).
+      let errorMs: number | null = s.status.phaseErrorMs;
+      const toEl = deckEl(s.toDeckId);
+      const expected = s.tXfWallMs == null ? null : s.entryB - (s.tXfWallMs - nowMs) / 1000;
+      if (s.bStarted && !s.bPlaying && !s.crossfadeScheduled && toEl && expected != null && expected >= 0 && s.bPlayFailures < SONG_SYNC_MAX_PLAY_FAILURES) {
+        toEl.currentTime = expected;
+        s.bPlaying = true;
+        toEl.play().catch(() => {
+          // Refused (the source changed under it, autoplay, a decode error): the next tick tries again, a few times.
+          if (songSyncRef.current === s) {
+            s.bPlaying = false;
+            s.bPlayFailures += 1;
+          }
+        });
+      }
+      if (s.bPlaying && !s.crossfadeScheduled && toEl && expected != null && !toEl.paused && !toEl.seeking && toEl.readyState >= 2) {
+        const err = toEl.currentTime - expected;
+        errorMs = err * 1000;
+        if (Math.abs(err) <= SONG_SYNC_LOCK_TOLERANCE_SEC) s.lockedStreak += 1;
+        else s.lockedStreak = 0;
+        if (Math.abs(err) > SONG_SYNC_NUDGE_THRESHOLD_SEC && nowMs - s.lastNudgeMs > SONG_SYNC_NUDGE_COOLDOWN_MS && untilCrossfadeSec > 0.4) {
+          toEl.currentTime = Math.max(0, toEl.currentTime - err);
+          s.lastNudgeMs = nowMs;
+          s.lockedStreak = 0;
+        }
+      }
+      const locked = s.lockedStreak >= SONG_SYNC_LOCK_STREAK;
+      const incomingPlaying = s.bPlaying && toEl != null && !toEl.paused && !toEl.ended;
+
+      // The morph has arrived: go as soon as the phase is locked (waiting a bar or two for it, then going regardless).
+      if (!s.crossfadeScheduled && morphDone && untilCrossfadeSec <= 0.15) {
+        if (!s.bStarted) {
+          armSongSyncIncoming(s);
+          s.extensions += 1;
+          if (s.tXfWallMs != null) s.tXfWallMs += barRealSec * 1000;
+        } else if (incomingPlaying && locked) {
+          scheduleSongSyncCrossfade(s, nowMs);
+        } else if (s.extensions >= SONG_SYNC_MAX_LOCK_EXTENSIONS) {
+          // Out of bars to wait. Go if the incoming deck is playing, locked or not; if it never started, stand down
+          // (the playing track carries on, and the ordinary transition takes the exit) rather than fade into silence.
+          if (incomingPlaying) {
+            scheduleSongSyncCrossfade(s, nowMs);
+          } else {
+            cancelSongSync();
+            return;
+          }
+        } else {
+          s.extensions += 1;
+          s.lockedStreak = 0;
+          if (s.tXfWallMs != null) s.tXfWallMs += barRealSec * 1000;
+        }
+      }
+
+      if (s.crossfadeScheduled && nowMs >= s.crossfadeEndMs + 60) {
+        completeSongSync(s);
+        return;
+      }
+
+      // The board's mirror: numbers change on the bar line (stepped), the phase on its own events.
+      const whole = Math.min(plan.morphBars, Math.floor(Math.max(0, barsElapsed)));
+      const stepped = songSyncStateAt(plan, morphDone ? plan.morphBars : whole);
+      const phase: SongSyncPhase = s.crossfadeScheduled
+        ? nowMs >= s.crossfadeStartMs
+          ? "crossfading"
+          : "locked"
+        : !morphDone
+          ? "morphing"
+          : locked
+            ? "locked"
+            : "aligning";
+      const bar = morphDone ? plan.morphBars : whole + 1;
+      if (bar !== s.lastBar || phase !== s.status.phase || nowMs - s.lastStatusMs >= 250) {
+        s.lastBar = bar;
+        s.lastStatusMs = nowMs;
+        writeSongSyncStatus(s, {
+          phase,
+          bar,
+          bpmNow: stepped.bpm,
+          pitchNow: stepped.pitchSemitones,
+          phaseErrorMs: errorMs,
+        });
+      }
+    }
+
+    /** The crossfade is over: the playing track is silent, so its voice and deck are released, the incoming deck becomes the active one at its own tempo and key, and the queue moves on. */
+    function completeSongSync(s: ActiveSongSync) {
+      if (s.tickIntervalId != null) clearInterval(s.tickIntervalId);
+      songSyncRef.current = null;
+      try {
+        s.voice.stop();
+      } catch {
+        // Already stopped — harmless.
+      }
+      s.voiceGain.disconnect();
+      const fromEl = deckEl(s.fromDeckId);
+      if (fromEl) {
+        fromEl.pause();
+        fromEl.playbackRate = 1;
+      }
+      const toEl = deckEl(s.toDeckId);
+      if (toEl) toEl.playbackRate = 1;
+      resetDeckNodes(s.fromDeckId, 1);
+      resetDeckNodes(s.toDeckId, 1);
+      loadedTrackId.current[s.fromDeckId] = null;
+      activeDeckRef.current = s.toDeckId;
+      setActiveDeck(s.toDeckId);
+      ambientResumeAfterRef.current = Date.now() + AMBIENT_RESUME_SETTLE_MS;
+      const store = useStore.getState();
+      store.setIsTransitioning(false);
+      store.setActiveTransitionRationale(null);
+      store.setActiveTransitionShortWhy(null);
+      store.setSongSync({ ...s.status, phase: "done", bar: s.plan.morphBars, bpmNow: s.plan.bpmTo, pitchNow: s.plan.pitchTargetSemitones });
+      setTimeout(() => {
+        if (useStore.getState().songSync?.phase === "done") useStore.getState().setSongSync(null);
+      }, SONG_SYNC_DONE_LINGER_MS);
+      store.next();
+    }
+
+    /** SYNC pressed, or Mix Now while Song Sync Mode is on: morph into the next track now. With nothing to morph (no trusted tempo, too far apart, no room) a Mix Now carries on with the ordinary transition; a SYNC press says why it couldn't. */
+    function manualSongSync(ordinary: (() => void) | null) {
+      if (songSyncRef.current || songSyncStartingRef.current) return;
+      const state = useStore.getState();
+      const nextTrack = state.queue[0];
+      if (!state.currentTrack || state.currentTrack.source !== "local" || !nextTrack || nextTrack.source !== "local") {
+        if (ordinary) ordinary();
+        else state.reportSyncError("SYNC needs two local tracks: the next one in the queue isn't one.");
+        return;
+      }
+      void startSongSync(nextTrack).then((started) => {
+        if (started) return;
+        if (ordinary) ordinary();
+        else useStore.getState().reportSyncError("Can't sync these two: their tempos are unclear or too far apart.");
+      });
+    }
+
     /**
      * Begins gliding the outgoing deck's own track from its native tempo
      * toward nextTrack's native tempo, using a SoundTouchJS buffer-voice in
@@ -2789,7 +3346,16 @@ export function DualDeckStage() {
 
     /** Occasional mid-track FX — never during an active transition, gated by ambienceEnabled/ambienceFrequency and shouldTriggerAmbience()'s own cooldown/energy-curve logic. */
     function tryAmbience() {
-      if (transitionRef.current || mashupRef.current || loopRef.current || backspinRef.current || tempoRampRef.current)
+      if (!TRANSITION_FX_ENABLED) return; // Song Sync Mode: only the music
+      if (
+        transitionRef.current ||
+        mashupRef.current ||
+        loopRef.current ||
+        backspinRef.current ||
+        tempoRampRef.current ||
+        songSyncRef.current ||
+        songSyncStartingRef.current
+      )
         return;
       const state = useStore.getState();
       if (!state.ambienceEnabled || state.ambienceFrequency === "off") return;
@@ -2836,10 +3402,19 @@ export function DualDeckStage() {
 
     /** In Spooky Music, the DJ dropping a random effect into the mix on its own — mainly in a track's build-up and at its drop (a small chance elsewhere), gated by the same on/off + frequency setting as the other mid-track FX, never during a transition or other special move. */
     function trySpookyFxMoment() {
+      if (!TRANSITION_FX_ENABLED) return; // Song Sync Mode: only the music
       const state = useStore.getState();
       if (state.activePlaylistTheme !== "spooky") return;
       if (!state.ambienceEnabled || state.ambienceFrequency === "off") return;
-      if (transitionRef.current || mashupRef.current || loopRef.current || backspinRef.current || tempoRampRef.current)
+      if (
+        transitionRef.current ||
+        mashupRef.current ||
+        loopRef.current ||
+        backspinRef.current ||
+        tempoRampRef.current ||
+        songSyncRef.current ||
+        songSyncStartingRef.current
+      )
         return;
       if (fxLayerRef.current || fxLoadRef.current.loading) return; // one FX at a time: don't cut across one that's playing
       const track = state.currentTrack;
@@ -2961,6 +3536,17 @@ export function DualDeckStage() {
       return pool.find((fx) => fx.id === fxId) ?? null;
     }
 
+    /** True while any crossfade-like process is under way: an ordinary transition, a mashup, a tempo ramp or a Song Sync morph. */
+    function crossfadeActive(): boolean {
+      return Boolean(
+        transitionRef.current ||
+          mashupRef.current ||
+          tempoRampRef.current ||
+          songSyncRef.current ||
+          songSyncStartingRef.current
+      );
+    }
+
     /** Starts the loop layer with an AI-picked loop for the current track. Async (the pick is a network call), so ambientBusyRef stops the 500ms tick from stacking up requests while one is in flight; if Spooky was switched off meanwhile the result is dropped. */
     function startAmbientLayer() {
       if (ambientRunningRef.current || ambientBusyRef.current) return;
@@ -2971,6 +3557,7 @@ export function DualDeckStage() {
       void chooseAmbientLoop(ambientCurrentFxIdRef.current).then((fx) => {
         ambientBusyRef.current = false;
         if (!fx || ambientRunningRef.current || useStore.getState().activePlaylistTheme !== "spooky") return;
+        if (!TRANSITION_FX_ENABLED && crossfadeActive()) return; // a crossfade began while the loop was being picked
         const slot = getOrCreateAmbientSlot("A");
         const ctx = audioCtxRef.current;
         if (!slot || !ctx) return; // ctx went away — stays off until retried
@@ -3082,6 +3669,16 @@ export function DualDeckStage() {
         stopAmbientLayer();
         return;
       }
+      // Song Sync Mode (TRANSITION_FX_ENABLED off): the loop pauses when a crossfade begins and stays paused until the
+      // new track is fully playing, so a crossfade is only the two songs.
+      if (!TRANSITION_FX_ENABLED) {
+        if (crossfadeActive()) {
+          ambientResumeAfterRef.current = Date.now() + AMBIENT_RESUME_SETTLE_MS;
+          stopAmbientLayer();
+          return;
+        }
+        if (Date.now() < ambientResumeAfterRef.current) return;
+      }
       if (!ambientRunningRef.current) {
         startAmbientLayer();
         return;
@@ -3161,6 +3758,7 @@ export function DualDeckStage() {
 
     function tryAutoTransition() {
       if (transitionRef.current || mashupRef.current || loopRef.current || backspinRef.current) return;
+      if (songSyncRef.current || songSyncStartingRef.current) return; // a Song Sync morph owns the exit
       if (vocalMashupPrepRef.current) return; // the vocal mashup is preparing its buffers or waiting for the bar line
       const state = useStore.getState();
       const track = state.currentTrack;
@@ -3201,6 +3799,41 @@ export function DualDeckStage() {
       }
 
       const currentAnalysis = getAnalysis(track.id);
+
+      // Song Sync Mode with Auto on: the exit is the morph. Once its lead (the morph plus the crossfade) is all that is
+      // left before the mix-out point it starts, waiting out a drop for up to two bars; before that, nothing else
+      // fires, so the ordinary triggers don't cut in. A pair with nothing to morph (no trusted tempo, too far apart),
+      // or one whose morph couldn't start, falls through to the ordinary transition, as does a transition the user
+      // pinned for this mix.
+      if (SONG_SYNC_ENABLED && state.songSyncAuto && nextTrack.source === "local" && !state.forcedTransitionId) {
+        const pair = `${track.id}>${nextTrack.id}`;
+        if (songSyncTriedRef.current !== pair) {
+          const nextAnalysisForSync = getAnalysis(nextTrack.id);
+          const cacheKey = `${pair}:${currentAnalysis.bpm}:${nextAnalysisForSync.bpm}:${currentAnalysis.camelotKey}:${nextAnalysisForSync.camelotKey}`;
+          if (songSyncPlanCacheRef.current?.key !== cacheKey) {
+            const report = buildSyncReport({
+              current: { track, analysis: currentAnalysis },
+              next: { track: nextTrack, analysis: nextAnalysisForSync },
+            });
+            const planned = planSongSync(report);
+            songSyncPlanCacheRef.current = { key: cacheKey, plan: planned.ok ? planned.plan : null };
+          }
+          const syncPlan = songSyncPlanCacheRef.current.plan;
+          if (!syncPlan) {
+            songSyncTriedRef.current = pair; // nothing to morph for this pair: the ordinary transition below
+          } else {
+            const decision = songSyncTrigger({
+              beatsUntilMixOut: beatsUntilMixOut(currentTime, duration, currentAnalysis.bpm),
+              morphBars: syncPlan.morphBars,
+              section: sectionLabelAt(currentAnalysis.songMap, currentTime),
+            });
+            if (decision === "wait") return;
+            songSyncTriedRef.current = pair;
+            void startSongSync(nextTrack);
+            return;
+          }
+        }
+      }
 
       // Opportunistic matched mashup: a rarer, bigger "special moment" than
       // a normal transition, so it's checked first (and takes over the
@@ -3394,10 +4027,15 @@ export function DualDeckStage() {
         // estimate instead, or the progress bar would appear to freeze.
         const activeRamp =
           tempoRampRef.current?.deckId === activeDeckRef.current ? tempoRampRef.current : null;
+        const activeSync = songSyncRef.current?.fromDeckId === activeDeckRef.current ? songSyncRef.current : null;
         useStore
           .getState()
           .setCurrentTime(
-            activeRamp ? activeRamp.entryTrackTimeSec + activeRamp.trackTimeElapsedSec : activeEl.currentTime
+            activeSync
+              ? songSyncPlayheadSec(activeSync)
+              : activeRamp
+                ? activeRamp.entryTrackTimeSec + activeRamp.trackTimeElapsedSec
+                : activeEl.currentTime
           );
       }
       tryAutoTransition();
@@ -3488,8 +4126,13 @@ export function DualDeckStage() {
         releaseManualLoop();
       }
 
+      // The SYNC button: morph into the next track now (works with Auto off, too).
+      if (SONG_SYNC_ENABLED && state.songSyncRequestId !== prevState.songSyncRequestId) {
+        if (!transitionRef.current && !mashupRef.current) manualSongSync(null);
+      }
+
       if (state.mixNowRequestId === prevState.mixNowRequestId) return;
-      if (transitionRef.current || mashupRef.current) return;
+      if (transitionRef.current || mashupRef.current || songSyncRef.current || songSyncStartingRef.current) return;
       const track = state.currentTrack;
       const nextTrack = state.queue[0];
       if (!track || !nextTrack) return;
@@ -3499,17 +4142,28 @@ export function DualDeckStage() {
         return;
       }
       const activeEl = deckEl(activeDeckRef.current);
-      const plan = planTransition(
-        planArgsFromState(
-          state,
-          useDjWeights.getState().categoryWeights,
-          { track, analysis: getAnalysis(track.id) },
-          { track: nextTrack, analysis: getAnalysis(nextTrack.id) },
-          { currentElapsedSec: activeEl?.currentTime ?? null }
-        )
-      );
-      applyLearningNudge(track, nextTrack, state, activeEl?.currentTime ?? null, plan);
-      startTransition(nextTrack, plan);
+      const ordinaryMixNow = () => {
+        const latest = useStore.getState();
+        if (latest.currentTrack?.id !== track.id || latest.queue[0]?.id !== nextTrack.id) return;
+        if (transitionRef.current || mashupRef.current || songSyncRef.current) return;
+        const plan = planTransition(
+          planArgsFromState(
+            latest,
+            useDjWeights.getState().categoryWeights,
+            { track, analysis: getAnalysis(track.id) },
+            { track: nextTrack, analysis: getAnalysis(nextTrack.id) },
+            { currentElapsedSec: activeEl?.currentTime ?? null }
+          )
+        );
+        applyLearningNudge(track, nextTrack, latest, activeEl?.currentTime ?? null, plan);
+        startTransition(nextTrack, plan);
+      };
+      // Song Sync Mode (Auto on) makes Mix Now a morph too; a pinned transition, or nothing to morph, keeps the ordinary mix.
+      if (SONG_SYNC_ENABLED && state.songSyncAuto && !state.forcedTransitionId) {
+        manualSongSync(ordinaryMixNow);
+        return;
+      }
+      ordinaryMixNow();
     });
 
     const elA = audioARef.current;
@@ -3562,6 +4216,15 @@ export function DualDeckStage() {
         clearInterval(backspinRef.current.intervalId);
       }
       backspinRef.current = null;
+      if (songSyncRef.current?.tickIntervalId != null) {
+        clearInterval(songSyncRef.current.tickIntervalId);
+      }
+      try {
+        songSyncRef.current?.voice.stop();
+      } catch {
+        // Already stopped — harmless.
+      }
+      songSyncRef.current = null;
       if (tempoRampRef.current?.tickIntervalId != null) {
         clearInterval(tempoRampRef.current.tickIntervalId);
       }
@@ -3588,7 +4251,7 @@ export function DualDeckStage() {
       elA?.removeEventListener("ended", onEndedA);
       elB?.removeEventListener("ended", onEndedB);
     };
-  }, [cancelLoop, cancelTempoRamp, deckEl, resetDeckNodes, stopOverlayNodes, releaseManualLoop]);
+  }, [cancelLoop, cancelSongSync, cancelTempoRamp, deckEl, resetDeckNodes, stopOverlayNodes, releaseManualLoop]);
 
   // External track changes (library/queue click, next/previous, playlist
   // play) land here. Transitions we drive ourselves already have the new
@@ -3611,6 +4274,7 @@ export function DualDeckStage() {
       cancelLoop();
       cancelBackspin();
       cancelTempoRamp();
+      cancelSongSync();
       cancelReversePlayback();
       releaseManualLoop();
       (["A", "B"] as DeckId[]).forEach((id) => deckEl(id)?.pause());
@@ -3624,6 +4288,7 @@ export function DualDeckStage() {
     cancelLoop();
     cancelBackspin();
     cancelTempoRamp();
+    cancelSongSync();
     cancelReversePlayback();
     releaseManualLoop();
 
@@ -3667,6 +4332,7 @@ export function DualDeckStage() {
     cancelLoop,
     cancelMashup,
     cancelTempoRamp,
+    cancelSongSync,
     cancelReversePlayback,
     releaseManualLoop,
     cancelTransition,
@@ -3762,6 +4428,7 @@ export function DualDeckStage() {
     cancelLoop();
     cancelBackspin();
     cancelTempoRamp();
+    cancelSongSync();
     cancelReversePlayback();
     releaseManualLoop();
     const activeEl = deckEl(activeDeck);
@@ -3775,6 +4442,7 @@ export function DualDeckStage() {
     cancelLoop,
     cancelMashup,
     cancelTempoRamp,
+    cancelSongSync,
     cancelReversePlayback,
     releaseManualLoop,
     clearSeekRequest,

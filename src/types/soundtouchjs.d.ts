@@ -19,6 +19,8 @@ declare module "soundtouchjs" {
     percentagePlayed: number;
     readonly node: AudioNode;
     readonly duration: number;
+    /** Seconds of the source read so far (set from the audio callback, once per block). */
+    readonly timePlayed: number;
     connect(node: AudioNode): void;
     disconnect(): void;
     on(eventName: string, cb: (detail: unknown) => void): void;

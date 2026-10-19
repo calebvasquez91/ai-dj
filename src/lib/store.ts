@@ -25,7 +25,7 @@ import {
 import { pickFallbackTransitionFx, type AiFxBoardState, type AiFxCandidate, type AiFxTrackProfile } from "@/lib/ai-fx";
 import { RECENT_TRANSITIONS_KEPT, planArgsFromState, planTransition } from "@/lib/mix-engine";
 import { useDjWeights } from "@/lib/dj-weights";
-import { buildSyncReport, candidateSyncSummary } from "@/lib/syncEngine";
+import { TRANSITION_FX_ENABLED, buildSyncReport, candidateSyncSummary } from "@/lib/syncEngine";
 import { jsonInit, syncRequest } from "@/lib/syncRequest";
 import { hasHalloweenAffinity } from "@/lib/fxAffinity";
 import {
@@ -36,6 +36,8 @@ import {
 } from "@/lib/layerMix";
 import { AUTO_FX_DEFAULTS, loadAutoFxSettings, saveAutoFxSettings, type AutoFxSettings } from "@/lib/autoFxSettings";
 import { loadStemAutoSettings, saveStemAutoSettings, type StemAutoSettings } from "@/lib/stemAutoSettings";
+import { loadSongSyncSettings, saveSongSyncSettings } from "@/lib/songSyncSettings";
+import type { SongSyncStatus } from "@/lib/songSync";
 import type { StemJobState } from "@/lib/stemAutopilot";
 import type { StemCounts } from "@/lib/stemStatus";
 import { judgeStemCandidate } from "@/lib/stemPlanner";
@@ -205,6 +207,12 @@ interface PlayerState {
   stemAutopilot: StemAutopilotStatus;
   /** The vocal mashup in progress, or null. Written by DualDeckStage. */
   vocalMashup: VocalMashupStatus | null;
+  /** Song Sync Mode's "Auto" switch: when on, every automatic transition is the morph (tempo and pitch bend onto the next track's, then a plain crossfade); when off the ordinary transitions run and SYNC only acts when pressed. Saved per device. */
+  songSyncAuto: boolean;
+  /** Bumped by the SYNC button; DualDeckStage starts a morph into queue[0] on each change (same shape as mixNowRequestId). */
+  songSyncRequestId: number;
+  /** The morph in progress, or null. Written only by DualDeckStage (a mirror of the real morph); the DJ board reads it. */
+  songSync: SongSyncStatus | null;
   /** Opportunistic tempo/key-matched dual-track mashup moments — a distinct, rarer "special moment" from ambience FX. */
   mashupEnabled: boolean;
 
@@ -357,6 +365,11 @@ interface PlayerState {
   loadStemAuto: () => void;
   setStemAutopilotStatus: (status: StemAutopilotStatus) => void;
   setVocalMashup: (status: VocalMashupStatus | null) => void;
+  setSongSyncAuto: (auto: boolean) => void;
+  /** Reads the saved Song Sync setting (browser only; called once on app load). */
+  loadSongSync: () => void;
+  requestSongSync: () => void;
+  setSongSync: (status: SongSyncStatus | null) => void;
   /** Reads the saved Auto FX settings (browser only; called once on app load). */
   loadAutoFx: () => void;
   requestFx: () => void;
@@ -468,6 +481,9 @@ export const useStore = create<PlayerState>()(
       trackVoiceMaps: {},
       stemAutopilot: INITIAL_STEM_AUTOPILOT_STATUS,
       vocalMashup: null,
+      songSyncAuto: true,
+      songSyncRequestId: 0,
+      songSync: null,
       mashupEnabled: true,
 
       mixerPanelOpen: false,
@@ -688,6 +704,11 @@ export const useStore = create<PlayerState>()(
       },
 
       requestAiFxPick: async () => {
+        // Song Sync Mode: a crossfade is only the two songs, so no FX is picked and no Claude call is made.
+        if (!TRANSITION_FX_ENABLED) {
+          set({ aiFxPickId: null, aiFxPickStartOffsetSec: null, aiFxPickVolumeMultiplier: null, aiFxPickReason: null, aiFxPickLoading: false });
+          return;
+        }
         const { currentTrack, queue, trackAnalysis, fxLibrary, djMode, crossfadeOverrideSec, activePlaylistTheme } =
           get();
         const nextTrack = queue[0];
@@ -932,6 +953,13 @@ export const useStore = create<PlayerState>()(
       setTrackVoiceMap: (trackId, map) => set((s) => ({ trackVoiceMaps: { ...s.trackVoiceMaps, [trackId]: map } })),
       setStemAutopilotStatus: (stemAutopilot) => set({ stemAutopilot }),
       setVocalMashup: (vocalMashup) => set({ vocalMashup }),
+      setSongSyncAuto: (songSyncAuto) => {
+        saveSongSyncSettings({ auto: songSyncAuto });
+        set({ songSyncAuto });
+      },
+      loadSongSync: () => set({ songSyncAuto: loadSongSyncSettings().auto }),
+      requestSongSync: () => set((s) => ({ songSyncRequestId: s.songSyncRequestId + 1 })),
+      setSongSync: (songSync) => set({ songSync }),
       requestFx: () => set((s) => ({ fxRequestId: s.fxRequestId + 1 })),
       setMashupEnabled: (enabled) => set({ mashupEnabled: enabled }),
       // Only localLibrary is the source of truth for curation flags, but
