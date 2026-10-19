@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { pickNextAnalysisJob, type JobAnalysis, type JobTrack } from "./analysisJobs";
+import { pickNextAnalysisJob, tempoChanged, type JobAnalysis, type JobTrack } from "./analysisJobs";
 
 const local = (id: string): JobTrack => ({ id, source: "local" });
 const yt = (id: string): JobTrack => ({ id, source: "youtube" });
@@ -77,5 +77,27 @@ describe("pickNextAnalysisJob", () => {
     pick({ queue, trackAnalysis: analysis });
     expect(queue).toHaveLength(1);
     expect(analysis).toEqual({ now: done });
+  });
+});
+
+describe("tempoChanged", () => {
+  it("replaces a persisted 60 with a fresh 120 (the old estimator's octave error)", () => {
+    expect(tempoChanged({ bpm: 60, bpmConfidence: 0.45 }, { bpm: 119.9, bpmConfidence: 0.88 })).toBe(true);
+  });
+
+  it("replaces a low-confidence fallback 120 with a measured 121", () => {
+    expect(tempoChanged({ bpm: 120, bpmConfidence: 0.04 }, { bpm: 120.9, bpmConfidence: 0.69 })).toBe(true);
+  });
+
+  it("leaves an unchanged reading alone, so a session does not re-save every track", () => {
+    expect(tempoChanged({ bpm: 120, bpmConfidence: 0.7 }, { bpm: 120.4, bpmConfidence: 0.72 })).toBe(false);
+  });
+
+  it("never replaces a saved reading with a run that fell back to the neutral tempo", () => {
+    expect(tempoChanged({ bpm: 60, bpmConfidence: 0.45 }, { bpm: 120, bpmConfidence: 0, fallback: true })).toBe(false);
+  });
+
+  it("takes a fresh tempo when nothing usable was saved", () => {
+    expect(tempoChanged({ bpm: 0, bpmConfidence: 0 }, { bpm: 128, bpmConfidence: 0.5 })).toBe(true);
   });
 });

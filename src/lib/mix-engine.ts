@@ -7,6 +7,7 @@ import { snapToBeatGrid } from "@/lib/beat-grid";
 import { alignEntryToBar, songMapMatchesBpm } from "@/lib/phrase-align";
 import { estimateStructuralCues } from "@/lib/structural-estimate";
 import { TRANSITION_FX_ENABLED } from "@/lib/transitionFx";
+import { bestTempoRatio } from "@/lib/tempoRatio";
 
 export { snapToBeatGrid } from "@/lib/beat-grid";
 
@@ -69,13 +70,8 @@ export function equalPowerCurves(steps = 64): { outCurve: Float32Array; inCurve:
   return { outCurve, inCurve };
 }
 
-/** BPM ratio (a/b) adjusted to whichever octave (1x, 2x, 0.5x) sits closest to 1 — treats double/half-tempo as compatible. */
-export function bestTempoRatio(bpmA: number, bpmB: number): number {
-  if (bpmA <= 0 || bpmB <= 0) return 1;
-  const raw = bpmA / bpmB;
-  const candidates = [raw, raw * 2, raw / 2];
-  return candidates.reduce((best, r) => (Math.abs(r - 1) < Math.abs(best - 1) ? r : best));
-}
+// bestTempoRatio lives in tempoRatio.ts (a leaf the analysis worker can import); re-exported so callers are unchanged.
+export { bestTempoRatio };
 
 /**
  * Whether a real, independent-time-stretch tempo ramp is worth attempting

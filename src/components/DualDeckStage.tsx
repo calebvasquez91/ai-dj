@@ -43,7 +43,7 @@ import {
   type AmbientDuckState,
 } from "@/lib/layerMix";
 import { BoundedCache } from "@/lib/boundedCache";
-import { ANALYSIS_JOB_TIMEOUT_MS, pickNextAnalysisJob } from "@/lib/analysisJobs";
+import { ANALYSIS_JOB_TIMEOUT_MS, pickNextAnalysisJob, tempoChanged } from "@/lib/analysisJobs";
 import { LOOKUP_LOOKAHEAD, reachableTracks } from "@/lib/lookahead";
 import { withTimeout } from "@/lib/withTimeout";
 import { voiceCutoffSec, voiceMapFromStem } from "@/lib/voiceMap";
@@ -818,13 +818,20 @@ export function DualDeckStage() {
     analyzingIdRef.current = track.id;
     if (kind === "fresh") state.startAnalyzing(track.id);
     const run = withTimeout(analyzeTrackFromUrl(track.sourceUrl), ANALYSIS_JOB_TIMEOUT_MS, "Track analysis");
-    // An "upgrade" keeps the persisted numbers exactly as they are and just adds the song map (src/lib/song-map.ts),
-    // silently — the server can't store one yet. `songMap: null` means "tried, nothing usable", so it isn't retried;
-    // left undefined (WASM/fallback paths, or a failure) it would read as "never tried" and loop on the same track.
+    // An "upgrade" adds the song map (src/lib/song-map.ts), silently — the server can't store one yet — and keeps the
+    // persisted numbers as they are, except the tempo: analyses saved before the song map's tempo estimator was used
+    // read most 120 BPM tracks as 60, so when the fresh run disagrees the whole fresh analysis replaces it (and is
+    // cached server-side). `songMap: null` means "tried, nothing usable", so it isn't retried; left undefined
+    // (WASM/fallback paths, or a failure) it would read as "never tried" and loop on the same track.
     const settled =
       kind === "upgrade"
         ? run
-            .then((fresh) => useStore.getState().setTrackSongMap(track.id, fresh.songMap ?? null))
+            .then((fresh) => {
+              const state = useStore.getState();
+              const saved = state.trackAnalysis[track.id];
+              if (fresh.songMap && saved && tempoChanged(saved, fresh)) state.setTrackAnalysis(track.id, fresh);
+              else state.setTrackSongMap(track.id, fresh.songMap ?? null);
+            })
             .catch(() => useStore.getState().setTrackSongMap(track.id, null))
         : run
             .then((analysis) =>
