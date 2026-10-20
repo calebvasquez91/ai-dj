@@ -10,6 +10,7 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "build:wasm": "bash scripts/build-wasm.sh",
+    "build:worklet": "node scripts/build-stretch-worklet.mjs",
     "postinstall": "prisma generate",
     "db:push": "prisma db push",
     "db:studio": "prisma studio",
