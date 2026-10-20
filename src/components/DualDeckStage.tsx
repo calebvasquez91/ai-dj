@@ -4499,11 +4499,12 @@ export function DualDeckStage() {
 
   return (
     <>
+      {/* data-deck lets the sync test suite (lib/syncTestRunner.ts) watch exactly these two elements for stalls. */}
       {/* crossOrigin is required for createMediaElementSource to read samples
           from cross-origin audio (Vercel Blob) — without it the element still
           plays normally, but the Web Audio graph it feeds outputs silence. */}
-      <audio ref={audioARef} preload="auto" crossOrigin="anonymous" className="hidden" />
-      <audio ref={audioBRef} preload="auto" crossOrigin="anonymous" className="hidden" />
+      <audio ref={audioARef} data-deck="A" preload="auto" crossOrigin="anonymous" className="hidden" />
+      <audio ref={audioBRef} data-deck="B" preload="auto" crossOrigin="anonymous" className="hidden" />
     </>
   );
 }
