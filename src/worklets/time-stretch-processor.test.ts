@@ -129,7 +129,11 @@ function run(
 
 describe("public/worklets/time-stretch.js", () => {
   it("is up to date with SoundTouchJS and the processor source (run `npm run build:worklet`)", () => {
-    expect(readFileSync(WORKLET_OUTPUT as string, "utf8")).toBe(buildStretchWorklet());
+    // Line endings are ignored: a Windows checkout may turn the committed file's LF into CRLF.
+    const eol = (text: string) => text.replace(/
+/g, "
+");
+    expect(eol(readFileSync(WORKLET_OUTPUT as string, "utf8"))).toBe(eol(buildStretchWorklet()));
   });
 
   it("keeps SoundTouchJS's LGPL notice at the top of the generated file and has no import or export left", () => {
