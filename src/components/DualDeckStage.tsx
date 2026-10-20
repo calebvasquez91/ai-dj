@@ -31,7 +31,7 @@ import { useDjWeights, LEARNING_NUDGE_UP, LEARNING_NUDGE_DOWN } from "@/lib/dj-w
 import { planMashup, MASHUP_COOLDOWN_SEC, type MashupPlan } from "@/lib/mashup-engine";
 import { reverseSamples } from "@/lib/reverse-audio";
 import { resolveHotCues, upcomingDropCueAtSec } from "@/lib/hot-cues";
-import { createTimeStretchVoice, type TimeStretchVoice } from "@/lib/time-stretch";
+import { createTimeStretchVoice, preloadTimeStretch, type TimeStretchVoice } from "@/lib/time-stretch";
 import { filterStateToKnobPos } from "@/lib/mixer-controls";
 import { MAX_FX_VOLUME_MULTIPLIER } from "@/lib/ai-fx";
 import {
@@ -208,10 +208,10 @@ const SONG_SYNC_JUMP_TOLERANCE_SEC = 0.5;
 /** Overlap while the buffer-voice takes over from the deck's <audio> element (both play the same audio, so it is not heard). */
 const SONG_SYNC_SWAP_FADE_SEC = 0.03;
 const SONG_SYNC_SWAP_OVERLAP_MS = 120;
-/** The voice starts this far past the swap position, to land where the <audio> element will be by the time the voice is heard (its first audible output comes about this long after it starts). Measured against the real output: the hand-over lands within a few ms. */
-const SONG_SYNC_START_LEAD_SEC = 0.027;
-/** The stretcher's output trails the position it has read by this much of the TRACK's own time (its read-ahead is a fixed span of the source, so on the clock it is this divided by the tempo ratio). Measured by lining the incoming deck's kicks up against the playing voice's, speeding up and slowing down. */
-const SONG_SYNC_VOICE_LAG_SEC = 0.2;
+/** The playing track's <audio> element and the audio clock disagree about where "now" is in the song by about this much: the element's own beats reach the speakers this much before (negative) or after (positive) the audio thread's clock says they should. Added to the scheduled hand-over time so the stretcher's first sample lands on the element's own beat. Measured on the real player: a 120 BPM click track handed over untouched (the "exact" voice, sample for sample) left every later kick 3.0 and 1.75 ms early in two runs (0.04 ms spread within a run; the run-to-run difference is the audio clock being read in 2.7 ms steps), so the voice is delayed by their mean. */
+const SONG_SYNC_CLOCK_OFFSET_SEC = 0.0024;
+/** A morph reads the playing track this many bars past the start (the morph itself, the bars it may wait for a lock, the crossfade, and slack), then needs no more of it; the stretcher copies only that much of the track to the audio thread. */
+const SONG_SYNC_VOICE_SLACK_BARS = 2;
 /** The incoming track pre-rolls silently for this many bars of the playing one (at least the minimum) before the crossfade: long enough to measure its phase and nudge it into place. */
 const SONG_SYNC_PREROLL_BARS = 3;
 const SONG_SYNC_MIN_PREROLL_SEC = 3;
@@ -772,7 +772,7 @@ export function DualDeckStage() {
     const store = useStore.getState();
     let position: number | null = null;
     try {
-      position = Math.max(0, s.voice.getPositionSec() - SONG_SYNC_VOICE_LAG_SEC);
+      position = Math.max(0, s.voice.getPositionSec());
       s.voice.stop();
     } catch {
       // Already stopped — harmless.
@@ -999,6 +999,9 @@ export function DualDeckStage() {
         window.AudioContext ||
         (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
       const ctx = new AudioContextCtor();
+      // Load the tempo/pitch stretcher worklet now so voices created later (synchronously) can use it; if it is
+      // unavailable they fall back to the main-thread voice.
+      void preloadTimeStretch(ctx);
 
       const masterGain = ctx.createGain();
       masterGain.gain.value = useStore.getState().volume;
@@ -2161,6 +2164,7 @@ export function DualDeckStage() {
         const voice = createTimeStretchVoice(ctx, buffer, {
           tempo: plan.tempoRatio,
           pitchSemitones: plan.pitchSemitones,
+          maxSourceSec: plan.durationSec * Math.max(1, plan.tempoRatio) + 10,
         });
         voice.setStartFraction(Math.max(0, Math.min(1, plan.entryOffsetSec / buffer.duration)));
         const voiceGain = ctx.createGain();
@@ -2371,8 +2375,9 @@ export function DualDeckStage() {
         if (stale() || fromEl.paused) return;
 
         const toDeckId: DeckId = fromDeckId === "A" ? "B" : "A";
-        const vocalVoice = createTimeStretchVoice(ctx, vocalBuf, { tempo: plan.tempoRatio, pitchSemitones: plan.pitchSemitones });
-        const instVoice = createTimeStretchVoice(ctx, instBuf, { tempo: plan.tempoRatio, pitchSemitones: plan.pitchSemitones });
+        const mashupSourceSec = plan.totalSec * Math.max(1, plan.tempoRatio) + 10;
+        const vocalVoice = createTimeStretchVoice(ctx, vocalBuf, { tempo: plan.tempoRatio, pitchSemitones: plan.pitchSemitones, maxSourceSec: mashupSourceSec });
+        const instVoice = createTimeStretchVoice(ctx, instBuf, { tempo: plan.tempoRatio, pitchSemitones: plan.pitchSemitones, maxSourceSec: mashupSourceSec });
         voicesToStop = [vocalVoice, instVoice];
         vocalVoice.setStartFraction(Math.max(0, Math.min(1, plan.entryOffsetSec / vocalBuf.duration)));
         instVoice.setStartFraction(Math.max(0, Math.min(1, plan.entryOffsetSec / instBuf.duration)));
@@ -2481,9 +2486,9 @@ export function DualDeckStage() {
       }
     }
 
-    /** The playing track's position, seconds into it, while a Song Sync morph is carrying playback on its voice: the stretcher's read position minus its output lag. */
+    /** The playing track's position, seconds into it, while a Song Sync morph is carrying playback on its voice: where the audio being heard comes from, as the voice itself reports it. */
     function songSyncPlayheadSec(s: ActiveSongSync): number {
-      return Math.max(0, s.voice.getPositionSec() - SONG_SYNC_VOICE_LAG_SEC);
+      return Math.max(0, s.voice.getPositionSec());
     }
 
     function writeSongSyncStatus(s: ActiveSongSync, patch: Partial<SongSyncStatus>) {
@@ -2542,6 +2547,7 @@ export function DualDeckStage() {
       };
       let voice: TimeStretchVoice | null = null;
       let voiceGain: GainNode | null = null;
+      let swapScheduled: { atCtx: number; deckGain: number } | null = null;
       let running = false;
       try {
         const aAnalysis = getAnalysis(track.id);
@@ -2583,6 +2589,34 @@ export function DualDeckStage() {
         useStore.getState().setActiveTransitionRationale(note);
         useStore.getState().setActiveTransitionShortWhy(`Morphing into ${nextTrack.title}`);
 
+        // The hand-over is scheduled on the audio clock, not done when this loop happens to notice the bar line: the
+        // stretcher voice is created now, told to stay silent until the bar line's exact audio-clock time and then start
+        // there, and the deck's gain and the voice's gain cross over on that same schedule (both play identical audio,
+        // so the overlap is not heard). A late timer can no longer leave a hole at the swap.
+        const barSrcSecForVoice = (4 * 60) / plan.bpmFrom;
+        const maxSourceSec =
+          (plan.morphBars + SONG_SYNC_MAX_LOCK_EXTENSIONS + SONG_SYNC_CROSSFADE_BARS + SONG_SYNC_VOICE_SLACK_BARS) *
+            barSrcSecForVoice *
+            Math.max(1, plan.rateTarget) +
+          5;
+        const tBarCtx = ctx.currentTime + Math.max(0, startAt - fromEl.currentTime) + SONG_SYNC_CLOCK_OFFSET_SEC;
+        // A morph that holds the tempo and the key never changes the outgoing track at all, so it plays it untouched
+        // (sample for sample, no stretching) instead of passing it through the stretcher for nothing.
+        const untouched = plan.direction === "hold" && plan.pitchTargetSemitones === 0;
+        voice = createTimeStretchVoice(ctx, bufA, { tempo: 1, pitchSemitones: 0, maxSourceSec, exact: untouched });
+        voice.setStartFraction(Math.max(0, Math.min(1, startAt / bufA.duration)), tBarCtx);
+        voiceGain = ctx.createGain();
+        voiceGain.gain.value = 0;
+        voice.node.connect(voiceGain);
+        voiceGain.connect(masterGain);
+        voiceGain.gain.setValueAtTime(0, tBarCtx);
+        voiceGain.gain.linearRampToValueAtTime(1, tBarCtx + SONG_SYNC_SWAP_FADE_SEC);
+        const deckGainBefore = fromNodes.gain.gain.value;
+        fromNodes.gain.gain.cancelScheduledValues(ctx.currentTime);
+        fromNodes.gain.gain.setValueAtTime(deckGainBefore, tBarCtx);
+        fromNodes.gain.gain.linearRampToValueAtTime(0, tBarCtx + SONG_SYNC_SWAP_FADE_SEC);
+        swapScheduled = { atCtx: tBarCtx, deckGain: deckGainBefore };
+
         // While waiting for the bar line the playhead should only creep up to it. A seek (the seek effect can't cancel a
         // morph that hasn't started) shows as a jump out of that range: the plan was made for another place in the song, so give up.
         const waitFromSec = fromEl.currentTime;
@@ -2591,7 +2625,7 @@ export function DualDeckStage() {
           const id = setInterval(() => {
             const t = fromEl.currentTime;
             if (t < waitFromSec - SONG_SYNC_JUMP_TOLERANCE_SEC || t > startAt + SONG_SYNC_JUMP_TOLERANCE_SEC) jumped = true;
-            if (stale() || jumped || fromEl.paused || t >= startAt - SONG_SYNC_START_LEAD_SEC) {
+            if (stale() || jumped || fromEl.paused || t >= startAt) {
               clearInterval(id);
               resolve();
             }
@@ -2599,20 +2633,6 @@ export function DualDeckStage() {
         });
         if (stale() || jumped || fromEl.paused) return false;
 
-        // The swap: the deck's <audio> element hands over to a stretcher voice at the same spot in the song.
-        const swapAt = fromEl.currentTime;
-        voice = createTimeStretchVoice(ctx, bufA, { tempo: 1, pitchSemitones: 0 });
-        voice.setStartFraction(Math.max(0, Math.min(1, (swapAt + SONG_SYNC_START_LEAD_SEC) / bufA.duration)));
-        voiceGain = ctx.createGain();
-        voiceGain.gain.value = 0;
-        voice.node.connect(voiceGain);
-        voiceGain.connect(masterGain);
-        const now = ctx.currentTime;
-        voiceGain.gain.setValueAtTime(0, now);
-        voiceGain.gain.linearRampToValueAtTime(1, now + SONG_SYNC_SWAP_FADE_SEC);
-        fromNodes.gain.gain.cancelScheduledValues(now);
-        fromNodes.gain.gain.setValueAtTime(fromNodes.gain.gain.value, now);
-        fromNodes.gain.gain.linearRampToValueAtTime(0, now + SONG_SYNC_SWAP_FADE_SEC);
         setTimeout(() => {
           if (songSyncRef.current?.fromDeckId === fromDeckId) fromEl.pause();
         }, SONG_SYNC_SWAP_OVERLAP_MS);
@@ -2662,6 +2682,18 @@ export function DualDeckStage() {
             // Already stopped — harmless.
           }
           voiceGain?.disconnect();
+          if (swapScheduled) {
+            // The morph never ran but the hand-over was already scheduled: give the deck its gain back, smoothly if the
+            // swap had already begun.
+            const now = ctx.currentTime;
+            fromNodes.gain.gain.cancelScheduledValues(now);
+            if (now >= swapScheduled.atCtx) {
+              fromNodes.gain.gain.setValueAtTime(fromNodes.gain.gain.value, now);
+              fromNodes.gain.gain.linearRampToValueAtTime(swapScheduled.deckGain, now + SONG_SYNC_SWAP_FADE_SEC);
+            } else {
+              fromNodes.gain.gain.setValueAtTime(swapScheduled.deckGain, now);
+            }
+          }
           useStore.getState().setSongSync(null);
           // Only clear the board's text if nothing else owns it.
           if (!transitionRef.current && !mashupRef.current) {
@@ -2937,7 +2969,11 @@ export function DualDeckStage() {
 
         const targetTempo = 1 / bestTempoRatio(currentAnalysis.bpm, nextAnalysis.bpm);
 
-        const voice = createTimeStretchVoice(ctx, buffer, { tempo: 1, pitchSemitones: 0 });
+        const voice = createTimeStretchVoice(ctx, buffer, {
+          tempo: 1,
+          pitchSemitones: 0,
+          maxSourceSec: TEMPO_RAMP_PRE_WINDOW_SEC * Math.max(1, targetTempo) + 10,
+        });
         voice.setStartFraction(Math.max(0, Math.min(1, entryTrackTimeSec / buffer.duration)));
         const voiceGain = ctx.createGain();
         voiceGain.gain.value = 0;
