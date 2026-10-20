@@ -807,7 +807,10 @@ class PitchShifter {
  * SoundTouch global) and writes public/worklets/time-stretch.js, the file the browser loads.
  *
  * Work per audio block is bounded: input is fed to the stretcher FEED_FRAMES at a time and only as far as one 128-frame
- * block needs, never in one big batch the way SoundTouchJS's own SimpleFilter does (16384 frames at once).
+ * block needs, never in one big batch the way SoundTouchJS's own SimpleFilter does (16384 frames at once). The stretcher
+ * itself releases audio in bursts of about one analysis window, so a block can still consume 4-5k frames at once in the
+ * steady state; the start-up work (several thousand frames before the first sample) is what the scheduled start lets
+ * the processor spread over silent blocks (see prime()).
  *
  * Messages in:  { type: "load", left, right, baseFrame, startFrame, atFrame, exact }   the audio to play (transferred),
  *                   the absolute source frame its first sample is, the absolute source frame the FIRST AUDIBLE sample
@@ -916,10 +919,8 @@ class TimeStretchProcessor extends AudioWorkletProcessor {
     return Math.round(Math.max(0, Math.min(4000, skip)));
   }
 
-  /** One bounded step of start-up work: the stretcher needs several thousand frames of input before its first output. */
-  prime() {
-    const out = this.st.outputBuffer;
-    if (out.frameCount >= PRIME_FRAMES || this.readPos >= this.length) return;
+  /** Feeds the stretcher one chunk (up to FEED_FRAMES) of the source and lets it process what it has. */
+  feedChunk() {
     const n = Math.min(FEED_FRAMES, this.length - this.readPos);
     const feed = this.feed;
     for (let i = 0; i < n; i++) {
@@ -931,20 +932,14 @@ class TimeStretchProcessor extends AudioWorkletProcessor {
     this.st.process();
   }
 
-  /** Feeds the stretcher until one block of output is ready (or the source has run out). */
+  /** One bounded step of start-up work: the stretcher needs several thousand frames of input before its first output. */
+  prime() {
+    if (this.st.outputBuffer.frameCount < PRIME_FRAMES && this.readPos < this.length) this.feedChunk();
+  }
+
+  /** Feeds the stretcher until `frames` of output are ready (or the source has run out). */
   fill(frames) {
-    const out = this.st.outputBuffer;
-    while (out.frameCount < frames && this.readPos < this.length) {
-      const n = Math.min(FEED_FRAMES, this.length - this.readPos);
-      const feed = this.feed;
-      for (let i = 0; i < n; i++) {
-        feed[i * 2] = this.left[this.readPos + i];
-        feed[i * 2 + 1] = this.right[this.readPos + i];
-      }
-      this.readPos += n;
-      this.st.inputBuffer.putSamples(feed, 0, n);
-      this.st.process();
-    }
+    while (this.st.outputBuffer.frameCount < frames && this.readPos < this.length) this.feedChunk();
   }
 
   /**
@@ -1037,6 +1032,3 @@ class TimeStretchProcessor extends AudioWorkletProcessor {
 }
 
 registerProcessor("time-stretch", TimeStretchProcessor);
-
-// Exposed for the unit tests (a plain scope has no AudioWorklet); harmless in a real worklet.
-globalThis.__TimeStretchProcessor = TimeStretchProcessor;

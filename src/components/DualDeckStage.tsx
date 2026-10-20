@@ -2980,19 +2980,23 @@ export function DualDeckStage() {
         voice.node.connect(voiceGain);
         voiceGain.connect(masterGain);
 
+        // The voice starts a short lead from now (it needs the lead to get ready without stalling the audio thread), with its
+        // start advanced by that lead, so it is exactly where the deck's own element will be then. The swap is timed from
+        // when the voice starts, not from now, or the deck would fade out before the voice could be heard.
         const now = ctx.currentTime;
-        voiceGain.gain.setValueAtTime(0, now);
-        voiceGain.gain.linearRampToValueAtTime(1, now + TEMPO_RAMP_SWAP_FADE_SEC);
+        const swapAt = voice.startAtContextSec ?? now;
+        voiceGain.gain.setValueAtTime(0, swapAt);
+        voiceGain.gain.linearRampToValueAtTime(1, swapAt + TEMPO_RAMP_SWAP_FADE_SEC);
         nodes.gain.gain.cancelScheduledValues(now);
-        nodes.gain.gain.setValueAtTime(nodes.gain.gain.value, now);
-        nodes.gain.gain.linearRampToValueAtTime(0, now + TEMPO_RAMP_SWAP_FADE_SEC);
+        nodes.gain.gain.setValueAtTime(nodes.gain.gain.value, swapAt);
+        nodes.gain.gain.linearRampToValueAtTime(0, swapAt + TEMPO_RAMP_SWAP_FADE_SEC);
 
         // Brief overlap while the voice spins up — both sides play identical
         // content from the same position at this instant, so a moment of
         // overlap is inaudible, unlike a gap would be.
         setTimeout(() => {
           el.pause();
-        }, 150);
+        }, Math.max(0, (swapAt - now) * 1000) + 150);
 
         const ramp: ActiveTempoRamp = {
           deckId,

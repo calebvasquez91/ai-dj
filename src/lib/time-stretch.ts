@@ -22,6 +22,13 @@ const PROCESSOR_NAME = "time-stretch";
 const FALLBACK_BUFFER_SIZE = 1024;
 /** Audio kept before the wanted start so the stretcher's initial skip has something to read. */
 const LEAD_IN_FRAMES = 4096;
+/**
+ * A voice that is not given a start time begins this far ahead on the audio clock, with its start position advanced by
+ * that much (at its tempo) so the sound is where it would have been had it started at once. The lead is what lets the
+ * audio thread prime the stretcher over silent blocks instead of in one burst inside a block that is also rendering the
+ * playing song, and lets the start land on an exact frame.
+ */
+const IMMEDIATE_START_LEAD_SEC = 0.1;
 /** The old ScriptProcessor voice's output trailed the position it had read by this much of the track's own time (measured when it was the only voice). Only the fallback needs it. */
 const SCRIPT_PROCESSOR_LAG_SEC = 0.2;
 /** The old voice's first audible output sat this far past where it was told to start (the stretcher's initial skip, less what its buffering took back). Only the fallback needs it. */
@@ -39,6 +46,13 @@ export interface TimeStretchVoice {
    * hand-over can be scheduled instead of landing whenever a message happens to arrive. Calling it again re-seeks.
    */
   setStartFraction(fraction: number, atContextSec?: number): void;
+  /**
+   * The AudioContext time the first sample is (or was) scheduled for, once setStartFraction has been called: the time
+   * it was given, or a short lead from the call when it was given none. Anything that must line up with the voice (a
+   * gain fade, a deck pausing) should be timed from this, not from "now". Null on the fallback voice when it was not
+   * given a time (it starts at once).
+   */
+  readonly startAtContextSec: number | null;
   /** Where in the SOURCE the audio being heard right now comes from, seconds: best estimate, accurate to a few milliseconds on average. */
   getPositionSec(): number;
   /** Releases listeners and disconnects the node — call once the voice is done playing. */
@@ -110,6 +124,7 @@ function createWorkletVoice(
   let currentTempo = exact ? 1 : tempo;
   let report: { source: number; at: number } | null = null;
   let startFrame = 0;
+  let startAt: number | null = null;
   let started = false;
   let stopped = false;
 
@@ -126,14 +141,18 @@ function createWorkletVoice(
     if (stopped) return;
     started = true;
     report = null;
-    startFrame = Math.max(0, Math.min(buffer.length, Math.floor(fraction * buffer.length)));
+    // No time given: start a short lead from now, and advance the start by what the voice would have played in that
+    // lead, so the sound lands where it would have landed had it started at once.
+    const lead = atContextSec == null ? IMMEDIATE_START_LEAD_SEC : 0;
+    startAt = atContextSec ?? ctx.currentTime + lead;
+    startFrame = Math.max(0, Math.min(buffer.length, Math.floor(fraction * buffer.length) + Math.round(lead * rate * currentTempo)));
     const from = Math.max(0, startFrame - LEAD_IN_FRAMES);
     const to = maxSourceSec != null ? Math.min(buffer.length, startFrame + Math.ceil(maxSourceSec * rate)) : buffer.length;
     // Copies (the AudioBuffer keeps its own data), handed over without a second copy.
     const left = buffer.getChannelData(0).slice(from, to);
     const right = buffer.numberOfChannels > 1 ? buffer.getChannelData(1).slice(from, to) : undefined;
     node.port.postMessage(
-      { type: "load", left, right, baseFrame: from, startFrame, exact: !!exact, atFrame: atContextSec != null ? Math.round(atContextSec * ctx.sampleRate) : 0 },
+      { type: "load", left, right, baseFrame: from, startFrame, exact: !!exact, atFrame: Math.round(startAt * ctx.sampleRate) },
       right ? [left.buffer, right.buffer] : [left.buffer]
     );
   };
@@ -153,6 +172,9 @@ function createWorkletVoice(
       node.port.postMessage({ type: "pitch", semitones });
     },
     setStartFraction: start,
+    get startAtContextSec() {
+      return startAt;
+    },
     getPositionSec: () => {
       if (!report) return startFrame / rate;
       // The audio thread reports every ~10 ms; carry the last report forward to now at the current tempo.
@@ -181,19 +203,30 @@ function createScriptProcessorVoice(
   const shifter = new PitchShifter(ctx, buffer, FALLBACK_BUFFER_SIZE, onEnd);
   shifter.tempo = tempo;
   shifter.pitchSemitones = pitchSemitones;
+  let currentTempo = tempo; // PitchShifter has no getter for it
+  let scheduledAt: number | null = null;
 
   return {
     node: shifter.node,
     setTempo: (t) => {
+      currentTempo = t;
       shifter.tempo = t;
     },
     setPitchSemitones: (s) => {
       shifter.pitchSemitones = s;
     },
-    // No scheduled starts on this voice: it begins whenever its first callback runs. Its first audible sample sat a
-    // little past the start it was given; lead it by that so the sound lands where was asked.
-    setStartFraction: (fraction) => {
-      shifter.percentagePlayed = fraction + SCRIPT_PROCESSOR_START_LEAD_SEC / buffer.duration;
+    // This voice cannot hold back: it begins whenever its first callback runs. To be at the wanted spot when the audio
+    // clock reaches a scheduled time it starts earlier in the source by the wait (at the tempo it runs at), silent
+    // meanwhile because the caller's gain is scheduled from that time. Its first audible sample also sat a little
+    // past the start it was given; lead it by that so the sound lands where was asked.
+    setStartFraction: (fraction, atContextSec) => {
+      scheduledAt = atContextSec ?? null;
+      const wait = atContextSec == null ? 0 : Math.max(0, atContextSec - ctx.currentTime);
+      const startSec = Math.max(0, fraction * buffer.duration - wait * currentTempo + SCRIPT_PROCESSOR_START_LEAD_SEC);
+      shifter.percentagePlayed = Math.min(1, startSec / buffer.duration);
+    },
+    get startAtContextSec() {
+      return scheduledAt;
     },
     getPositionSec: () => shifter.timePlayed - SCRIPT_PROCESSOR_LAG_SEC,
     stop: () => {
