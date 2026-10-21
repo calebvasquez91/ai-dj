@@ -235,6 +235,20 @@ export function songSyncCrossfadeCurves(pointsPerBar = 16): { a: Float32Array; b
 // When an automatic sync starts
 // ---------------------------------------------------------------------------
 
+/** How many of the incoming track's latest phase readings are averaged: one reading jitters by about +-3 ms (the media clock is read in steps), the mean of this many by well under 1 ms. */
+export const PHASE_READINGS_AVERAGED = 6;
+
+/** The latest phase readings with a new one added, oldest dropped. */
+export function addPhaseReading(readings: readonly number[], reading: number, keep = PHASE_READINGS_AVERAGED): number[] {
+  return [...readings, reading].slice(-keep);
+}
+
+/** The phase error to act on: the mean of the readings, once there are enough of them to trust (null until then). */
+export function averagedPhaseError(readings: readonly number[], needed = PHASE_READINGS_AVERAGED): number | null {
+  if (readings.length < needed) return null;
+  return readings.reduce((sum, r) => sum + r, 0) / readings.length;
+}
+
 /** The moment A must be fully out by: the end of the file, never past the engine's active-play cap. */
 export function songSyncMixOutSec(durationSec: number): number {
   return Math.min(durationSec, MAX_ACTIVE_PLAY_SEC);

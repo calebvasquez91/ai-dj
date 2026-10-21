@@ -9,8 +9,9 @@
  * two tracks lock to within PHASE_LOCK_MAX_MS; E the crossfade plays without buffering or unexpected seeks and the
  * next track takes over.
  *
- * The thresholds are the spec's, not tuned to pass: PHASE_LOCK_MAX_MS = 10 is tighter than the app has measured on
- * real songs (-12 to +3 ms), so a lock a little over it fails here and says so.
+ * The thresholds are the spec's, not tuned to pass: PHASE_LOCK_MAX_MS = 10. The player's own lock loop moves the
+ * incoming track whenever its averaged phase error passes SONG_SYNC_PHASE_TOLERANCE_SEC (5 ms, in DualDeckStage), so a
+ * lock over 10 ms here means that loop never got to correct it, not that such a lock is normal.
  */
 
 import { isPhraseGridTrustworthy, type SongMap } from "@/lib/song-map";
