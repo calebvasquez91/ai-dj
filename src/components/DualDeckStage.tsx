@@ -51,6 +51,8 @@ import { SONG_SYNC_ENABLED, STEM_FEATURES_ENABLED, VOCAL_MASHUP_ENABLED } from "
 import { TRANSITION_FX_ENABLED, buildSyncReport } from "@/lib/syncEngine";
 import {
   SONG_SYNC_CROSSFADE_BARS,
+  addPhaseReading,
+  averagedPhaseError,
   beatsUntilMixOut,
   fitMorphToRoom,
   initialSongSyncStatus,
@@ -215,9 +217,9 @@ const SONG_SYNC_VOICE_SLACK_BARS = 2;
 /** The incoming track pre-rolls silently for this many bars of the playing one (at least the minimum) before the crossfade: long enough to measure its phase and nudge it into place. */
 const SONG_SYNC_PREROLL_BARS = 3;
 const SONG_SYNC_MIN_PREROLL_SEC = 3;
-/** Phase error, seconds, under which the incoming track counts as lined up; over the nudge threshold it is moved. */
-const SONG_SYNC_LOCK_TOLERANCE_SEC = 0.02;
-const SONG_SYNC_NUDGE_THRESHOLD_SEC = 0.02;
+/** Phase error, seconds (averaged over the latest readings), under which the incoming track counts as lined up; over the nudge threshold it is moved. Both sit well inside the test suite's 10 ms limit: with the old 20 ms a start error of 11-13 ms was never corrected. */
+const SONG_SYNC_LOCK_TOLERANCE_SEC = 0.008;
+const SONG_SYNC_NUDGE_THRESHOLD_SEC = 0.005;
 const SONG_SYNC_NUDGE_COOLDOWN_MS = 400;
 /** Consecutive in-tolerance ticks that make the phase "locked". */
 const SONG_SYNC_LOCK_STREAK = 4;
@@ -264,6 +266,8 @@ interface ActiveSongSync {
   bPlayFailures: number;
   lockedStreak: number;
   lastNudgeMs: number;
+  /** The incoming deck's latest raw phase readings, seconds; cleared whenever it is moved. */
+  phaseReadings: number[];
   extensions: number;
   crossfadeScheduled: boolean;
   crossfadeStartMs: number;
@@ -2657,6 +2661,7 @@ export function DualDeckStage() {
           bPlayFailures: 0,
           lockedStreak: 0,
           lastNudgeMs: 0,
+          phaseReadings: [],
           extensions: 0,
           crossfadeScheduled: false,
           crossfadeStartMs: 0,
@@ -2801,14 +2806,20 @@ export function DualDeckStage() {
         });
       }
       if (s.bPlaying && !s.crossfadeScheduled && toEl && expected != null && !toEl.paused && !toEl.seeking && toEl.readyState >= 2) {
-        const err = toEl.currentTime - expected;
-        errorMs = err * 1000;
-        if (Math.abs(err) <= SONG_SYNC_LOCK_TOLERANCE_SEC) s.lockedStreak += 1;
-        else s.lockedStreak = 0;
-        if (Math.abs(err) > SONG_SYNC_NUDGE_THRESHOLD_SEC && nowMs - s.lastNudgeMs > SONG_SYNC_NUDGE_COOLDOWN_MS && untilCrossfadeSec > 0.4) {
-          toEl.currentTime = Math.max(0, toEl.currentTime - err);
-          s.lastNudgeMs = nowMs;
-          s.lockedStreak = 0;
+        // One reading jitters by a few ms, so the phase is the mean of the latest few; it is judged, and shown, once there are enough.
+        const reading = toEl.currentTime - expected;
+        s.phaseReadings = addPhaseReading(s.phaseReadings, reading);
+        const err = averagedPhaseError(s.phaseReadings);
+        if (err != null) {
+          errorMs = err * 1000;
+          if (Math.abs(err) <= SONG_SYNC_LOCK_TOLERANCE_SEC) s.lockedStreak += 1;
+          else s.lockedStreak = 0;
+          if (Math.abs(err) > SONG_SYNC_NUDGE_THRESHOLD_SEC && nowMs - s.lastNudgeMs > SONG_SYNC_NUDGE_COOLDOWN_MS && untilCrossfadeSec > 0.4) {
+            toEl.currentTime = Math.max(0, toEl.currentTime - err);
+            s.lastNudgeMs = nowMs;
+            s.lockedStreak = 0;
+            s.phaseReadings = [];
+          }
         }
       }
       const locked = s.lockedStreak >= SONG_SYNC_LOCK_STREAK;
@@ -2834,6 +2845,7 @@ export function DualDeckStage() {
         } else {
           s.extensions += 1;
           s.lockedStreak = 0;
+          s.phaseReadings = []; // the target moves a bar: readings against the old one no longer count
           if (s.tXfWallMs != null) s.tXfWallMs += barRealSec * 1000;
         }
       }

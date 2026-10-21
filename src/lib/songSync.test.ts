@@ -5,6 +5,9 @@ import {
   SONG_SYNC_MAX_PITCH_SEMITONES,
   SONG_SYNC_MAX_RATE_DELTA,
   SONG_SYNC_MIN_MORPH_BARS,
+  PHASE_READINGS_AVERAGED,
+  addPhaseReading,
+  averagedPhaseError,
   beatsUntilMixOut,
   describeSongSyncBpmRow,
   describeSongSyncHeadline,
@@ -393,5 +396,28 @@ describe("what the DJ board says", () => {
     expect(s.pitchNow).toBe(0);
     expect(s.phaseErrorMs).toBeNull();
     expect(s.listenerNote).toBeNull();
+  });
+});
+
+describe("phase readings", () => {
+  it("keeps only the latest few readings", () => {
+    let readings: number[] = [];
+    for (let i = 1; i <= PHASE_READINGS_AVERAGED + 3; i++) readings = addPhaseReading(readings, i);
+    expect(readings).toHaveLength(PHASE_READINGS_AVERAGED);
+    expect(readings[readings.length - 1]).toBe(PHASE_READINGS_AVERAGED + 3);
+    expect(readings[0]).toBe(4);
+  });
+
+  it("does not hand back an average until it has enough readings", () => {
+    expect(averagedPhaseError([])).toBeNull();
+    expect(averagedPhaseError([0.01, 0.01, 0.01])).toBeNull();
+  });
+
+  it("averages jittery readings down to their centre", () => {
+    const jitter = [-0.0112, -0.0098, -0.0141, -0.0083, -0.0127, -0.0099];
+    const mean = averagedPhaseError(jitter) as number;
+    expect(mean).toBeCloseTo(-0.01100, 4);
+    // each reading is off by up to 3 ms from the centre, the mean by far less
+    expect(Math.max(...jitter.map((j) => Math.abs(j - mean)))).toBeGreaterThan(0.002);
   });
 });
