@@ -217,9 +217,10 @@ const SONG_SYNC_VOICE_SLACK_BARS = 2;
 /** The incoming track pre-rolls silently for this many bars of the playing one (at least the minimum) before the crossfade: long enough to measure its phase and nudge it into place. */
 const SONG_SYNC_PREROLL_BARS = 3;
 const SONG_SYNC_MIN_PREROLL_SEC = 3;
-/** Phase error, seconds (averaged over the latest readings), under which the incoming track counts as lined up; over the nudge threshold it is moved. Both sit well inside the test suite's 10 ms limit: with the old 20 ms a start error of 11-13 ms was never corrected. */
-const SONG_SYNC_LOCK_TOLERANCE_SEC = 0.008;
-const SONG_SYNC_NUDGE_THRESHOLD_SEC = 0.005;
+/** Phase error, seconds (averaged over the latest readings), under which the incoming track counts as lined up and over which it is moved: one limit, so nothing is both "locked" and due a nudge. Well inside the sync test's 10 ms limit; the old 20 ms never corrected a start error of 11-13 ms. */
+const SONG_SYNC_PHASE_TOLERANCE_SEC = 0.005;
+/** A single reading this far off is no jitter (readings scatter by about 3 ms): the incoming track is moved at once instead of waiting for the average. */
+const SONG_SYNC_GROSS_PHASE_SEC = 0.02;
 const SONG_SYNC_NUDGE_COOLDOWN_MS = 400;
 /** Consecutive in-tolerance ticks that make the phase "locked". */
 const SONG_SYNC_LOCK_STREAK = 4;
@@ -2806,15 +2807,18 @@ export function DualDeckStage() {
         });
       }
       if (s.bPlaying && !s.crossfadeScheduled && toEl && expected != null && !toEl.paused && !toEl.seeking && toEl.readyState >= 2) {
-        // One reading jitters by a few ms, so the phase is the mean of the latest few; it is judged, and shown, once there are enough.
+        // One reading jitters by a few ms, so the phase is the mean of the latest few; it is judged, and shown, once there are
+        // enough. A reading far past the jitter is acted on at once: averaging would only delay moving a track that is plainly off.
         const reading = toEl.currentTime - expected;
         s.phaseReadings = addPhaseReading(s.phaseReadings, reading);
-        const err = averagedPhaseError(s.phaseReadings);
+        const gross = Math.abs(reading) > SONG_SYNC_GROSS_PHASE_SEC;
+        const err = gross ? reading : averagedPhaseError(s.phaseReadings);
         if (err != null) {
           errorMs = err * 1000;
-          if (Math.abs(err) <= SONG_SYNC_LOCK_TOLERANCE_SEC) s.lockedStreak += 1;
+          const inTolerance = Math.abs(err) <= SONG_SYNC_PHASE_TOLERANCE_SEC;
+          if (inTolerance) s.lockedStreak += 1;
           else s.lockedStreak = 0;
-          if (Math.abs(err) > SONG_SYNC_NUDGE_THRESHOLD_SEC && nowMs - s.lastNudgeMs > SONG_SYNC_NUDGE_COOLDOWN_MS && untilCrossfadeSec > 0.4) {
+          if (!inTolerance && nowMs - s.lastNudgeMs > SONG_SYNC_NUDGE_COOLDOWN_MS && untilCrossfadeSec > 0.4) {
             toEl.currentTime = Math.max(0, toEl.currentTime - err);
             s.lastNudgeMs = nowMs;
             s.lockedStreak = 0;
