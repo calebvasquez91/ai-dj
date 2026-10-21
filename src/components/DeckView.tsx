@@ -533,11 +533,11 @@ export function DeckView() {
 
   return (
     <>
-      <div className="fixed inset-0 z-40 bg-black/50" onClick={toggle} aria-hidden="true" />
-      {/* max-h is "everything above the player bar, minus a margin" (bottom-32 /
-          md:bottom-24 + 1rem top), not a flat 70vh — 70vh + the bottom offset
-          overshoots short screens and pushes the title bar off the top. */}
-      <div className="fixed inset-x-4 bottom-32 md:bottom-24 z-50 mx-auto max-w-3xl max-h-[calc(100dvh-9rem)] md:max-h-[calc(100dvh-7rem)] overflow-y-auto overscroll-contain rounded-2xl bg-surface/95 backdrop-blur-xl p-4 flex flex-col gap-3 shadow-elevate-lg">
+      <div className="fixed inset-x-0 top-0 bottom-[var(--player-bar-h)] z-40 bg-black/50" onClick={toggle} aria-hidden="true" />
+      {/* max-h is "the space between the top bar and the lane Que owns above the player bar, minus a margin", not a
+          flat 70vh — 70vh + the bottom offset overshoots short screens and pushes the title bar off the top. The bar's
+          real height (it wraps on a phone) and Que's lane come from --player-bar-h / --chrome-bottom. */}
+      <div className="fixed left-[max(1rem,env(safe-area-inset-left))] right-[max(1rem,env(safe-area-inset-right))] bottom-[calc(var(--chrome-bottom)+0.5rem)] z-50 mx-auto max-w-3xl max-h-[calc(100dvh-var(--chrome-bottom)-var(--topbar-h)-1rem)] overflow-y-auto overscroll-contain rounded-2xl bg-surface/95 backdrop-blur-xl p-4 flex flex-col gap-3 shadow-elevate-lg">
         <div className="flex flex-wrap items-center justify-between gap-2">
           <h2 className="text-sm heading">DJ Decks</h2>
           <div className="flex flex-wrap items-center gap-3">

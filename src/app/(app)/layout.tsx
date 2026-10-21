@@ -10,6 +10,7 @@ import { SpookyBackdrop } from "@/components/SpookyBackdrop";
 import { Sidebar } from "@/components/Sidebar";
 import { TopBar } from "@/components/TopBar";
 import { PlayerBar } from "@/components/PlayerBar";
+import { QueDock } from "@/components/QueDock";
 import { NowPlayingView } from "@/components/NowPlayingView";
 import { QueuePanel } from "@/components/QueuePanel";
 import { DeckView } from "@/components/DeckView";
@@ -37,10 +38,11 @@ export default async function AppLayout({ children }: { children: React.ReactNod
               becomes horizontally scrollable too, which is how one
               too-wide child made whole pages slide sideways. Page
               content is built to fit; this is the backstop. */}
-          <main className="flex-1 overflow-y-auto overflow-x-hidden">{children}</main>
+          <main className="flex-1 overflow-y-auto overflow-x-hidden pb-[var(--que-lane-h)]">{children}</main>
         </div>
       </div>
       <PlayerBar />
+      <QueDock />
       <NowPlayingView />
       <QueuePanel />
       <DeckView />

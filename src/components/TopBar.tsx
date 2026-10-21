@@ -12,7 +12,9 @@ import {
   type SearchGroup,
 } from "@/lib/search";
 import { formatTime } from "@/lib/format";
-import { CloseIcon, LibraryIcon, PlayIcon, QueueIcon } from "@/components/Icons";
+import { CloseIcon, LibraryIcon, MenuIcon, PlayIcon, QueueIcon } from "@/components/Icons";
+import { useIsDesktop } from "@/lib/useIsDesktop";
+import { sidebarShowing, toggledSidebarChoice } from "@/lib/viewport";
 import { TrackThumbnail } from "@/components/TrackThumbnail";
 import type { FxSound, Playlist, Track } from "@/types/music";
 
@@ -174,7 +176,7 @@ function SyncErrorToast() {
   return createPortal(
     <div
       role="alert"
-      className="fixed right-4 top-[4.5rem] z-[70] w-[min(24rem,calc(100vw-2rem))] flex items-start gap-3 rounded-xl bg-surface shadow-elevate-md border border-accent-pink/40 px-4 py-3 text-sm"
+      className="fixed right-[max(1rem,env(safe-area-inset-right))] top-[calc(var(--topbar-h)+0.5rem)] z-[70] w-[min(24rem,calc(100vw-2rem))] flex items-start gap-3 rounded-xl bg-surface shadow-elevate-md border border-accent-pink/40 px-4 py-3 text-sm"
     >
       <p className="flex-1 min-w-0 break-words text-accent-pink">{message}</p>
       <button type="button" onClick={clear} aria-label="Dismiss" className="btn-icon text-muted shrink-0">
@@ -193,6 +195,7 @@ export function TopBar() {
   const setQuery = useStore((s) => s.setSearchQuery);
   const sidebarOpen = useStore((s) => s.sidebarOpen);
   const setSidebarOpen = useStore((s) => s.setSidebarOpen);
+  const desktop = useIsDesktop();
   const playTrackList = useStore((s) => s.playTrackList);
   const localLibrary = useStore((s) => s.localLibrary);
   const playlists = useStore((s) => s.playlists);
@@ -423,14 +426,17 @@ export function TopBar() {
   const activeId = showPanel && rows.length > 0 ? `${listId}-${safeActive}` : undefined;
 
   return (
-    <header className="h-16 shrink-0 flex items-center gap-4 px-4 sm:px-6 shadow-elevate-md surface-glass">
+    <header className="h-[var(--topbar-h)] shrink-0 flex items-center gap-3 sm:gap-4 pt-[env(safe-area-inset-top)] pl-[max(1rem,env(safe-area-inset-left))] pr-[max(1rem,env(safe-area-inset-right))] sm:pl-[max(1.5rem,env(safe-area-inset-left))] sm:pr-[max(1.5rem,env(safe-area-inset-right))] shadow-elevate-md surface-glass">
       <button
         type="button"
-        onClick={() => setSidebarOpen(!sidebarOpen)}
-        className="btn-icon md:hidden text-accent-purple hover:text-accent-pink text-xl leading-none"
-        title="Toggle menu"
+        onClick={() => setSidebarOpen(toggledSidebarChoice(sidebarOpen, desktop))}
+        className="btn-icon shrink-0 text-accent-purple hover:text-accent-pink"
+        aria-label={sidebarShowing(sidebarOpen, desktop) ? "Close side panel" : "Open side panel"}
+        aria-expanded={sidebarShowing(sidebarOpen, desktop)}
+        aria-controls="app-sidebar"
+        title="Show or hide the side panel"
       >
-        ☰
+        <MenuIcon size={22} />
       </button>
       <div ref={wrapRef} className="flex-1 min-w-0 max-w-xl mx-auto relative">
         <span className="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 text-muted text-sm">

@@ -1,11 +1,11 @@
 "use client";
 
+import { useEffect, useRef } from "react";
 import { useStore } from "@/lib/store";
 import { formatTime } from "@/lib/format";
 import { DualDeckStage } from "@/components/DualDeckStage";
 import { YouTubeDeckStage } from "@/components/YouTubeDeckStage";
 import { TrackThumbnail } from "@/components/TrackThumbnail";
-import { Que } from "@/components/Que";
 import { genreFamilies } from "@/data/styles";
 import type { DjSetMode } from "@/lib/mix-engine";
 import { DecksIcon, MixerIcon, NextIcon, PauseIcon, PlayIcon, PreviousIcon, QueueIcon } from "@/components/Icons";
@@ -52,6 +52,23 @@ export function PlayerBar() {
   const nowPlayingExpanded = useStore((s) => s.nowPlayingExpanded);
   const setNowPlayingExpanded = useStore((s) => s.setNowPlayingExpanded);
 
+  // Publishes the bar's real height (it wraps to more rows on a narrow phone) so the overlays and Que's dock can be sized
+  // to stop at its top edge: --player-bar-h in globals.css.
+  const barRef = useRef<HTMLElement>(null);
+  useEffect(() => {
+    const el = barRef.current;
+    if (!el) return;
+    const root = document.documentElement;
+    const publish = () => root.style.setProperty("--player-bar-h", `${el.offsetHeight}px`);
+    publish();
+    const observer = new ResizeObserver(publish);
+    observer.observe(el);
+    return () => {
+      observer.disconnect();
+      root.style.removeProperty("--player-bar-h");
+    };
+  }, []);
+
   const durationSec = currentTrack?.durationSec ?? 0;
   const progressPercent =
     durationSec > 0 ? Math.min(100, (currentTimeSec / durationSec) * 100) : 0;
@@ -65,14 +82,10 @@ export function PlayerBar() {
 
   return (
     <footer
+      ref={barRef}
       className="relative min-h-20 shrink-0 shadow-elevate-top surface-glass border-t border-border/10 pt-2 pb-[max(0.5rem,env(safe-area-inset-bottom))] pl-[max(1rem,env(safe-area-inset-left))] pr-[max(1rem,env(safe-area-inset-right))] flex flex-wrap items-center gap-2 lg:gap-4"
       inert={nowPlayingExpanded ? true : undefined}
     >
-      {currentTrack && (
-        <div className="absolute -top-9 left-4 z-10">
-          <Que />
-        </div>
-      )}
       <div className="flex items-center gap-3 w-28 sm:w-48 lg:w-64 min-w-0 shrink-0">
         {currentTrack ? (
           <>
@@ -160,7 +173,7 @@ export function PlayerBar() {
       </div>
 
       {/* Own row below 850px: between ~768 and ~815px the transport column is narrower than its own buttons and Next would sit on top of FX. */}
-      <div className="flex flex-wrap items-center gap-x-1 gap-y-1 sm:gap-x-2 justify-between min-[850px]:justify-end w-full min-[850px]:w-auto shrink-0">
+      <div className="flex flex-wrap items-center gap-x-1 gap-y-1 sm:gap-x-2 justify-between min-[850px]:justify-end short-landscape:justify-end w-full min-[850px]:w-auto short-landscape:w-auto shrink-0">
         <button
           type="button"
           onClick={() => requestFx()}

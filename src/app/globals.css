@@ -1,5 +1,8 @@
 @import "tailwindcss";
 
+/* A phone held sideways: short, but wide enough that the player bar fits on one row (it needs about 780px). */
+@custom-variant short-landscape (@media (max-height: 480px) and (orientation: landscape) and (min-width: 780px));
+
 :root {
   --background: #f3edff;
   --surface: #ffffff;
@@ -64,6 +67,58 @@
   --font-retro: var(--font-retro);
 }
 
+/* ---- Layout metrics shared by the shell and every overlay ----
+   The top bar grows by the notch/status-bar inset; the player bar's real height is published at runtime by
+   PlayerBar (it wraps to more rows on a narrow phone) and Que's dock publishes the lane he owns above it. Overlays
+   (side drawer, deck/mixer sheets, queue) are sized from these so none of them can cover the player bar or Que. */
+:root {
+  --topbar-h: calc(4rem + env(safe-area-inset-top, 0px));
+  --player-bar-h: 5rem;
+  --que-lane-h: 0px;
+  --chrome-bottom: calc(var(--player-bar-h) + var(--que-lane-h));
+}
+
+/* A phone held sideways is short: a slimmer top bar leaves room for the page. */
+@media (max-height: 480px) and (orientation: landscape) {
+  :root {
+    --topbar-h: calc(3rem + env(safe-area-inset-top, 0px));
+  }
+}
+
+/* ---- Phone and tablet hardening (iOS Safari, iPadOS, Android Chrome) ---- */
+html {
+  /* iOS inflates text in landscape unless told not to. */
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+  -webkit-tap-highlight-color: transparent;
+}
+
+button,
+a,
+input,
+select,
+textarea,
+summary,
+[role="button"] {
+  /* No double-tap-to-zoom delay on controls. */
+  touch-action: manipulation;
+}
+
+@media (pointer: coarse) {
+  /* iOS Safari zooms the whole page when a field under 16px takes focus, and doesn't zoom back: keep fields at 16px+. */
+  input:not([type="range"], [type="checkbox"], [type="radio"], [type="file"]),
+  select,
+  textarea {
+    font-size: max(16px, 1em);
+  }
+
+  /* Fingers need a bigger target than a cursor does. */
+  .btn-icon {
+    min-width: 2.5rem;
+    min-height: 2.5rem;
+  }
+}
+
 body {
   background-color: var(--background);
   background-image: radial-gradient(
@@ -84,6 +139,8 @@ body {
   background-attachment: fixed;
   color: var(--foreground);
   font-family: var(--font-sans), Arial, Helvetica, sans-serif;
+  /* No rubber-band bounce revealing the background behind the fixed shell. */
+  overscroll-behavior: none;
 }
 
 * {
