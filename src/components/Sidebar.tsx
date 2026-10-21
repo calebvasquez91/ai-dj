@@ -1,9 +1,12 @@
 "use client";
 
+import { useEffect } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useSession, signOut } from "next-auth/react";
 import { useStore } from "@/lib/store";
+import { useIsDesktop } from "@/lib/useIsDesktop";
+import { isDesktopViewport, sidebarShowing } from "@/lib/viewport";
 import { ThemeToggle } from "@/components/ThemeToggle";
 import { HomeIcon, LibraryIcon, SparklesIcon } from "@/components/Icons";
 import type { ComponentType } from "react";
@@ -48,31 +51,50 @@ export function Sidebar() {
   const createPlaylist = useStore((s) => s.createPlaylist);
   const sidebarOpen = useStore((s) => s.sidebarOpen);
   const setSidebarOpen = useStore((s) => s.setSidebarOpen);
+  const desktop = useIsDesktop();
 
+  // On a phone the panel is a drawer that covers the page, so picking something closes it (back to "no choice", so a
+  // rotation to a wider layout still opens it by default); on desktop it sits beside the page and stays as left.
   function closeOnMobile() {
-    setSidebarOpen(false);
+    if (!isDesktopViewport()) setSidebarOpen(null);
   }
 
   async function handleCreatePlaylist() {
     const id = await createPlaylist();
     if (!id) return;
-    setSidebarOpen(false);
+    closeOnMobile();
     router.push(`/playlist?id=${id}`);
   }
 
+  // Escape closes the drawer, as it does the other overlays.
+  const drawerOpen = sidebarShowing(sidebarOpen, desktop) && !desktop;
+  useEffect(() => {
+    if (!drawerOpen) return;
+    function onKeyDown(e: KeyboardEvent) {
+      if (e.key === "Escape") setSidebarOpen(null);
+    }
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [drawerOpen, setSidebarOpen]);
+
+  // Visibility is decided in CSS from the stored choice, so the first paint is already right: with no choice yet the
+  // panel is hidden below the desktop breakpoint and shown above it; an explicit choice wins on both.
+  const visibility = sidebarOpen === true ? "" : sidebarOpen === false ? "hidden" : "max-md:hidden";
+
   return (
     <>
-      {sidebarOpen && (
+      {/* The drawer and its dimming start below the top bar (so the hamburger that opened it stays on screen to close
+          it) and stop above the player bar and Que's lane (so neither is ever covered). */}
+      {sidebarOpen === true && (
         <div
-          className="fixed inset-0 z-30 bg-black/50 md:hidden"
+          className="fixed inset-x-0 top-[var(--topbar-h)] bottom-[var(--player-bar-h)] z-30 bg-black/50 md:hidden"
           onClick={closeOnMobile}
           aria-hidden="true"
         />
       )}
       <aside
-        className={`fixed top-0 left-0 z-40 max-md:h-dvh w-60 max-w-[85vw] shrink-0 surface-glass border-r border-border/10 shadow-elevate-right flex flex-col gap-4 p-3 overflow-y-auto md:static ${
-          sidebarOpen ? "" : "max-md:hidden"
-        }`}
+        id="app-sidebar"
+        className={`fixed left-0 top-[var(--topbar-h)] bottom-[var(--chrome-bottom)] z-40 w-[min(18rem,85vw)] shrink-0 surface-glass border-r border-border/10 shadow-elevate-right flex flex-col gap-4 py-3 pl-[max(0.75rem,env(safe-area-inset-left))] pr-3 overflow-y-auto overscroll-contain md:static md:top-auto md:bottom-auto md:w-60 ${visibility}`}
       >
         <div className="px-2 py-2 flex flex-col gap-2">
           <span className="text-xl wordmark">AI DJ</span>

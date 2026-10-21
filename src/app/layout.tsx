@@ -43,7 +43,13 @@ export const metadata: Metadata = {
 };
 
 export const viewport: Viewport = {
-  themeColor: "#9333ea",
+  width: "device-width",
+  initialScale: 1,
+  // The browser's own chrome (Android address bar, iOS Safari's tinted status area) follows the app's theme.
+  themeColor: [
+    { media: "(prefers-color-scheme: light)", color: "#9333ea" },
+    { media: "(prefers-color-scheme: dark)", color: "#150f20" },
+  ],
   // Lets the layout extend under a notch/home-indicator; the player bar and
   // overlay panels pad themselves with env(safe-area-inset-*) so nothing
   // important ends up underneath it.

@@ -6,8 +6,10 @@ export const metadata = {
 
 export default function PrivacyPage() {
   return (
-    <div className="min-h-full flex justify-center p-6">
-      <div className="card w-full max-w-2xl p-8 flex flex-col gap-6 my-8">
+    <div className="h-full overflow-y-auto overscroll-contain">
+      {/* The body never scrolls (the app shell is a fixed-height frame), so this page scrolls itself: before, only the first screen of the policy could be read. */}
+      <div className="min-h-full flex justify-center pt-[max(1.5rem,env(safe-area-inset-top))] pb-[max(1.5rem,env(safe-area-inset-bottom))] pl-[max(1.5rem,env(safe-area-inset-left))] pr-[max(1.5rem,env(safe-area-inset-right))]">
+      <div className="card w-full max-w-2xl p-8 max-sm:p-5 flex flex-col gap-6 my-8">
         <div className="flex flex-col gap-2">
           <span className="text-2xl wordmark">AI DJ</span>
           <h1 className="text-2xl heading">Privacy Policy</h1>
@@ -103,6 +105,7 @@ export default function PrivacyPage() {
         <Link href="/login" className="text-sm text-accent-purple hover:text-accent-pink font-medium">
           ← Back to login
         </Link>
+      </div>
       </div>
     </div>
   );

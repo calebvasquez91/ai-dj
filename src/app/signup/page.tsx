@@ -42,8 +42,12 @@ export default function SignupPage() {
   }
 
   return (
-    <div className="min-h-full flex items-center justify-center p-6">
-      <form onSubmit={handleSubmit} className="card w-full max-w-sm p-6 flex flex-col gap-4">
+    <div className="h-full overflow-y-auto overscroll-contain">
+      {/* The body never scrolls (the app shell is a fixed-height frame), so each standalone page scrolls itself. Without
+          this a card taller than the screen (a phone held sideways, the keyboard up, the whole privacy policy) was cut
+          off with no way to reach the rest. m-auto centers the card without clipping its top when it is taller. */}
+      <div className="min-h-full flex pt-[max(1.5rem,env(safe-area-inset-top))] pb-[max(1.5rem,env(safe-area-inset-bottom))] pl-[max(1.5rem,env(safe-area-inset-left))] pr-[max(1.5rem,env(safe-area-inset-right))]">
+      <form onSubmit={handleSubmit} className="card w-full max-w-sm p-6 flex flex-col gap-4 m-auto">
         <div className="flex flex-col gap-2">
           <span className="text-2xl wordmark">AI DJ</span>
           <div className="retro-stripe w-24" />
@@ -100,6 +104,7 @@ export default function SignupPage() {
           Privacy Policy
         </Link>
       </form>
+      </div>
     </div>
   );
 }
