@@ -1,10 +1,8 @@
 import { prisma } from "@/lib/prisma";
 import { PLAYLIST_TRACK_OMIT, toTrackSummary } from "@/lib/trackApi";
+import { SPOOKY_TRACK_TAGS } from "@/lib/spookyTags";
 import type { Playlist } from "@/types/music";
 import type { Track as PrismaTrack } from "@/generated/prisma/client";
-
-/** Any track tagged with one of these (case-insensitive, Track.tagsJson) auto-joins the Spooky Music system playlist, alongside whatever tracks were explicitly added to it. */
-const SPOOKY_TRACK_TAGS = ["halloween", "spooky", "horror", "dark", "eerie"];
 
 function hasSpookyTag(track: Pick<PrismaTrack, "tagsJson">): boolean {
   if (!track.tagsJson) return false;

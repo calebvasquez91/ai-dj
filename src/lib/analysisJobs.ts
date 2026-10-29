@@ -56,6 +56,7 @@ export function pickNextAnalysisJob<T extends JobTrack>({
   inFlightId,
   ahead = ANALYSIS_LOOKAHEAD,
   scanLimit = SCAN_LIMIT,
+  requested = [],
 }: {
   currentTrack: T | null | undefined;
   queue: T[];
@@ -64,6 +65,8 @@ export function pickNextAnalysisJob<T extends JobTrack>({
   inFlightId: string | null;
   ahead?: number;
   scanLimit?: number;
+  /** Tracks someone asked to have analysed ahead of time (a track just added to a playlist from Add Music). They get a turn only after the window above is done, and only a fresh analysis, never an upgrade. */
+  requested?: T[];
 }): NextAnalysisJob<T> | null {
   if (inFlightId != null) return null;
 
@@ -81,6 +84,9 @@ export function pickNextAnalysisJob<T extends JobTrack>({
     const existing = trackAnalysis[track.id];
     if (!existing) return { track, kind: "fresh" };
     if (existing.songMap === undefined) return { track, kind: "upgrade" };
+  }
+  for (const track of requested) {
+    if (track.source === "local" && !trackAnalysis[track.id]) return { track, kind: "fresh" };
   }
   return null;
 }

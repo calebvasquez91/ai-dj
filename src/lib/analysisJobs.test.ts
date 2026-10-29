@@ -66,6 +66,22 @@ describe("pickNextAnalysisJob", () => {
     expect(pick({ queue, trackAnalysis: { now: done }, scanLimit: 1000 })?.track.id).toBe("far");
   });
 
+  it("works through requested tracks only once the playing window is done, fresh only", () => {
+    expect(pick({ queue: [local("a")], requested: [local("added")] })).toEqual({ track: local("now"), kind: "fresh" });
+    const windowDone = { now: done, a: done };
+    expect(pick({ queue: [local("a")], trackAnalysis: windowDone, requested: [local("added")] })).toEqual({
+      track: local("added"),
+      kind: "fresh",
+    });
+    // already analysed (even without a song map): not upgraded, since nobody is waiting on it
+    expect(pick({ queue: [local("a")], trackAnalysis: { ...windowDone, added: noMap }, requested: [local("added")] })).toBeNull();
+  });
+
+  it("skips requested YouTube tracks", () => {
+    expect(pick({ trackAnalysis: { now: done }, requested: [yt("v"), local("added")] })).toEqual({ track: local("added"), kind: "fresh" });
+    expect(pick({ trackAnalysis: { now: done }, requested: [yt("v")] })).toBeNull();
+  });
+
   it("handles nothing playing and an empty queue", () => {
     expect(pick({ currentTrack: null, queue: [local("a")] })?.track.id).toBe("a");
     expect(pick({ currentTrack: null, queue: [] })).toBeNull();

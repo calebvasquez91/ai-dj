@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { HALLOWEEN_AFFINITY, hasHalloweenAffinity, withHalloweenAffinity } from "./fxAffinity";
+import { HALLOWEEN_AFFINITY, getEligibleFX, hasHalloweenAffinity, withHalloweenAffinity } from "./fxAffinity";
 
 describe("hasHalloweenAffinity", () => {
   it("is true for either Halloween tag, any case", () => {
@@ -30,5 +30,37 @@ describe("withHalloweenAffinity", () => {
     const input = ["chill"];
     withHalloweenAffinity(input);
     expect(input).toEqual(["chill"]);
+  });
+});
+
+describe("getEligibleFX", () => {
+  const make = (id: string, tags: string[], playlistAffinity: string[]) =>
+    ({ id, name: id, tags, playlistAffinity }) as unknown as import("@/types/music").FxSound;
+  const library = [
+    make("by-tag", ["Halloween"], []),
+    make("by-affinity-spooky", [], ["Spooky"]),
+    make("by-affinity-halloween", [], ["halloween"]),
+    make("plain", ["riser"], ["club"]),
+    make("untagged", [], []),
+  ];
+
+  it("in Spooky Music offers only the Halloween sounds", () => {
+    expect(getEligibleFX(library, true).map((fx) => fx.id)).toEqual(["by-tag", "by-affinity-spooky", "by-affinity-halloween"]);
+  });
+
+  it("anywhere else offers everything except the Halloween sounds", () => {
+    expect(getEligibleFX(library, false).map((fx) => fx.id)).toEqual(["plain", "untagged"]);
+  });
+
+  it("never offers a sound in both modes", () => {
+    const spooky = getEligibleFX(library, true).map((fx) => fx.id);
+    const other = getEligibleFX(library, false).map((fx) => fx.id);
+    expect(spooky.filter((id) => other.includes(id))).toEqual([]);
+    expect(spooky.length + other.length).toBe(library.length);
+  });
+
+  it("handles an empty library", () => {
+    expect(getEligibleFX([], true)).toEqual([]);
+    expect(getEligibleFX([], false)).toEqual([]);
   });
 });

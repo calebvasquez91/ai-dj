@@ -14,6 +14,7 @@ import {
 import { formatTime } from "@/lib/format";
 import { CloseIcon, LibraryIcon, PlayIcon, QueueIcon } from "@/components/Icons";
 import { TrackThumbnail } from "@/components/TrackThumbnail";
+import { getEligibleFX } from "@/lib/fxAffinity";
 import type { FxSound, Playlist, Track } from "@/types/music";
 
 /**
@@ -197,6 +198,7 @@ export function TopBar() {
   const localLibrary = useStore((s) => s.localLibrary);
   const playlists = useStore((s) => s.playlists);
   const fxLibrary = useStore((s) => s.fxLibrary);
+  const spookyActive = useStore((s) => s.activePlaylistTheme === "spooky");
   const libraryLoaded = useStore((s) => s.libraryLoaded);
 
   const inputRef = useRef<HTMLInputElement>(null);
@@ -259,8 +261,9 @@ export function TopBar() {
   // keystroke instead of delaying it.
   const deferredQuery = useDeferredValue(query);
   const groups = useMemo(
-    () => searchAll({ tracks: localLibrary, playlists, fx: fxLibrary }, deferredQuery),
-    [localLibrary, playlists, fxLibrary, deferredQuery]
+    // FX results are auditions, so they follow the same rule as every other FX path (getEligibleFX).
+    () => searchAll({ tracks: localLibrary, playlists, fx: getEligibleFX(fxLibrary, spookyActive) }, deferredQuery),
+    [localLibrary, playlists, fxLibrary, spookyActive, deferredQuery]
   );
   const { rows, headerAt } = useMemo(() => buildRows(groups), [groups]);
   const hasQuery = deferredQuery.trim().length > 0;
