@@ -48,6 +48,7 @@ import { LOOKUP_LOOKAHEAD, reachableTracks } from "@/lib/lookahead";
 import { withTimeout } from "@/lib/withTimeout";
 import { voiceCutoffSec, voiceMapFromStem } from "@/lib/voiceMap";
 import { SONG_SYNC_ENABLED, STEM_FEATURES_ENABLED, VOCAL_MASHUP_ENABLED } from "@/lib/featureFlags";
+import { MUTED_GAIN, isStuckMuted, shouldResumeContext } from "@/lib/backgroundAudio";
 import { TRANSITION_FX_ENABLED, buildSyncReport } from "@/lib/syncEngine";
 import {
   SONG_SYNC_CROSSFADE_BARS,
@@ -233,6 +234,10 @@ const SONG_SYNC_MAX_PLAY_FAILURES = 3;
 const SONG_SYNC_DECODE_TIMEOUT_MS = 8000;
 /** How long "DONE" stays on the board after the hand-over. */
 const SONG_SYNC_DONE_LINGER_MS = 2500;
+/** The audio context was stopped for longer than this (a locked screen, a call) while a Song Sync morph was under way: the morph is timed against both the wall clock and the audio clock, which no longer agree, so it is dropped and the playing track simply carries on. */
+const AUDIO_GAP_ABANDON_MS = 1500;
+/** The 500ms tick not running for this long means the page itself was frozen (a locked iPhone): the audio clock and the wall clock have drifted apart the same way. */
+const TIMER_STARVED_MS = 2500;
 /** After a morph or crossfade, the Halloween loop waits this long before it comes back (the new track "fully playing"). */
 const AMBIENT_RESUME_SETTLE_MS = 1500;
 
@@ -1004,6 +1009,12 @@ export function DualDeckStage() {
         window.AudioContext ||
         (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
       const ctx = new AudioContextCtor();
+      // The OS suspends the context when the screen locks, a call comes in or the app is backgrounded ("interrupted" on
+      // iOS). The app's own state still says "playing" and nothing used to start it again, so the sound stayed gone:
+      // wake it as soon as it stops, and again on every touch, return to the page and tick (wakeAudioContext below).
+      ctx.addEventListener("statechange", () => {
+        if (shouldResumeContext(ctx.state, useStore.getState().isPlaying)) ctx.resume().catch(() => {});
+      });
       // Load the tempo/pitch stretcher worklet now so voices created later (synchronously) can use it; if it is
       // unavailable they fall back to the main-thread voice.
       void preloadTimeStretch(ctx);
@@ -1956,6 +1967,12 @@ export function DualDeckStage() {
           if (toDeckEl) {
             toDeckEl.playbackRate = t.tempoRatioStart + (1 - t.tempoRatioStart) * progress;
           }
+        }
+        // A browser that refused to start the incoming deck (a backgrounded page) is asked again each tick, so the
+        // crossfade never ends on a deck that is fading in but not playing.
+        if (progress < 1 && useStore.getState().isPlaying) {
+          const incoming = deckEl(t.toDeckId);
+          if (incoming && incoming.paused && incoming.src) incoming.play().catch(() => {});
         }
         if (progress >= 1) {
           if (t.tickIntervalId != null) clearInterval(t.tickIntervalId);
@@ -4080,8 +4097,88 @@ export function DualDeckStage() {
       }
     }
 
+    // ---- Keeping the sound on (lib/backgroundAudio.ts) ----
+    let audioStoppedSinceMs: number | null = null;
+    let lastTickMs = performance.now();
+    let mutedSinceMs: number | null = null;
+
+    /**
+     * Wakes an audio context the OS stopped, and notices how long it was stopped for. After a long gap (or the whole page
+     * being frozen, which is the same thing from the clocks' point of view) a Song Sync morph is dropped: its timing
+     * mixes the wall clock with the audio clock, which stopped while the other carried on.
+     */
+    function wakeAudioContext() {
+      const ctx = audioCtxRef.current;
+      if (!ctx) return;
+      const now = performance.now();
+      const sinceLastCheckMs = now - lastTickMs;
+      lastTickMs = now;
+      if (shouldResumeContext(ctx.state, useStore.getState().isPlaying)) {
+        audioStoppedSinceMs ??= now - Math.min(sinceLastCheckMs, 500);
+        ctx.resume().catch(() => {});
+        return;
+      }
+      const stoppedMs = audioStoppedSinceMs != null ? now - audioStoppedSinceMs : 0;
+      const frozen = sinceLastCheckMs > TIMER_STARVED_MS;
+      audioStoppedSinceMs = null;
+      if ((frozen || stoppedMs > AUDIO_GAP_ABANDON_MS) && songSyncRef.current && !songSyncRef.current.crossfadeScheduled) cancelSongSync();
+    }
+
+    /**
+     * A playing deck whose gain sits at zero while nothing is fading it is a transition whose automation never finished
+     * (for example a crossfade frozen with the audio context): the track "plays" in silence. Lifts it back to full.
+     */
+    function liftStuckMute() {
+      const ctx = audioCtxRef.current;
+      const state = useStore.getState();
+      const nodes = deckNodesRef.current[activeDeckRef.current];
+      const el = deckEl(activeDeckRef.current);
+      const busy =
+        transitionRef.current ||
+        mashupRef.current ||
+        loopRef.current ||
+        backspinRef.current ||
+        tempoRampRef.current ||
+        reverseRef.current ||
+        songSyncRef.current ||
+        songSyncStartingRef.current ||
+        vocalMashupPrepRef.current ||
+        crossSourceFadeTimeoutRef.current != null;
+      const fading =
+        el != null &&
+        Number.isFinite(el.duration) &&
+        (el.currentTime < TRACK_FADE_IN_SEC + 1 || el.duration - el.currentTime < TRACK_FADE_OUT_SEC + 2);
+      if (!ctx || ctx.state !== "running" || !nodes || !el || el.paused || !state.isPlaying || busy || fading || state.currentTrack?.source !== "local") {
+        mutedSinceMs = null;
+        return;
+      }
+      const gain = nodes.gain.gain.value;
+      if (gain >= MUTED_GAIN) {
+        mutedSinceMs = null;
+        return;
+      }
+      const now = performance.now();
+      mutedSinceMs ??= now;
+      if (isStuckMuted({ gain, mutedSinceMs, nowMs: now })) {
+        mutedSinceMs = null;
+        const at = ctx.currentTime;
+        nodes.gain.gain.cancelScheduledValues(at);
+        nodes.gain.gain.setValueAtTime(gain, at);
+        nodes.gain.gain.linearRampToValueAtTime(1, at + 0.3);
+      }
+    }
+
+    // Coming back to the page, or touching it, is the moment a browser that refused to restart the audio will allow it.
+    const onWake = () => wakeAudioContext();
+    document.addEventListener("visibilitychange", onWake);
+    window.addEventListener("pageshow", onWake);
+    window.addEventListener("focus", onWake);
+    window.addEventListener("pointerdown", onWake, true);
+
     const interval = setInterval(() => {
       if (useStore.getState().currentTrack?.source !== "local") return; // owned by YouTubeDeckStage
+      wakeAudioContext();
+      liftStuckMute();
       const activeEl = deckEl(activeDeckRef.current);
       if (activeEl) {
         // Same reasoning as tryAutoTransition's own currentTime read: the
@@ -4240,6 +4337,10 @@ export function DualDeckStage() {
 
     return () => {
       clearInterval(interval);
+      document.removeEventListener("visibilitychange", onWake);
+      window.removeEventListener("pageshow", onWake);
+      window.removeEventListener("focus", onWake);
+      window.removeEventListener("pointerdown", onWake, true);
       unsubscribe();
       if (transitionRef.current?.tickIntervalId != null) {
         clearInterval(transitionRef.current.tickIntervalId);

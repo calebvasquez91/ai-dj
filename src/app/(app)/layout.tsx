@@ -15,6 +15,7 @@ import { QueuePanel } from "@/components/QueuePanel";
 import { DeckView } from "@/components/DeckView";
 import { Mixer } from "@/components/Mixer";
 import { KeyboardShortcuts } from "@/components/KeyboardShortcuts";
+import { BackgroundAudio } from "@/components/BackgroundAudio";
 
 export default async function AppLayout({ children }: { children: React.ReactNode }) {
   const session = await auth();
@@ -27,6 +28,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
       {!STEM_FEATURES_ENABLED && VOCAL_MASHUP_ENABLED && <StemAutopilot scope="mashup-next" />}
       {(STEM_FEATURES_ENABLED || VOCAL_MASHUP_ENABLED) && <VoiceMapLoader />}
       <KeyboardShortcuts />
+      <BackgroundAudio />
       <SpookyBackdrop />
       <MusicWaveBackground />
       <div className="flex flex-1 min-h-0">
