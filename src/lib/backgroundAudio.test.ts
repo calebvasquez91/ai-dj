@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { MUTED_GAIN, STUCK_MUTE_MS, isStuckMuted, mediaPositionState, shouldResumeContext, silentWavDataUri } from "./backgroundAudio";
+import { AUDIO_GAP_ABANDON_MS, MUTED_GAIN, STUCK_MUTE_MS, isStuckMuted, mediaPositionState, shouldResumeContext, silentWavDataUri, wakeVerdict, type WakeInput } from "./backgroundAudio";
 
 describe("shouldResumeContext", () => {
   it("wakes a context that stopped while the app wants sound", () => {
@@ -67,6 +67,62 @@ describe("mediaPositionState", () => {
   it("falls back to normal speed for a bad rate", () => {
     expect(mediaPositionState(200, 5, 0)?.playbackRate).toBe(1);
     expect(mediaPositionState(200, 5, NaN)?.playbackRate).toBe(1);
+  });
+});
+
+describe("wakeVerdict", () => {
+  const healthy: WakeInput = {
+    contextState: "running",
+    wantPlaying: true,
+    stoppedForMs: 0,
+    wallDeltaMs: 500,
+    audioDeltaMs: 500,
+    morphActive: true,
+    crossfadeScheduled: false,
+  };
+  const verdict = (over: Partial<WakeInput>) => wakeVerdict({ ...healthy, ...over });
+
+  it("leaves a healthy, running morph alone", () => {
+    expect(verdict({})).toEqual({ resume: false, dropMorph: false });
+  });
+
+  it("wakes a stopped context and waits to judge the morph until it runs again", () => {
+    expect(verdict({ contextState: "suspended", stoppedForMs: 9000 })).toEqual({ resume: true, dropMorph: false });
+    expect(verdict({ contextState: "interrupted" }).resume).toBe(true);
+  });
+
+  it("drops the morph once the context ran again after a long stop", () => {
+    expect(verdict({ stoppedForMs: AUDIO_GAP_ABANDON_MS }).dropMorph).toBe(true);
+  });
+
+  it("keeps the morph after a stop short enough to be a hiccup", () => {
+    expect(verdict({ stoppedForMs: AUDIO_GAP_ABANDON_MS - 1 }).dropMorph).toBe(false);
+  });
+
+  it("drops the morph when the page was frozen and the audio clock fell behind real time", () => {
+    // a locked iPhone: 8 s of wall time passed, the audio clock moved almost none of it
+    expect(verdict({ wallDeltaMs: 8000, audioDeltaMs: 300 }).dropMorph).toBe(true);
+  });
+
+  it("keeps the morph through a busy main thread: the wall time passed but so did the audio clock", () => {
+    // a 4 s decode froze the page; the audio thread (and the morph's voice) ran the whole time
+    expect(verdict({ wallDeltaMs: 4000, audioDeltaMs: 3990 }).dropMorph).toBe(false);
+  });
+
+  it("does not read a short gap between checks as a freeze", () => {
+    expect(verdict({ wallDeltaMs: AUDIO_GAP_ABANDON_MS - 1, audioDeltaMs: 0 }).dropMorph).toBe(false);
+  });
+
+  it("leaves a morph whose crossfade is already scheduled to finish", () => {
+    expect(verdict({ stoppedForMs: 9000, crossfadeScheduled: true }).dropMorph).toBe(false);
+  });
+
+  it("has nothing to drop without a morph", () => {
+    expect(verdict({ stoppedForMs: 9000, morphActive: false }).dropMorph).toBe(false);
+  });
+
+  it("does not try to wake a context while paused", () => {
+    expect(verdict({ contextState: "suspended", wantPlaying: false }).resume).toBe(false);
   });
 });
 

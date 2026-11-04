@@ -48,7 +48,7 @@ import { LOOKUP_LOOKAHEAD, reachableTracks } from "@/lib/lookahead";
 import { withTimeout } from "@/lib/withTimeout";
 import { voiceCutoffSec, voiceMapFromStem } from "@/lib/voiceMap";
 import { SONG_SYNC_ENABLED, STEM_FEATURES_ENABLED, VOCAL_MASHUP_ENABLED } from "@/lib/featureFlags";
-import { MUTED_GAIN, isStuckMuted, shouldResumeContext } from "@/lib/backgroundAudio";
+import { MUTED_GAIN, isStuckMuted, shouldResumeContext, wakeVerdict } from "@/lib/backgroundAudio";
 import { TRANSITION_FX_ENABLED, buildSyncReport } from "@/lib/syncEngine";
 import {
   SONG_SYNC_CROSSFADE_BARS,
@@ -234,10 +234,6 @@ const SONG_SYNC_MAX_PLAY_FAILURES = 3;
 const SONG_SYNC_DECODE_TIMEOUT_MS = 8000;
 /** How long "DONE" stays on the board after the hand-over. */
 const SONG_SYNC_DONE_LINGER_MS = 2500;
-/** The audio context was stopped for longer than this (a locked screen, a call) while a Song Sync morph was under way: the morph is timed against both the wall clock and the audio clock, which no longer agree, so it is dropped and the playing track simply carries on. */
-const AUDIO_GAP_ABANDON_MS = 1500;
-/** The 500ms tick not running for this long means the page itself was frozen (a locked iPhone): the audio clock and the wall clock have drifted apart the same way. */
-const TIMER_STARVED_MS = 2500;
 /** After a morph or crossfade, the Halloween loop waits this long before it comes back (the new track "fully playing"). */
 const AMBIENT_RESUME_SETTLE_MS = 1500;
 
@@ -1972,7 +1968,8 @@ export function DualDeckStage() {
         // crossfade never ends on a deck that is fading in but not playing.
         if (progress < 1 && useStore.getState().isPlaying) {
           const incoming = deckEl(t.toDeckId);
-          if (incoming && incoming.paused && incoming.src) incoming.play().catch(() => {});
+          // (never an ended one: play() on an element that reached its end starts it over)
+          if (incoming && incoming.paused && !incoming.ended && incoming.src) incoming.play().catch(() => {});
         }
         if (progress >= 1) {
           if (t.tickIntervalId != null) clearInterval(t.tickIntervalId);
@@ -4099,29 +4096,41 @@ export function DualDeckStage() {
 
     // ---- Keeping the sound on (lib/backgroundAudio.ts) ----
     let audioStoppedSinceMs: number | null = null;
-    let lastTickMs = performance.now();
+    let lastCheckWallMs = performance.now();
+    let lastCheckAudioMs: number | null = null;
     let mutedSinceMs: number | null = null;
 
     /**
-     * Wakes an audio context the OS stopped, and notices how long it was stopped for. After a long gap (or the whole page
-     * being frozen, which is the same thing from the clocks' point of view) a Song Sync morph is dropped: its timing
-     * mixes the wall clock with the audio clock, which stopped while the other carried on.
+     * Wakes an audio context the OS stopped, and drops a Song Sync morph the stop left stranded. What counts as a stop
+     * is decided by wakeVerdict from the two clocks: the audio clock (ctx.currentTime) against real time, so a page whose
+     * main thread merely hung for a few seconds (the audio thread carried on) is not mistaken for a suspended context.
      */
     function wakeAudioContext() {
       const ctx = audioCtxRef.current;
       if (!ctx) return;
       const now = performance.now();
-      const sinceLastCheckMs = now - lastTickMs;
-      lastTickMs = now;
-      if (shouldResumeContext(ctx.state, useStore.getState().isPlaying)) {
-        audioStoppedSinceMs ??= now - Math.min(sinceLastCheckMs, 500);
+      const audioNowMs = ctx.currentTime * 1000;
+      const wallDeltaMs = now - lastCheckWallMs;
+      const audioDeltaMs = lastCheckAudioMs == null ? wallDeltaMs : audioNowMs - lastCheckAudioMs;
+      lastCheckWallMs = now;
+      lastCheckAudioMs = audioNowMs;
+      const morph = songSyncRef.current;
+      const verdict = wakeVerdict({
+        contextState: ctx.state,
+        wantPlaying: useStore.getState().isPlaying,
+        stoppedForMs: audioStoppedSinceMs != null ? now - audioStoppedSinceMs : 0,
+        wallDeltaMs,
+        audioDeltaMs,
+        morphActive: morph != null,
+        crossfadeScheduled: morph?.crossfadeScheduled ?? false,
+      });
+      if (verdict.resume) {
+        audioStoppedSinceMs ??= now - Math.min(wallDeltaMs, 500);
         ctx.resume().catch(() => {});
         return;
       }
-      const stoppedMs = audioStoppedSinceMs != null ? now - audioStoppedSinceMs : 0;
-      const frozen = sinceLastCheckMs > TIMER_STARVED_MS;
       audioStoppedSinceMs = null;
-      if ((frozen || stoppedMs > AUDIO_GAP_ABANDON_MS) && songSyncRef.current && !songSyncRef.current.crossfadeScheduled) cancelSongSync();
+      if (verdict.dropMorph) cancelSongSync();
     }
 
     /**

@@ -57,6 +57,41 @@ export function mediaPositionState(
   return { duration: durationSec, position: Math.min(Math.max(0, positionSec), durationSec), playbackRate: rate };
 }
 
+/** A Song Sync morph is dropped when the audio clock was stopped, or fell behind real time, for at least this long. */
+export const AUDIO_GAP_ABANDON_MS = 1500;
+/** The audio clock counts as having fallen behind when it advanced less than this fraction of the real time that passed. */
+const AUDIO_CLOCK_LAG_RATIO = 0.5;
+
+export interface WakeInput {
+  /** The audio context's state right now. */
+  contextState: string;
+  /** The app wants sound (playing, not paused). */
+  wantPlaying: boolean;
+  /** How long the context has been seen not running, ms (0 if it hasn't been). */
+  stoppedForMs: number;
+  /** Real time since the previous check, ms, and how far the audio clock (ctx.currentTime) moved in that time, ms. */
+  wallDeltaMs: number;
+  audioDeltaMs: number;
+  /** A Song Sync morph is under way, and whether its crossfade is already scheduled on the audio clock. */
+  morphActive: boolean;
+  crossfadeScheduled: boolean;
+}
+
+/**
+ * What to do about the audio context on this check: wake it if it stopped while sound is wanted, and drop a Song Sync
+ * morph whose two clocks (the wall clock its tick runs on, the audio clock its voice and gains run on) can no longer be
+ * trusted to agree. They disagree only when the AUDIO clock stopped or fell behind — a context the OS suspended — and
+ * not when the page's main thread merely hung for a few seconds (the audio thread, and the morph's voice with it,
+ * carried on, so the elapsed wall time alone says nothing). A morph whose crossfade is already scheduled is left to
+ * finish, as before.
+ */
+export function wakeVerdict(i: WakeInput): { resume: boolean; dropMorph: boolean } {
+  if (shouldResumeContext(i.contextState, i.wantPlaying)) return { resume: true, dropMorph: false };
+  const audioClockBehind = i.wallDeltaMs >= AUDIO_GAP_ABANDON_MS && i.audioDeltaMs < i.wallDeltaMs * AUDIO_CLOCK_LAG_RATIO;
+  const wasStopped = i.stoppedForMs >= AUDIO_GAP_ABANDON_MS;
+  return { resume: false, dropMorph: i.morphActive && !i.crossfadeScheduled && (audioClockBehind || wasStopped) };
+}
+
 /** How long a deck's gain may sit near zero while its track is playing and nothing is fading it, before it is judged stuck. */
 export const STUCK_MUTE_MS = 2500;
 /** A gain under this, outside any fade, is a muted deck. */

@@ -72,14 +72,20 @@ export function BackgroundAudio() {
       navigator.mediaSession.metadata = null;
       return;
     }
-    navigator.mediaSession.metadata = new MediaMetadata({
-      title: currentTrack.title,
-      artist: currentTrack.artist,
-      album: "AI DJ",
-      artwork: currentTrack.thumbnailUrl
-        ? [{ src: currentTrack.thumbnailUrl }]
-        : [{ src: "/icons/icon-512.png", sizes: "512x512", type: "image/png" }],
-    });
+    const appIcon = [{ src: "/icons/icon-512.png", sizes: "512x512", type: "image/png" }];
+    const describe = (artwork: MediaImage[]) =>
+      new MediaMetadata({ title: currentTrack.title, artist: currentTrack.artist, album: "AI DJ", artwork });
+    // A cosmetic feature must never take the player down: an artwork URL the browser rejects makes the constructor
+    // throw (and a throw inside an effect unmounts the layout), so fall back to the app icon, then to no artwork.
+    try {
+      navigator.mediaSession.metadata = describe(currentTrack.thumbnailUrl ? [{ src: currentTrack.thumbnailUrl }] : appIcon);
+    } catch {
+      try {
+        navigator.mediaSession.metadata = describe(appIcon);
+      } catch {
+        navigator.mediaSession.metadata = null;
+      }
+    }
   }, [currentTrack]);
 
   // (3b) Whether it is playing, and how far in.
@@ -92,9 +98,10 @@ export function BackgroundAudio() {
   useEffect(() => {
     if (!("mediaSession" in navigator) || !currentTrack) return;
     const state = mediaPositionState(currentTrack.durationSec, positionSecond);
-    if (!state) return;
     try {
-      navigator.mediaSession.setPositionState(state);
+      // No usable duration (a YouTube track): clear it, so the previous track's progress isn't left on the lock screen.
+      if (state) navigator.mediaSession.setPositionState(state);
+      else navigator.mediaSession.setPositionState();
     } catch {
       // a browser that rejects it keeps showing no progress bar; nothing else depends on it
     }
