@@ -8,11 +8,15 @@ import {
   clampPopupToViewport,
   highlightSegments,
   searchAll,
+  suggestKeywords,
   type PopupRect,
   type SearchGroup,
 } from "@/lib/search";
 import { formatTime } from "@/lib/format";
-import { CloseIcon, LibraryIcon, PlayIcon, QueueIcon } from "@/components/Icons";
+import { CloseIcon, LibraryIcon, MenuIcon, PlayIcon, QueueIcon, SearchIcon } from "@/components/Icons";
+import { AccountMenu } from "@/components/AccountMenu";
+import { useIsDesktop } from "@/lib/useIsDesktop";
+import { sidebarShowing, toggledSidebarChoice } from "@/lib/viewport";
 import { TrackThumbnail } from "@/components/TrackThumbnail";
 import type { FxSound, Playlist, Track } from "@/types/music";
 
@@ -25,6 +29,7 @@ const URL_SYNC_DEBOUNCE_MS = 300;
 const FX_PREVIEW_MAX_SEC = 5;
 
 type Row =
+  | { key: string; kind: "suggestion"; text: string }
   | { key: string; kind: "track"; track: Track; tracks: Track[]; index: number }
   | { key: string; kind: "playlist"; playlist: Playlist }
   | { key: string; kind: "fx"; fx: FxSound }
@@ -32,10 +37,14 @@ type Row =
 
 const GROUP_LABEL: Record<SearchGroup["kind"], string> = { tracks: "Songs", playlists: "Playlists", fx: "FX" };
 
-/** Flattens ranked groups into the keyboard-navigable row list (group headers aren't rows). Also returns where each group starts, for rendering headers. */
-function buildRows(groups: SearchGroup[]): { rows: Row[]; headerAt: Map<number, string> } {
+/** Flattens ranked groups into the keyboard-navigable row list (group headers aren't rows), the keyword suggestions first. Also returns where each group starts, for rendering headers. */
+function buildRows(groups: SearchGroup[], suggestions: string[]): { rows: Row[]; headerAt: Map<number, string> } {
   const rows: Row[] = [];
   const headerAt = new Map<number, string>();
+  if (suggestions.length > 0) {
+    headerAt.set(0, "Suggestions");
+    for (const text of suggestions) rows.push({ key: `s:${text}`, kind: "suggestion", text });
+  }
   for (const g of groups) {
     headerAt.set(rows.length, GROUP_LABEL[g.kind]);
     if (g.kind === "tracks") {
@@ -108,7 +117,14 @@ const ResultRow = memo(function ResultRow({
   let icon: React.ReactNode;
   let primary: React.ReactNode;
   let secondary: React.ReactNode = null;
-  if (row.kind === "track") {
+  if (row.kind === "suggestion") {
+    icon = (
+      <span className="w-9 h-9 rounded-lg bg-surface-hover flex items-center justify-center text-accent-purple shrink-0">
+        <SearchIcon size={16} />
+      </span>
+    );
+    primary = <Highlighted text={row.text} query={query} />;
+  } else if (row.kind === "track") {
     icon = <TrackThumbnail thumbnailUrl={row.track.thumbnailUrl} title={row.track.title} size={36} />;
     primary = <Highlighted text={row.track.title} query={query} />;
     secondary = <Highlighted text={row.track.artist || "Unknown artist"} query={query} />;
@@ -174,7 +190,7 @@ function SyncErrorToast() {
   return createPortal(
     <div
       role="alert"
-      className="fixed right-4 top-[4.5rem] z-[70] w-[min(24rem,calc(100vw-2rem))] flex items-start gap-3 rounded-xl bg-surface shadow-elevate-md border border-accent-pink/40 px-4 py-3 text-sm"
+      className="fixed right-[max(1rem,env(safe-area-inset-right))] top-[calc(var(--topbar-h)+0.5rem)] z-[70] w-[min(24rem,calc(100vw-2rem))] flex items-start gap-3 rounded-xl bg-surface shadow-elevate-md border border-accent-pink/40 px-4 py-3 text-sm"
     >
       <p className="flex-1 min-w-0 break-words text-accent-pink">{message}</p>
       <button type="button" onClick={clear} aria-label="Dismiss" className="btn-icon text-muted shrink-0">
@@ -193,6 +209,7 @@ export function TopBar() {
   const setQuery = useStore((s) => s.setSearchQuery);
   const sidebarOpen = useStore((s) => s.sidebarOpen);
   const setSidebarOpen = useStore((s) => s.setSidebarOpen);
+  const desktop = useIsDesktop();
   const playTrackList = useStore((s) => s.playTrackList);
   const localLibrary = useStore((s) => s.localLibrary);
   const playlists = useStore((s) => s.playlists);
@@ -207,6 +224,12 @@ export function TopBar() {
   const [activeIndex, setActiveIndex] = useState(0);
   const [rect, setRect] = useState<PopupRect | null>(null);
   const [mounted, setMounted] = useState(false);
+  // The phone's Search page: the box lives here (and only here on a phone), its results stay up while the page is
+  // otherwise blank, and it offers keyword completions as the user types.
+  const onSearchPage = pathname === "/search";
+  // Only a phone keeps the results up on that page. A tablet or desktop has the search box on every page, so there the
+  // panel opens and closes (outside click, Escape) like it does anywhere else.
+  const resultsStayOpen = onSearchPage && !desktop;
 
   // ---- URL mirror -------------------------------------------------------
   // Values we've written to the URL and not yet seen come back through
@@ -262,9 +285,13 @@ export function TopBar() {
     () => searchAll({ tracks: localLibrary, playlists, fx: fxLibrary }, deferredQuery),
     [localLibrary, playlists, fxLibrary, deferredQuery]
   );
-  const { rows, headerAt } = useMemo(() => buildRows(groups), [groups]);
+  const suggestions = useMemo(
+    () => (onSearchPage ? suggestKeywords({ tracks: localLibrary, playlists, fx: fxLibrary }, deferredQuery) : []),
+    [onSearchPage, localLibrary, playlists, fxLibrary, deferredQuery]
+  );
+  const { rows, headerAt } = useMemo(() => buildRows(groups, suggestions), [groups, suggestions]);
   const hasQuery = deferredQuery.trim().length > 0;
-  const showPanel = open && query.trim().length > 0 && mounted;
+  const showPanel = (open || resultsStayOpen) && query.trim().length > 0 && mounted;
 
   // Reset the highlighted row to the top hit whenever the result set changes.
   const [prevGroups, setPrevGroups] = useState(groups);
@@ -338,6 +365,11 @@ export function TopBar() {
     return () => document.removeEventListener("keydown", onKeyDown);
   }, []);
 
+  // Arriving on the Search page puts the cursor in the box, so the user can type straight away.
+  useEffect(() => {
+    if (resultsStayOpen) inputRef.current?.focus();
+  }, [resultsStayOpen]);
+
   // Navigating somewhere closes the panel (state adjusted during render, not in an effect).
   const [prevPathname, setPrevPathname] = useState(pathname);
   if (prevPathname !== pathname) {
@@ -365,6 +397,9 @@ export function TopBar() {
 
   function selectRow(row: Row) {
     switch (row.kind) {
+      case "suggestion":
+        handleChange(row.text); // finishes the user's query; the results below follow it
+        break;
       case "track":
         playTrackList(row.tracks, row.tracks.indexOf(row.track));
         setOpen(false);
@@ -423,16 +458,26 @@ export function TopBar() {
   const activeId = showPanel && rows.length > 0 ? `${listId}-${safeActive}` : undefined;
 
   return (
-    <header className="h-16 shrink-0 flex items-center gap-4 px-4 sm:px-6 shadow-elevate-md surface-glass">
-      <button
-        type="button"
-        onClick={() => setSidebarOpen(!sidebarOpen)}
-        className="btn-icon md:hidden text-accent-purple hover:text-accent-pink text-xl leading-none"
-        title="Toggle menu"
-      >
-        ☰
-      </button>
-      <div ref={wrapRef} className="flex-1 min-w-0 max-w-xl mx-auto relative">
+    <header className="h-[var(--topbar-h)] shrink-0 flex items-center gap-3 sm:gap-4 pt-[env(safe-area-inset-top)] pl-[max(1rem,env(safe-area-inset-left))] pr-[max(1rem,env(safe-area-inset-right))] sm:pl-[max(1.5rem,env(safe-area-inset-left))] sm:pr-[max(1.5rem,env(safe-area-inset-right))] shadow-elevate-md surface-glass">
+      {/* The hamburger is for the side panel, which a phone doesn't have (it uses the buttons under the player bar). It sits
+          in a wrapper that is hidden there: .btn-icon's own display would beat a hidden class put on the button itself. */}
+      <div className="hidden md:block shrink-0">
+        <button
+          type="button"
+          onClick={() => setSidebarOpen(toggledSidebarChoice(sidebarOpen, desktop))}
+          className="btn-icon text-accent-purple hover:text-accent-pink"
+          aria-label={sidebarShowing(sidebarOpen, desktop) ? "Close side panel" : "Open side panel"}
+          aria-expanded={sidebarShowing(sidebarOpen, desktop)}
+          aria-controls="app-sidebar"
+          title="Show or hide the side panel"
+        >
+          <MenuIcon size={22} />
+        </button>
+      </div>
+      {/* A phone's top bar: the wordmark, with the search box swapped in for it on the Search page, and the account button
+          at the right on every page (Log out and Dark mode live there now that there is no side panel). */}
+      {!onSearchPage && <span className="md:hidden flex-1 min-w-0 text-xl wordmark">AI DJ</span>}
+      <div ref={wrapRef} className={`flex-1 min-w-0 max-w-xl mx-auto relative ${onSearchPage ? "" : "max-md:hidden"}`}>
         <span className="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 text-muted text-sm">
           🔍
         </span>
@@ -468,6 +513,10 @@ export function TopBar() {
             <CloseIcon size={14} />
           </button>
         )}
+      </div>
+
+      <div className="md:hidden shrink-0">
+        <AccountMenu />
       </div>
 
       {mounted && <SyncErrorToast />}

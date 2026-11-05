@@ -12,19 +12,16 @@ function NavLink({
   href,
   icon: Icon,
   label,
-  onNavigate,
 }: {
   href: string;
   icon: ComponentType<{ size?: number; className?: string }>;
   label: string;
-  onNavigate: () => void;
 }) {
   const pathname = usePathname();
   const active = pathname === href;
   return (
     <Link
       href={href}
-      onClick={onNavigate}
       className={`relative flex items-center gap-3 rounded-full pl-2.5 pr-3 py-2 text-sm font-semibold transition-colors ${
         active
           ? "bg-gradient-to-r from-accent-teal/20 to-accent-purple/20 text-accent-purple border border-accent-purple/25"
@@ -47,32 +44,21 @@ export function Sidebar() {
   const playlists = useStore((s) => s.playlists);
   const createPlaylist = useStore((s) => s.createPlaylist);
   const sidebarOpen = useStore((s) => s.sidebarOpen);
-  const setSidebarOpen = useStore((s) => s.setSidebarOpen);
-
-  function closeOnMobile() {
-    setSidebarOpen(false);
-  }
 
   async function handleCreatePlaylist() {
     const id = await createPlaylist();
-    if (!id) return;
-    setSidebarOpen(false);
-    router.push(`/playlist?id=${id}`);
+    if (id) router.push(`/playlist?id=${id}`);
   }
+
+  // Desktop and tablet only: a phone navigates with the buttons under the player bar (BottomNav), so the panel is never
+  // displayed below the md breakpoint, whatever was chosen. Above it, the panel is open until the hamburger collapses it.
+  const visibility = sidebarOpen === false ? "hidden" : "max-md:hidden";
 
   return (
     <>
-      {sidebarOpen && (
-        <div
-          className="fixed inset-0 z-30 bg-black/50 md:hidden"
-          onClick={closeOnMobile}
-          aria-hidden="true"
-        />
-      )}
       <aside
-        className={`fixed top-0 left-0 z-40 max-md:h-dvh w-60 max-w-[85vw] shrink-0 surface-glass border-r border-border/10 shadow-elevate-right flex flex-col gap-4 p-3 overflow-y-auto md:static ${
-          sidebarOpen ? "" : "max-md:hidden"
-        }`}
+        id="app-sidebar"
+        className={`w-60 shrink-0 surface-glass border-r border-border/10 shadow-elevate-right flex flex-col gap-4 py-3 pl-[max(0.75rem,env(safe-area-inset-left))] pr-3 overflow-y-auto overscroll-contain ${visibility}`}
       >
         <div className="px-2 py-2 flex flex-col gap-2">
           <span className="text-xl wordmark">AI DJ</span>
@@ -80,9 +66,9 @@ export function Sidebar() {
         </div>
 
         <nav className="flex flex-col gap-1">
-          <NavLink href="/" icon={HomeIcon} label="Home" onNavigate={closeOnMobile} />
-          <NavLink href="/library" icon={LibraryIcon} label="Music Library" onNavigate={closeOnMobile} />
-          <NavLink href="/inspiration" icon={SparklesIcon} label="DJ Inspiration" onNavigate={closeOnMobile} />
+          <NavLink href="/" icon={HomeIcon} label="Home" />
+          <NavLink href="/library" icon={LibraryIcon} label="Music Library" />
+          <NavLink href="/inspiration" icon={SparklesIcon} label="DJ Inspiration" />
         </nav>
 
         <div className="flex items-center justify-between px-2 pt-2">
@@ -107,7 +93,6 @@ export function Sidebar() {
               <Link
                 key={playlist.id}
                 href={`/playlist?id=${playlist.id}`}
-                onClick={closeOnMobile}
                 title={playlist.name}
                 className="rounded-lg px-2 py-2 text-sm text-muted hover:text-foreground hover:bg-surface-hover break-words"
               >

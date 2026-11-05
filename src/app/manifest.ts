@@ -8,7 +8,8 @@ export default function manifest(): MetadataRoute.Manifest {
     start_url: "/",
     scope: "/",
     display: "standalone",
-    orientation: "portrait",
+    // No lock: an installed app on a tablet or a phone held sideways should rotate with the device.
+    orientation: "any",
     background_color: "#f3edff",
     theme_color: "#9333ea",
     icons: [

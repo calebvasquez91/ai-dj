@@ -223,6 +223,65 @@ export function searchAll(
   return groups;
 }
 
+/** How many completions the search page offers under the box. */
+export const SUGGESTION_LIMIT = 5;
+
+/**
+ * Keyword completions for a half-typed query, so the search box can finish the user's thought ("dau" -> "Daft Punk",
+ * "Daughter"). The candidates are the words people search by: song titles, artists, tags, playlist and FX names. A
+ * candidate completes the query when it starts with everything typed, or when it contains the earlier words whole and a
+ * word that starts with the last one still being typed. The query itself is never offered back. Best first: starts-with
+ * before contains, then the keyword that appears on more items, then the shorter one.
+ */
+export function suggestKeywords(data: SearchData, query: string, limit = SUGGESTION_LIMIT): string[] {
+  const tokens = tokenizeQuery(query);
+  if (tokens.length === 0 || limit <= 0) return [];
+  const typed = tokens.join(" ");
+  const last = tokens[tokens.length - 1];
+  const earlier = tokens.slice(0, -1);
+
+  const candidates = new Map<string, { text: string; norm: string; count: number }>();
+  const add = (text: string | undefined) => {
+    const trimmed = text?.trim();
+    if (!trimmed) return;
+    const norm = normalizeText(trimmed);
+    const seen = candidates.get(norm);
+    if (seen) seen.count++;
+    else candidates.set(norm, { text: trimmed, norm, count: 1 });
+  };
+  for (const t of data.tracks) {
+    add(t.title);
+    add(t.artist);
+    t.tags?.forEach(add);
+  }
+  for (const p of data.playlists) add(p.name);
+  for (const f of data.fx) {
+    add(f.name);
+    f.tags.forEach(add);
+  }
+
+  const ranked: { text: string; norm: string; count: number; startsWith: boolean }[] = [];
+  for (const c of candidates.values()) {
+    if (c.norm === typed) continue;
+    if (c.norm.startsWith(typed)) {
+      ranked.push({ ...c, startsWith: true });
+      continue;
+    }
+    const words = c.norm.split(/[^\p{L}\p{N}]+/u).filter(Boolean);
+    if (earlier.every((w) => words.includes(w)) && words.some((w) => w.startsWith(last))) {
+      ranked.push({ ...c, startsWith: false });
+    }
+  }
+  ranked.sort(
+    (a, b) =>
+      Number(b.startsWith) - Number(a.startsWith) ||
+      b.count - a.count ||
+      a.norm.length - b.norm.length ||
+      a.norm.localeCompare(b.norm)
+  );
+  return ranked.slice(0, limit).map((c) => c.text);
+}
+
 /** A contiguous span of the ORIGINAL text to emphasize: [start, end). */
 export type HighlightRange = [number, number];
 

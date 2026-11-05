@@ -12,6 +12,14 @@ function base(size: number) {
   return { width: size, height: size, viewBox: "0 0 24 24", fill: "none" } as const;
 }
 
+export function MenuIcon({ size = 22, className }: IconProps) {
+  return (
+    <svg {...base(size)} className={className} aria-hidden="true">
+      <path d="M4 7h16M4 12h16M4 17h16" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+    </svg>
+  );
+}
+
 export function PlayIcon({ size = 16, className }: IconProps) {
   return (
     <svg {...base(size)} className={className} aria-hidden="true">
@@ -104,6 +112,15 @@ export function LibraryIcon({ size = 18, className }: IconProps) {
       <rect x="3.5" y="4" width="4" height="16" rx="1" stroke="currentColor" strokeWidth="1.6" />
       <rect x="10" y="4" width="4" height="16" rx="1" stroke="currentColor" strokeWidth="1.6" />
       <path d="M17.2 4.6 20.5 19.2l-3.9.9L13.3 5.5" stroke="currentColor" strokeWidth="1.6" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
+export function SearchIcon({ size = 18, className }: IconProps) {
+  return (
+    <svg {...base(size)} className={className} aria-hidden="true">
+      <circle cx="10.5" cy="10.5" r="6.5" stroke="currentColor" strokeWidth="1.8" />
+      <path d="m15.5 15.5 5 5" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
     </svg>
   );
 }

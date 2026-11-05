@@ -12,6 +12,7 @@ import {
   searchFx,
   searchPlaylists,
   searchTracks,
+  suggestKeywords,
   tokenizeQuery,
 } from "@/lib/search";
 
@@ -295,6 +296,55 @@ describe("highlightRanges / highlightSegments", () => {
     expect(segs.map((s) => s.text).join("")).toBe("Björk - Jóga");
     expect(segs.filter((s) => s.match).map((s) => s.text)).toEqual(["Björk", "Jóga"]);
     expect(highlightSegments("Hello", "zzz")).toEqual([{ text: "Hello", match: false }]);
+  });
+});
+
+describe("suggestKeywords", () => {
+  const data = {
+    tracks: [
+      track("One More Time", "Daft Punk", ["dance"]),
+      track("Around the World", "Daft Punk", ["dance", "french"]),
+      track("Daughter", "Elbow"),
+      track("Punk Rock Girl", "The Dead Milkmen", ["punk"]),
+    ],
+    playlists: [playlist("Dance Party"), playlist("Spooky Music")],
+    fx: [fx("Dance Hit", ["hit"])],
+  };
+
+  it("finishes a half-typed word from titles, artists, tags and playlists", () => {
+    expect(suggestKeywords(data, "da")).toEqual(expect.arrayContaining(["Daft Punk", "Daughter", "dance", "Dance Party"]));
+  });
+
+  it("puts what starts with the query ahead of what merely contains it", () => {
+    const out = suggestKeywords(data, "pun");
+    expect(out.indexOf("Daft Punk")).toBeGreaterThan(out.indexOf("punk"));
+    expect(out.indexOf("Daft Punk")).toBeGreaterThan(out.indexOf("Punk Rock Girl"));
+  });
+
+  it("offers the keyword on more items first", () => {
+    // "dance" is on two tracks, "Dance Party" and "Dance Hit" on one each
+    expect(suggestKeywords(data, "dan")[0]).toBe("dance");
+  });
+
+  it("completes the last word while keeping the earlier ones whole", () => {
+    expect(suggestKeywords(data, "daft pu")).toEqual(["Daft Punk"]);
+    expect(suggestKeywords(data, "world pu")).toEqual([]);
+  });
+
+  it("matches without caring about case or accents", () => {
+    expect(suggestKeywords({ ...data, tracks: [track("Jolene", "Björk")] }, "BJO")).toEqual(["Björk"]);
+  });
+
+  it("never offers the query back, and says nothing for an empty or unmatched one", () => {
+    expect(suggestKeywords(data, "Daft Punk")).not.toContain("Daft Punk");
+    expect(suggestKeywords(data, "   ")).toEqual([]);
+    expect(suggestKeywords(data, "zzzz")).toEqual([]);
+  });
+
+  it("respects the limit and lists a repeated keyword once", () => {
+    expect(suggestKeywords(data, "d", 2)).toHaveLength(2);
+    expect(suggestKeywords(data, "daft")).toEqual(["Daft Punk"]); // on two tracks, listed once
+    expect(suggestKeywords(data, "dan").filter((s) => s === "dance")).toHaveLength(1);
   });
 });
 

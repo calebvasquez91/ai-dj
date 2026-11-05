@@ -158,7 +158,8 @@ interface PlayerState {
   manualLoopInSec: number | null;
   manualLoopOutSec: number | null;
   isTransitioning: boolean;
-  sidebarOpen: boolean;
+  /** The side panel's open/closed choice; null until the user makes one, when it follows the viewport (open on desktop, closed on a phone — see lib/viewport.ts). */
+  sidebarOpen: boolean | null;
   queuePanelOpen: boolean;
   deckViewOpen: boolean;
   /** Full-screen now-playing view, expanded from the compact PlayerBar footer. */
@@ -310,7 +311,7 @@ interface PlayerState {
   /** Write-only from the DJ Decks panel's perspective — called by DualDeckStage's real deck logic to mirror actual manual-loop state; never called from a component. */
   setManualLoopState: (active: boolean, inSec: number | null, outSec: number | null) => void;
   setIsTransitioning: (isTransitioning: boolean) => void;
-  setSidebarOpen: (open: boolean) => void;
+  setSidebarOpen: (open: boolean | null) => void;
   toggleQueuePanel: () => void;
   toggleDeckView: () => void;
   setNowPlayingExpanded: (expanded: boolean) => void;
@@ -451,7 +452,7 @@ export const useStore = create<PlayerState>()(
       manualLoopInSec: null,
       manualLoopOutSec: null,
       isTransitioning: false,
-      sidebarOpen: false,
+      sidebarOpen: null,
       queuePanelOpen: false,
       deckViewOpen: false,
       nowPlayingExpanded: false,
