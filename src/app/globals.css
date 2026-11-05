@@ -105,6 +105,10 @@
 
 /* The scale the primitives (src/ui) are built on: 12px card radius, 8 / 16 / 24 spacing. */
 @theme {
+  /* The three layouts: phone below 600px (bottom tabs), tablet 600-1023px (icon rail), desktop from 1024px (side panel,
+     docked right panel). lib/viewport.ts has the same numbers for JavaScript, and a test keeps the two in step. */
+  --breakpoint-tablet: 600px;
+  --breakpoint-desktop: 1024px;
   --radius-card: 12px;
   --spacing-step-1: 8px;
   --spacing-step-2: 16px;

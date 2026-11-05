@@ -1,5 +1,32 @@
+import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
-import { sidebarShowing, toggledSidebarChoice } from "./viewport";
+import { DESKTOP_MIN_WIDTH, TABLET_MIN_WIDTH, layoutForWidth, sidebarShowing, toggledSidebarChoice } from "./viewport";
+
+describe("layoutForWidth", () => {
+  it("is a phone below 600", () => {
+    expect(layoutForWidth(320)).toBe("phone");
+    expect(layoutForWidth(599)).toBe("phone");
+  });
+
+  it("is a tablet from 600 to 1023", () => {
+    expect(layoutForWidth(600)).toBe("tablet");
+    expect(layoutForWidth(768)).toBe("tablet");
+    expect(layoutForWidth(1023)).toBe("tablet");
+  });
+
+  it("is a desktop from 1024", () => {
+    expect(layoutForWidth(1024)).toBe("desktop");
+    expect(layoutForWidth(1920)).toBe("desktop");
+  });
+});
+
+describe("the breakpoints", () => {
+  it("are the same numbers the tablet: and desktop: classes use in globals.css", () => {
+    const css = readFileSync("src/app/globals.css", "utf8");
+    expect(css.match(/--breakpoint-tablet:\s*(\d+)px/)?.[1]).toBe(String(TABLET_MIN_WIDTH));
+    expect(css.match(/--breakpoint-desktop:\s*(\d+)px/)?.[1]).toBe(String(DESKTOP_MIN_WIDTH));
+  });
+});
 
 describe("sidebarShowing", () => {
   it("follows the viewport until the user chooses", () => {

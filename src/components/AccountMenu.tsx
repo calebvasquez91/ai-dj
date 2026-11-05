@@ -12,7 +12,7 @@ import { SlidersIcon, SparklesIcon } from "@/components/Icons";
  * out, and the DJ Inspiration page (which has no button under the player bar). A round initial in the top bar opens a
  * small card under it. The side panel still carries all of this on tablets and desktops, so this is for phones only.
  */
-export function AccountMenu() {
+export function AccountMenu({ placement = "below" }: { placement?: "below" | "above-start" } = {}) {
   const { data: session } = useSession();
   const pathname = usePathname();
   const [open, setOpen] = useState(false);
@@ -57,7 +57,7 @@ export function AccountMenu() {
         aria-label="Account and settings"
         aria-expanded={open}
         aria-controls={cardId}
-        className="flex h-9 w-9 items-center justify-center rounded-full bg-gradient-to-br from-accent-teal to-accent-purple text-sm font-bold uppercase text-white shadow-elevate-sm"
+        className="flex h-9 w-9 items-center justify-center rounded-full border border-border-subtle bg-surface-raised text-sm font-bold uppercase text-foreground"
       >
         {who.trim().charAt(0) || "?"}
       </button>
@@ -68,7 +68,7 @@ export function AccountMenu() {
           role="group"
           aria-label="Account and settings"
           tabIndex={-1}
-          className="absolute right-0 top-full z-[70] mt-2 w-64 max-w-[calc(100vw-1.5rem)] outline-none rounded-2xl bg-surface p-3 shadow-elevate-md border border-border/10 flex flex-col gap-3"
+          className={`absolute ${placement === "below" ? "right-0 top-full mt-2" : "bottom-full left-0 mb-2"} z-[70] w-64 max-w-[calc(100vw-1.5rem)] outline-none rounded-2xl bg-surface p-3 shadow-elevate-md border border-border/10 flex flex-col gap-3`}
         >
           <p className="truncate text-sm font-semibold" title={session?.user?.email ?? undefined}>
             {who}

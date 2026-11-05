@@ -30,9 +30,12 @@ Flags carried over exactly (not edited): `TRANSITION_FX_ENABLED = false`, `SYNC_
    tab indicator and SYNC.
 2. **Primitives** in `src/ui/`: Text, Button, IconButton, Chip, Card, Tile, CoverArt (generated gradient fallback),
    Carousel, PagedGrid (page dots), Skeleton, Sheet, TrackRow, SectionHeader. Everything after this uses them.
-3. **Navigation shell.** Phone (< 600px): four tabs in the spec's order (Home, Search, Library, Playlists) with a mini
-   player directly above. Tablet (600-1023): icon rail. Desktop (>= 1024): sidebar, centre, collapsible right panel
-   (Now Playing / Queue), bottom player bar. Keep keyboard shortcuts and add Space for play/pause.
+3. **Navigation shell.** Phone (< 600px): four tabs with the player bar directly above. The tabs keep the order you
+   asked for when the phone nav shipped (Home, Music Library, Playlists, Search), not the spec's (Home, Search, Library,
+   Playlists). Tablet (600-1023): icon rail. Desktop (>= 1024): sidebar, centre, collapsible docked right panel (the
+   queue, with the current song), bottom player bar. The compact mini player that expands into a Now Playing sheet comes
+   with phase 5, when the DJ controls move into that sheet, so the phone's player bar keeps every feature until then.
+   Space already plays and pauses.
 4. **Screens.** Home (filter chips, quick-access grid, "Choose a mix" hero carousel, paged 3x3 Quick picks,
    Recently added / Recently played / Mixed for you, skeletons), Search (grouped results, Browse-all tiles),
    Library (Songs, Artists, Liked, FX segments), Playlists (mosaics, Spooky pinned, detail with the existing Add Music bar).

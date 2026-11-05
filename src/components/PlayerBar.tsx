@@ -83,7 +83,7 @@ export function PlayerBar() {
   return (
     <footer
       ref={barRef}
-      className="relative min-h-20 shrink-0 shadow-elevate-top surface-glass border-t border-border/10 pt-2 pb-2 md:pb-[max(0.5rem,env(safe-area-inset-bottom))] pl-[max(1rem,env(safe-area-inset-left))] pr-[max(1rem,env(safe-area-inset-right))] flex flex-wrap items-center gap-2 lg:gap-4"
+      className="relative min-h-20 shrink-0 shadow-elevate-top surface-glass border-t border-border/10 pt-2 pb-2 tablet:pb-[max(0.5rem,env(safe-area-inset-bottom))] pl-[max(1rem,env(safe-area-inset-left))] pr-[max(1rem,env(safe-area-inset-right))] flex flex-wrap items-center gap-2 lg:gap-4"
       inert={nowPlayingExpanded ? true : undefined}
     >
       <div className="flex items-center gap-3 w-28 sm:w-48 lg:w-64 min-w-0 shrink-0">

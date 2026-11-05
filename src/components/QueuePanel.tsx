@@ -29,13 +29,14 @@ export function QueuePanel() {
   return (
     <>
       <div
-        className="fixed inset-x-0 top-0 bottom-[var(--dock-h)] z-40 bg-black/50"
+        className="fixed inset-x-0 top-0 bottom-[var(--dock-h)] z-40 bg-black/50 desktop:hidden"
         onClick={toggle}
         aria-hidden="true"
       />
-      {/* Stops above the player bar and Que's lane (--chrome-bottom): the Queue button that opened it is still there to close
-          it, and Que (who is drawn above every panel) never sits on top of its last rows. */}
-      <aside className="fixed top-0 right-0 bottom-[var(--chrome-bottom)] z-50 w-[min(85vw,20rem)] pt-[env(safe-area-inset-top)] pr-[env(safe-area-inset-right)] surface-glass border-l border-border/10 shadow-elevate-left flex flex-col">
+      {/* Below the desktop width an overlay from the right that stops above the player bar and Que's lane (--chrome-bottom):
+          the Queue button that opened it is still there to close it, and Que (who is drawn above every panel) never sits
+          on top of its last rows. From the desktop width it is docked, a column in the page's row (see the app layout). */}
+      <aside className="fixed top-0 right-0 bottom-[var(--chrome-bottom)] z-50 w-[min(85vw,20rem)] pt-[env(safe-area-inset-top)] pr-[env(safe-area-inset-right)] surface-glass border-l border-border/10 shadow-elevate-left flex flex-col desktop:static desktop:z-auto desktop:w-80 desktop:shrink-0 desktop:pt-0 desktop:pr-0 desktop:shadow-none">
         <div
           className="flex items-center justify-between px-4 h-16 shrink-0 border-b border-border/10 transition-colors duration-1000"
           style={isSpooky ? { backgroundColor: "rgba(255, 80, 0, 0.08)" } : undefined}

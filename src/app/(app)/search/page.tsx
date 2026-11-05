@@ -5,6 +5,6 @@
  */
 export default function SearchPage() {
   return (
-    <p className="hidden md:block p-6 text-sm text-muted">Use the search box at the top to find songs, playlists and FX.</p>
+    <p className="hidden tablet:block p-6 text-sm text-muted">Use the search box at the top to find songs, playlists and FX.</p>
   );
 }
