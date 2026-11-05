@@ -17,6 +17,8 @@ export function AccountMenu() {
   const pathname = usePathname();
   const [open, setOpen] = useState(false);
   const wrapRef = useRef<HTMLDivElement>(null);
+  const buttonRef = useRef<HTMLButtonElement>(null);
+  const cardRef = useRef<HTMLDivElement>(null);
   const cardId = useId();
   const who = session?.user?.name || session?.user?.email || "";
 
@@ -33,8 +35,11 @@ export function AccountMenu() {
       if (!wrapRef.current?.contains(e.target as Node)) setOpen(false);
     }
     function onKeyDown(e: KeyboardEvent) {
-      if (e.key === "Escape") setOpen(false);
+      if (e.key !== "Escape") return;
+      setOpen(false);
+      buttonRef.current?.focus(); // back where the user was, so the keyboard doesn't lose its place
     }
+    cardRef.current?.focus(); // into the card, so a keyboard or screen reader user lands on it
     document.addEventListener("pointerdown", onPointerDown);
     document.addEventListener("keydown", onKeyDown);
     return () => {
@@ -46,6 +51,7 @@ export function AccountMenu() {
   return (
     <div ref={wrapRef} className="relative shrink-0">
       <button
+        ref={buttonRef}
         type="button"
         onClick={() => setOpen((v) => !v)}
         aria-label="Account and settings"
@@ -57,8 +63,12 @@ export function AccountMenu() {
       </button>
       {open && (
         <div
+          ref={cardRef}
           id={cardId}
-          className="absolute right-0 top-full z-[70] mt-2 w-64 max-w-[calc(100vw-1.5rem)] rounded-2xl bg-surface p-3 shadow-elevate-md border border-border/10 flex flex-col gap-3"
+          role="group"
+          aria-label="Account and settings"
+          tabIndex={-1}
+          className="absolute right-0 top-full z-[70] mt-2 w-64 max-w-[calc(100vw-1.5rem)] outline-none rounded-2xl bg-surface p-3 shadow-elevate-md border border-border/10 flex flex-col gap-3"
         >
           <p className="truncate text-sm font-semibold" title={session?.user?.email ?? undefined}>
             {who}

@@ -227,6 +227,9 @@ export function TopBar() {
   // The phone's Search page: the box lives here (and only here on a phone), its results stay up while the page is
   // otherwise blank, and it offers keyword completions as the user types.
   const onSearchPage = pathname === "/search";
+  // Only a phone keeps the results up on that page. A tablet or desktop has the search box on every page, so there the
+  // panel opens and closes (outside click, Escape) like it does anywhere else.
+  const resultsStayOpen = onSearchPage && !desktop;
 
   // ---- URL mirror -------------------------------------------------------
   // Values we've written to the URL and not yet seen come back through
@@ -288,7 +291,7 @@ export function TopBar() {
   );
   const { rows, headerAt } = useMemo(() => buildRows(groups, suggestions), [groups, suggestions]);
   const hasQuery = deferredQuery.trim().length > 0;
-  const showPanel = (open || onSearchPage) && query.trim().length > 0 && mounted;
+  const showPanel = (open || resultsStayOpen) && query.trim().length > 0 && mounted;
 
   // Reset the highlighted row to the top hit whenever the result set changes.
   const [prevGroups, setPrevGroups] = useState(groups);
@@ -364,8 +367,8 @@ export function TopBar() {
 
   // Arriving on the Search page puts the cursor in the box, so the user can type straight away.
   useEffect(() => {
-    if (onSearchPage && !desktop) inputRef.current?.focus();
-  }, [onSearchPage, desktop]);
+    if (resultsStayOpen) inputRef.current?.focus();
+  }, [resultsStayOpen]);
 
   // Navigating somewhere closes the panel (state adjusted during render, not in an effect).
   const [prevPathname, setPrevPathname] = useState(pathname);
@@ -471,13 +474,9 @@ export function TopBar() {
           <MenuIcon size={22} />
         </button>
       </div>
-      {/* A phone's top bar: the wordmark and the account button, with the search box swapped in on the Search page. */}
-      {!onSearchPage && (
-        <div className="md:hidden flex flex-1 min-w-0 items-center justify-between gap-3">
-          <span className="text-xl wordmark">AI DJ</span>
-          <AccountMenu />
-        </div>
-      )}
+      {/* A phone's top bar: the wordmark, with the search box swapped in for it on the Search page, and the account button
+          at the right on every page (Log out and Dark mode live there now that there is no side panel). */}
+      {!onSearchPage && <span className="md:hidden flex-1 min-w-0 text-xl wordmark">AI DJ</span>}
       <div ref={wrapRef} className={`flex-1 min-w-0 max-w-xl mx-auto relative ${onSearchPage ? "" : "max-md:hidden"}`}>
         <span className="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 text-muted text-sm">
           🔍
@@ -514,6 +513,10 @@ export function TopBar() {
             <CloseIcon size={14} />
           </button>
         )}
+      </div>
+
+      <div className="md:hidden shrink-0">
+        <AccountMenu />
       </div>
 
       {mounted && <SyncErrorToast />}

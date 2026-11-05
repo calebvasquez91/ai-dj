@@ -24,10 +24,21 @@ export interface ThemeState {
   toggleTheme: () => void;
 }
 
-function applyThemeToDocument(theme: Theme) {
+/**
+ * What the browser's own chrome (Android's address bar, iOS's status area) is tinted: the header purple in light mode, the
+ * page's near-black in dark mode. Follows the app's choice, not the phone's (the app has its own switch, so the two can
+ * disagree and a media query on prefers-color-scheme would show the wrong one).
+ */
+export const THEME_COLORS: Record<Theme, string> = { light: "#9333ea", dark: "#150f20" };
+
+/** Sets the data-theme attribute globals.css keys off and the browser-chrome color to match. */
+export function applyThemeToDocument(theme: Theme) {
   if (typeof document === "undefined") return;
   if (theme === "dark") document.documentElement.setAttribute("data-theme", "dark");
   else document.documentElement.removeAttribute("data-theme");
+  for (const meta of document.querySelectorAll('meta[name="theme-color"]')) {
+    meta.setAttribute("content", THEME_COLORS[theme]);
+  }
 }
 
 function createThemeState(

@@ -324,7 +324,7 @@ function HotCuePads({
               <button
                 type="button"
                 onClick={() => setHotCueOverride(trackId, i + 1, currentTimeSec)}
-                className="btn-icon absolute -top-2 -right-2 !p-0.5 text-[9px] leading-none bg-surface shadow-elevate-sm opacity-0 group-hover:opacity-100 focus:opacity-100 transition-opacity"
+                className="btn-icon touch-compact absolute -top-2 -right-2 !p-0.5 text-[9px] leading-none bg-surface shadow-elevate-sm opacity-0 group-hover:opacity-100 focus:opacity-100 transition-opacity"
                 title="Re-set to the current playback position"
               >
                 ↺

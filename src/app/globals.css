@@ -109,15 +109,20 @@ summary,
 }
 
 @media (pointer: coarse) {
-  /* iOS Safari zooms the whole page when a field under 16px takes focus, and doesn't zoom back: keep fields at 16px+. */
-  input:not([type="range"], [type="checkbox"], [type="radio"], [type="file"]),
+  /* iOS Safari zooms the whole page when a field under 16px takes focus, and doesn't zoom back: keep fields that take
+     typing (and selects) at 16px+. Buttons, sliders, checkboxes and the like never open the keyboard, so they stay as sized. */
+  input:not([type="range"], [type="checkbox"], [type="radio"], [type="file"], [type="button"], [type="submit"], [type="reset"], [type="image"], [type="color"]),
   select,
   textarea {
     font-size: max(16px, 1em);
   }
+}
 
-  /* Fingers need a bigger target than a cursor does. */
-  .btn-icon {
+@media (pointer: coarse) and (max-width: 767.98px) {
+  /* Fingers need a bigger target than a cursor does. Phones only: a tablet's layout has its own, roomier sizing, and a
+     forced 2.5rem there stretches the dense rows (queue items, deck controls). .touch-compact opts a button out, for the
+     tiny corner badges that sit on top of something else. */
+  .btn-icon:not(.touch-compact) {
     min-width: 2.5rem;
     min-height: 2.5rem;
   }
