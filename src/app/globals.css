@@ -84,9 +84,23 @@
   --color-accent-yellow: var(--accent-yellow);
   --color-accent-green: var(--accent-green);
   --color-border: var(--border);
+  --color-border-subtle: var(--border-subtle);
   --font-sans: var(--font-dm-sans);
   --font-mono: var(--font-space-mono);
   --font-retro: var(--font-retro);
+}
+
+/* Helpers the primitives (src/ui) share. The gradient is only ever applied to the play button, the progress fill, the
+   active tab indicator and the SYNC state. */
+.accent-gradient {
+  background-image: var(--accent-gradient);
+}
+
+.no-scrollbar {
+  scrollbar-width: none;
+}
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
 }
 
 /* The scale the primitives (src/ui) are built on: 12px card radius, 8 / 16 / 24 spacing. */
