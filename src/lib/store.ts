@@ -160,7 +160,8 @@ interface PlayerState {
   manualLoopInSec: number | null;
   manualLoopOutSec: number | null;
   isTransitioning: boolean;
-  sidebarOpen: boolean;
+  /** The side panel's open/closed choice; null until the user makes one, when it follows the viewport (open on desktop, closed on a phone — see lib/viewport.ts). */
+  sidebarOpen: boolean | null;
   queuePanelOpen: boolean;
   deckViewOpen: boolean;
   /** Full-screen now-playing view, expanded from the compact PlayerBar footer. */
@@ -317,7 +318,7 @@ interface PlayerState {
   /** Write-only from the DJ Decks panel's perspective — called by DualDeckStage's real deck logic to mirror actual manual-loop state; never called from a component. */
   setManualLoopState: (active: boolean, inSec: number | null, outSec: number | null) => void;
   setIsTransitioning: (isTransitioning: boolean) => void;
-  setSidebarOpen: (open: boolean) => void;
+  setSidebarOpen: (open: boolean | null) => void;
   toggleQueuePanel: () => void;
   toggleDeckView: () => void;
   setNowPlayingExpanded: (expanded: boolean) => void;
@@ -459,7 +460,7 @@ export const useStore = create<PlayerState>()(
       manualLoopInSec: null,
       manualLoopOutSec: null,
       isTransitioning: false,
-      sidebarOpen: false,
+      sidebarOpen: null,
       queuePanelOpen: false,
       deckViewOpen: false,
       nowPlayingExpanded: false,
@@ -1195,6 +1196,9 @@ export const useStore = create<PlayerState>()(
               : p
           ),
         }));
+        // What this add put into the live session, so a failed save undoes exactly that and not a copy that was already there.
+        let joinedQueue = false;
+        let joinedPool = false;
         if (!wasPresent) {
           // Added to the playlist that is playing right now: it joins the live queue (or, in a shuffle, the pool the DJ
           // picks from), so it is heard this session and not only the next time the playlist starts.
@@ -1202,6 +1206,7 @@ export const useStore = create<PlayerState>()(
           if (live.activePlaylistId === playlistId && live.currentTrack?.id !== track.id && track.playPreference !== "do-not") {
             if (live.shuffleSession) {
               if (!live.shuffleSession.pool.some((t) => t.id === track.id)) {
+                joinedPool = true;
                 set({
                   shuffleSession: {
                     pool: [...live.shuffleSession.pool, track],
@@ -1210,6 +1215,7 @@ export const useStore = create<PlayerState>()(
                 });
               }
             } else if (!live.queue.some((t) => t.id === track.id)) {
+              joinedQueue = true;
               set({ queue: [...live.queue, track] });
             }
           }
@@ -1223,9 +1229,9 @@ export const useStore = create<PlayerState>()(
               playlists: s.playlists.map((p) =>
                 p.id === playlistId ? { ...p, tracks: p.tracks.filter((t) => t.id !== track.id) } : p
               ),
-              queue: s.activePlaylistId === playlistId ? s.queue.filter((t) => t.id !== track.id) : s.queue,
+              queue: joinedQueue ? s.queue.filter((t) => t.id !== track.id) : s.queue,
               shuffleSession:
-                s.shuffleSession && s.activePlaylistId === playlistId
+                s.shuffleSession && joinedPool
                   ? {
                       pool: s.shuffleSession.pool.filter((t) => t.id !== track.id),
                       unplayedIds: s.shuffleSession.unplayedIds.filter((id) => id !== track.id),

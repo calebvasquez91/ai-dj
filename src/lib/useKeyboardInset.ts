@@ -13,12 +13,21 @@ function subscribe(onChange: () => void) {
   };
 }
 
+/**
+ * How much of the bottom of the layout viewport the visual viewport has left uncovered. Pinch-zoomed in, the visual
+ * viewport is smaller than the layout one too, but nothing covers the page (and the numbers mean something else), so
+ * that is no keyboard: 0.
+ */
+export function keyboardInset(layoutHeight: number, vv: { height: number; offsetTop: number; scale: number }): number {
+  if (vv.scale > 1.01) return 0;
+  return Math.max(0, Math.round(layoutHeight - vv.height - vv.offsetTop));
+}
+
 // One primitive string ("inset|height") so useSyncExternalStore sees a stable snapshot between changes.
 function snapshot(): string {
   const vv = window.visualViewport;
   if (!vv) return "0|0";
-  const inset = Math.max(0, Math.round(window.innerHeight - vv.height - vv.offsetTop));
-  return `${inset}|${Math.round(vv.height)}`;
+  return `${keyboardInset(window.innerHeight, vv)}|${Math.round(vv.height)}`;
 }
 
 /**

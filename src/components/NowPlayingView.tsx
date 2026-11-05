@@ -117,16 +117,16 @@ export function NowPlayingView() {
         {spooky && <SpookySparkles />}
       </div>
 
-      <div className="flex items-center justify-center p-4 shrink-0">
+      <div className="flex items-center justify-center pt-[max(1rem,env(safe-area-inset-top))] pb-4 px-4 shrink-0">
         {spooky && (
-          <span className="absolute right-4 text-xs font-semibold flex items-center gap-1" style={{ color: "#ff8a3d" }}>
+          <span className="absolute right-[max(1rem,env(safe-area-inset-right))] text-xs font-semibold flex items-center gap-1" style={{ color: "#ff8a3d" }}>
             🎃 Spooky Mode
           </span>
         )}
         <button
           type="button"
           onClick={() => setExpanded(false)}
-          className="btn-icon absolute left-4 text-2xl text-accent-purple hover:text-accent-pink"
+          className="btn-icon absolute left-[max(1rem,env(safe-area-inset-left))] text-2xl text-accent-purple hover:text-accent-pink"
           title="Back to browsing"
         >
           <ChevronDownIcon size={22} />
@@ -139,7 +139,7 @@ export function NowPlayingView() {
         // screen the content scrolls instead of being clipped by this
         // panel's overflow-hidden (centering alone would cut off the top).
         <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain">
-        <div className="min-h-full flex flex-col items-center justify-center gap-4 sm:gap-8 px-4 sm:px-6 pb-[max(1.5rem,env(safe-area-inset-bottom))]">
+        <div className="min-h-full flex flex-col items-center justify-center gap-4 sm:gap-8 pl-[max(1rem,env(safe-area-inset-left))] pr-[max(1rem,env(safe-area-inset-right))] sm:pl-[max(1.5rem,env(safe-area-inset-left))] sm:pr-[max(1.5rem,env(safe-area-inset-right))] pb-[max(1.5rem,env(safe-area-inset-bottom))]">
           <div className="relative w-[min(100%,24rem,38dvh)] aspect-square">
             <TrackThumbnailFill thumbnailUrl={currentTrack.thumbnailUrl} title={currentTrack.title} />
             {particles.map((p) => (

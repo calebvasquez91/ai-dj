@@ -3,14 +3,16 @@ import { Geist, Geist_Mono, Bungee } from "next/font/google";
 import "./globals.css";
 import { ServiceWorkerRegister } from "@/components/ServiceWorkerRegister";
 import { ThemeInit } from "@/components/ThemeInit";
-import { THEME_STORAGE_KEY } from "@/lib/theme";
+import { THEME_COLORS, THEME_STORAGE_KEY } from "@/lib/theme";
 
 // Runs before first paint so dark mode never flashes light on load — reads
 // the same zustand-persist localStorage key lib/theme.ts writes to,
 // directly (not through the store, which hasn't hydrated yet this early).
 const THEME_INIT_SCRIPT = `(function(){try{var r=localStorage.getItem(${JSON.stringify(
   THEME_STORAGE_KEY
-)});var t=r?JSON.parse(r).state.theme:null;if(t==="dark")document.documentElement.setAttribute("data-theme","dark");}catch(e){}})();`;
+)});var t=r?JSON.parse(r).state.theme:null;if(t==="dark"){document.documentElement.setAttribute("data-theme","dark");var m=document.querySelectorAll('meta[name="theme-color"]');for(var i=0;i<m.length;i++)m[i].setAttribute("content",${JSON.stringify(
+  THEME_COLORS.dark
+)});}}catch(e){}})();`;
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -43,7 +45,11 @@ export const metadata: Metadata = {
 };
 
 export const viewport: Viewport = {
-  themeColor: "#9333ea",
+  width: "device-width",
+  initialScale: 1,
+  // The browser's own chrome (Android address bar, iOS Safari's tinted status area) follows the app's own light/dark
+  // switch, not the phone's: lib/theme.ts re-tints this tag when the theme changes (and the script above does on load).
+  themeColor: THEME_COLORS.light,
   // Lets the layout extend under a notch/home-indicator; the player bar and
   // overlay panels pad themselves with env(safe-area-inset-*) so nothing
   // important ends up underneath it.

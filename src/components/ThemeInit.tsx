@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect } from "react";
-import { useTheme } from "@/lib/theme";
+import { applyThemeToDocument, useTheme } from "@/lib/theme";
 
 /**
  * The inline script in app/layout.tsx already sets data-theme before first
@@ -13,9 +13,7 @@ import { useTheme } from "@/lib/theme";
  */
 export function ThemeInit() {
   useEffect(() => {
-    const { theme } = useTheme.getState();
-    if (theme === "dark") document.documentElement.setAttribute("data-theme", "dark");
-    else document.documentElement.removeAttribute("data-theme");
+    applyThemeToDocument(useTheme.getState().theme);
   }, []);
   return null;
 }
