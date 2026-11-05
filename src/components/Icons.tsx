@@ -181,6 +181,17 @@ export function PlusIcon({ size = 16, className }: IconProps) {
   );
 }
 
+export function SlidersIcon({ size = 18, className }: IconProps) {
+  return (
+    <svg {...base(size)} className={className} aria-hidden="true">
+      <path d="M4 7h9M17 7h3M4 12h3M11 12h9M4 17h11M19 17h1" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+      <circle cx="15" cy="7" r="2" stroke="currentColor" strokeWidth="1.8" />
+      <circle cx="9" cy="12" r="2" stroke="currentColor" strokeWidth="1.8" />
+      <circle cx="17" cy="17" r="2" stroke="currentColor" strokeWidth="1.8" />
+    </svg>
+  );
+}
+
 export function SparklesIcon({ size = 18, className }: IconProps) {
   return (
     <svg {...base(size)} className={className} aria-hidden="true">

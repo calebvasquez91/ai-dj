@@ -5,7 +5,7 @@ import { usePathname, useRouter } from "next/navigation";
 import { useSession, signOut } from "next-auth/react";
 import { useStore } from "@/lib/store";
 import { ThemeToggle } from "@/components/ThemeToggle";
-import { HomeIcon, LibraryIcon, SparklesIcon } from "@/components/Icons";
+import { HomeIcon, LibraryIcon, SlidersIcon, SparklesIcon } from "@/components/Icons";
 import type { ComponentType } from "react";
 
 function NavLink({
@@ -69,6 +69,7 @@ export function Sidebar() {
           <NavLink href="/" icon={HomeIcon} label="Home" />
           <NavLink href="/library" icon={LibraryIcon} label="Music Library" />
           <NavLink href="/inspiration" icon={SparklesIcon} label="DJ Inspiration" />
+          <NavLink href="/settings" icon={SlidersIcon} label="Settings" />
         </nav>
 
         <div className="flex items-center justify-between px-2 pt-2">

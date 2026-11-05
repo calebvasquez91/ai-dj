@@ -3,68 +3,98 @@
 /* A phone held sideways: short, but wide enough that the player bar fits on one row (it needs about 780px). */
 @custom-variant short-landscape (@media (max-height: 480px) and (orientation: landscape) and (min-width: 780px));
 
+/* ---- Design tokens ----
+   Dark is the default (a first launch is dark); light lives under data-theme="light", which lib/theme.ts and the inline
+   script in app/layout.tsx always set. Names kept from before so every existing component keeps working: --accent-teal is
+   now the cool secondary (sky), --accent-purple the violet accent, --accent-pink the rose. --border is the accent hue
+   itself because the app draws borders as `border-border/10` (10% of it); --border-subtle is the same line as one color.
+   The gradient (--accent-gradient) is for the play button, the progress fill, the active tab indicator and SYNC only. */
 :root {
-  --background: #f3edff;
-  --surface: #ffffff;
-  --surface-hover: #f4e9ff;
-  --foreground: #211531;
-  --muted: #6c5b82;
-  --accent: #0d9488;
-  --accent-strong: #9333ea;
-  --accent-teal: #0d9488;
-  --accent-teal-bright: #2dd4bf;
-  --accent-purple: #9333ea;
-  --accent-purple-bright: #c084fc;
-  --accent-pink: #ec4899;
-  --accent-yellow: #facc15;
-  --border: #211531;
+  color-scheme: dark;
+  /* Surfaces, darkest to lightest: page, panels, cards, hover, raised. */
+  --background: #080810;
+  --background-alt: #0f0e18;
+  --surface: #161524;
+  --surface-hover: #1e1d30;
+  --surface-raised: #26253d;
+  /* Text: primary, secondary (65%), faint (38%, for non-essential detail only: it is below AA contrast). */
+  --foreground: #e8e6f0;
+  --muted: rgba(232, 230, 240, 0.65);
+  --faint: rgba(232, 230, 240, 0.38);
+  --accent: #a78bfa;
+  --accent-strong: #c4b5fd;
+  --accent-teal: #38bdf8;
+  --accent-teal-bright: #7dd3fc;
+  --accent-purple: #a78bfa;
+  --accent-purple-bright: #c4b5fd;
+  --accent-pink: #fb7185;
+  --accent-yellow: #fde047;
+  --accent-green: #4ade80;
+  --border: #a78bfa;
+  --border-subtle: rgba(167, 139, 250, 0.13);
+  --accent-gradient: linear-gradient(135deg, #a78bfa, #38bdf8);
   /* Multiplier on every foreground-tinted shadow's color-mix percentage
      below (shadow-elevate-*, .card, .btn-outline, .que-stage, .que-why-
-     pill) — a flat opacity that reads as a soft shadow on this light
-     surface all but disappears once --foreground flips to a light color
-     for dark mode, so dark mode bumps this instead of forking every rule. */
-  --shadow-boost: 1;
+     pill) — a flat opacity that reads as a soft shadow on a light
+     surface all but disappears once --foreground is a light color, so
+     dark mode bumps this instead of forking every rule. */
+  --shadow-boost: 1.8;
 }
 
-:root[data-theme="dark"] {
-  /* Same identity, recalculated for a dark surface: the hero section's own
-     near-black (#150f20) becomes the page background, accents move to
-     their existing "-bright" values (already tuned for contrast) as the
-     new base, and foreground/muted invert to the light lavender tones the
-     hero already uses for text. */
-  --background: #150f20;
-  --surface: #201933;
-  --surface-hover: #2b2245;
-  --foreground: #f3edff;
-  --muted: #ab9bc4;
-  --accent: #2dd4bf;
-  --accent-strong: #c084fc;
-  --accent-teal: #2dd4bf;
-  --accent-teal-bright: #5eead4;
-  --accent-purple: #c084fc;
-  --accent-purple-bright: #e9d5ff;
-  --accent-pink: #f472b6;
-  --accent-yellow: #fde047;
-  --border: #3a2e52;
-  --shadow-boost: 1.8;
+:root[data-theme="light"] {
+  color-scheme: light;
+  --background: #f7f6fb;
+  --background-alt: #efeef6;
+  --surface: #ffffff;
+  --surface-hover: #f1effa;
+  --surface-raised: #e8e5f4;
+  --foreground: #1b1930;
+  --muted: rgba(27, 25, 48, 0.65);
+  --faint: rgba(27, 25, 48, 0.38);
+  /* Darker hues than the dark theme's: the same accents at AA contrast on white. */
+  --accent: #7c3aed;
+  --accent-strong: #6d28d9;
+  --accent-teal: #0369a1;
+  --accent-teal-bright: #0ea5e9;
+  --accent-purple: #7c3aed;
+  --accent-purple-bright: #8b5cf6;
+  --accent-pink: #be123c;
+  --accent-yellow: #ca8a04;
+  --accent-green: #15803d;
+  --border: #7c3aed;
+  --border-subtle: rgba(124, 58, 237, 0.16);
+  --accent-gradient: linear-gradient(135deg, #7c3aed, #0284c7);
+  --shadow-boost: 1;
 }
 
 @theme inline {
   --color-background: var(--background);
+  --color-background-alt: var(--background-alt);
   --color-surface: var(--surface);
   --color-surface-hover: var(--surface-hover);
+  --color-surface-raised: var(--surface-raised);
   --color-foreground: var(--foreground);
   --color-muted: var(--muted);
+  --color-faint: var(--faint);
   --color-accent: var(--accent);
   --color-accent-strong: var(--accent-strong);
   --color-accent-teal: var(--accent-teal);
   --color-accent-purple: var(--accent-purple);
   --color-accent-pink: var(--accent-pink);
   --color-accent-yellow: var(--accent-yellow);
+  --color-accent-green: var(--accent-green);
   --color-border: var(--border);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+  --font-sans: var(--font-dm-sans);
+  --font-mono: var(--font-space-mono);
   --font-retro: var(--font-retro);
+}
+
+/* The scale the primitives (src/ui) are built on: 12px card radius, 8 / 16 / 24 spacing. */
+@theme {
+  --radius-card: 12px;
+  --spacing-step-1: 8px;
+  --spacing-step-2: 16px;
+  --spacing-step-3: 24px;
 }
 
 /* ---- Layout metrics shared by the shell and every overlay ----
@@ -129,23 +159,9 @@ summary,
 }
 
 body {
+  /* Quiet, flat surfaces: the colored washes that used to sit here are gone (the spec's header washes come from the
+     current cover art, in the screens phase). */
   background-color: var(--background);
-  background-image: radial-gradient(
-      circle at 12% 8%,
-      color-mix(in srgb, var(--accent-teal-bright) 12%, transparent) 0%,
-      transparent 40%
-    ),
-    radial-gradient(
-      circle at 88% 15%,
-      color-mix(in srgb, var(--accent-purple-bright) 13%, transparent) 0%,
-      transparent 42%
-    ),
-    radial-gradient(
-      circle at 50% 100%,
-      color-mix(in srgb, var(--accent-pink) 8%, transparent) 0%,
-      transparent 48%
-    );
-  background-attachment: fixed;
   color: var(--foreground);
   font-family: var(--font-sans), Arial, Helvetica, sans-serif;
   /* No rubber-band bounce revealing the background behind the fixed shell. */

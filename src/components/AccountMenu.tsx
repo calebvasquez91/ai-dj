@@ -5,7 +5,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useSession, signOut } from "next-auth/react";
 import { ThemeToggle } from "@/components/ThemeToggle";
-import { SparklesIcon } from "@/components/Icons";
+import { SlidersIcon, SparklesIcon } from "@/components/Icons";
 
 /**
  * The phone's home for what the side panel used to hold besides navigation: the dark-mode switch, who is signed in, Log
@@ -77,6 +77,13 @@ export function AccountMenu() {
             <span className="text-sm text-muted">Dark mode</span>
             <ThemeToggle />
           </div>
+          <Link
+            href="/settings"
+            className="flex items-center gap-2 rounded-lg px-1 py-2 text-sm font-medium text-muted hover:text-foreground"
+          >
+            <SlidersIcon size={18} />
+            Settings
+          </Link>
           <Link
             href="/inspiration"
             className="flex items-center gap-2 rounded-lg px-1 py-2 text-sm font-medium text-muted hover:text-foreground"
