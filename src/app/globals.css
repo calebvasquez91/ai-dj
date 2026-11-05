@@ -69,13 +69,17 @@
 
 /* ---- Layout metrics shared by the shell and every overlay ----
    The top bar grows by the notch/status-bar inset; the player bar's real height is published at runtime by
-   PlayerBar (it wraps to more rows on a narrow phone) and Que's dock publishes the lane he owns above it. Overlays
-   (side drawer, deck/mixer sheets, queue) are sized from these so none of them can cover the player bar or Que. */
+   PlayerBar (it wraps to more rows on a narrow phone), the phone's bottom navigation publishes its own height under it
+   (0 on a tablet or desktop, where it is not displayed) and Que's dock publishes the lane he owns above it. Overlays
+   (deck/mixer sheets, queue) are sized from these so none of them can cover the player bar, the bottom navigation or
+   Que. --dock-h is the whole stack under the page: the player bar and the navigation below it. */
 :root {
   --topbar-h: calc(4rem + env(safe-area-inset-top, 0px));
   --player-bar-h: 5rem;
+  --bottom-nav-h: 0px;
+  --dock-h: calc(var(--player-bar-h) + var(--bottom-nav-h));
   --que-lane-h: 0px;
-  --chrome-bottom: calc(var(--player-bar-h) + var(--que-lane-h));
+  --chrome-bottom: calc(var(--dock-h) + var(--que-lane-h));
 }
 
 /* A phone held sideways is short: a slimmer top bar leaves room for the page. */

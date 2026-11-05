@@ -12,7 +12,7 @@ const QUE_LANE_REM = 2.75;
  *
  * He used to be a child of the player bar, which is a stacking context of its own (backdrop-filter), so the dimming
  * layer behind the side panel, the decks, the mixer and the queue always painted over him. He is rendered here, outside
- * it, above every panel; and he reserves a lane (--que-lane-h) that the drawer and the bottom sheets are sized to stay
+ * it, above every panel; and he reserves a lane (--que-lane-h) that the bottom sheets and the page are sized to stay
  * out of, so he is never covered and never covers a control. Hidden only while the full-screen now-playing view is up,
  * which shows its own Que.
  */
@@ -31,7 +31,7 @@ export function QueDock() {
 
   if (!show) return null;
   return (
-    <div className="fixed z-[60] left-[max(0.75rem,env(safe-area-inset-left))] bottom-[calc(var(--player-bar-h)+0.25rem)] max-w-[calc(100vw-1.5rem)]">
+    <div className="fixed z-[60] left-[max(0.75rem,env(safe-area-inset-left))] bottom-[calc(var(--dock-h)+0.25rem)] max-w-[calc(100vw-1.5rem)]">
       <Que />
     </div>
   );

@@ -29,12 +29,12 @@ export function QueuePanel() {
   return (
     <>
       <div
-        className="fixed inset-x-0 top-0 bottom-[var(--player-bar-h)] z-40 bg-black/50"
+        className="fixed inset-x-0 top-0 bottom-[var(--dock-h)] z-40 bg-black/50"
         onClick={toggle}
         aria-hidden="true"
       />
       {/* Stops at the player bar, so the Queue button that opened it is still there to close it. */}
-      <aside className="fixed top-0 right-0 bottom-[var(--player-bar-h)] z-50 w-[min(85vw,20rem)] pt-[env(safe-area-inset-top)] pr-[env(safe-area-inset-right)] surface-glass border-l border-border/10 shadow-elevate-left flex flex-col">
+      <aside className="fixed top-0 right-0 bottom-[var(--dock-h)] z-50 w-[min(85vw,20rem)] pt-[env(safe-area-inset-top)] pr-[env(safe-area-inset-right)] surface-glass border-l border-border/10 shadow-elevate-left flex flex-col">
         <div
           className="flex items-center justify-between px-4 h-16 shrink-0 border-b border-border/10 transition-colors duration-1000"
           style={isSpooky ? { backgroundColor: "rgba(255, 80, 0, 0.08)" } : undefined}

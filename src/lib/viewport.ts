@@ -1,19 +1,13 @@
 /**
- * Where the layout switches from the phone layout (the side panel is a slide-over drawer, closed until asked for) to
- * the desktop one (it sits in the page, open until collapsed). Matches Tailwind's `md` breakpoint, which the side
- * panel's own classes use, so the two can't disagree.
+ * Where the layout switches from the phone layout (no side panel or hamburger; the buttons under the player bar
+ * navigate) to the desktop one (the side panel sits in the page, open until collapsed). Matches Tailwind's `md`
+ * breakpoint, which the side panel's and bottom bar's own classes use, so the two can't disagree.
  */
 export const DESKTOP_MEDIA_QUERY = "(min-width: 768px)";
 
-/** Whether the viewport is wide enough for the desktop layout right now (false on the server and where matchMedia is missing). */
-export function isDesktopViewport(): boolean {
-  if (typeof window === "undefined" || typeof window.matchMedia !== "function") return false;
-  return window.matchMedia(DESKTOP_MEDIA_QUERY).matches;
-}
-
 /**
  * The side panel is open when the user chose so (true) or closed it (false); with no choice yet (null) it follows the
- * viewport: open on desktop, closed on a phone, where it would cover the page.
+ * viewport: open on desktop. (A phone never displays it, whatever the choice.)
  */
 export function sidebarShowing(choice: boolean | null, desktop: boolean): boolean {
   return choice ?? desktop;

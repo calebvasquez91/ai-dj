@@ -10,6 +10,7 @@ import { SpookyBackdrop } from "@/components/SpookyBackdrop";
 import { Sidebar } from "@/components/Sidebar";
 import { TopBar } from "@/components/TopBar";
 import { PlayerBar } from "@/components/PlayerBar";
+import { BottomNav } from "@/components/BottomNav";
 import { QueDock } from "@/components/QueDock";
 import { NowPlayingView } from "@/components/NowPlayingView";
 import { QueuePanel } from "@/components/QueuePanel";
@@ -42,6 +43,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
         </div>
       </div>
       <PlayerBar />
+      <BottomNav />
       <QueDock />
       <NowPlayingView />
       <QueuePanel />

@@ -116,6 +116,15 @@ export function LibraryIcon({ size = 18, className }: IconProps) {
   );
 }
 
+export function SearchIcon({ size = 18, className }: IconProps) {
+  return (
+    <svg {...base(size)} className={className} aria-hidden="true">
+      <circle cx="10.5" cy="10.5" r="6.5" stroke="currentColor" strokeWidth="1.8" />
+      <path d="m15.5 15.5 5 5" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+    </svg>
+  );
+}
+
 export function ChevronDownIcon({ size = 18, className }: IconProps) {
   return (
     <svg {...base(size)} className={className} aria-hidden="true">
