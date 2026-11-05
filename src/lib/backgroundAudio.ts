@@ -78,34 +78,69 @@ export interface WakeInput {
 }
 
 /**
- * What to do about the audio context on this check: wake it if it stopped while sound is wanted, and drop a Song Sync
- * morph whose two clocks (the wall clock its tick runs on, the audio clock its voice and gains run on) can no longer be
- * trusted to agree. They disagree only when the AUDIO clock stopped or fell behind — a context the OS suspended — and
- * not when the page's main thread merely hung for a few seconds (the audio thread, and the morph's voice with it,
- * carried on, so the elapsed wall time alone says nothing). A morph whose crossfade is already scheduled is left to
- * finish, as before.
+ * How long the app keeps waking a stopped context on its own. A screen lock or a short interruption (Siri, a
+ * notification) is over well within this; a phone call or another app that took the audio is not, and past it the app
+ * stops fighting for the speakers and treats the stop as a pause (the caller sets isPlaying false), so the user decides
+ * when the music comes back. Touching or returning to the page starts the wait over (see wakeAudioContext).
  */
-export function wakeVerdict(i: WakeInput): { resume: boolean; dropMorph: boolean } {
-  if (shouldResumeContext(i.contextState, i.wantPlaying)) return { resume: true, dropMorph: false };
+export const RESUME_PATIENCE_MS = 15000;
+
+/**
+ * What to do about the audio context on this check: wake it if it stopped while sound is wanted (for up to
+ * RESUME_PATIENCE_MS, then give up), and drop a Song Sync morph whose two clocks (the wall clock its tick runs on, the
+ * audio clock its voice and gains run on) can no longer be trusted to agree. They disagree only when the AUDIO clock
+ * stopped or fell behind — a context the OS suspended — and not when the page's main thread merely hung for a few
+ * seconds (the audio thread, and the morph's voice with it, carried on, so the elapsed wall time alone says nothing). A
+ * morph whose crossfade is already scheduled is left to finish, as before.
+ */
+export function wakeVerdict(i: WakeInput): { resume: boolean; dropMorph: boolean; giveUp: boolean } {
+  const dropIfMorph = i.morphActive && !i.crossfadeScheduled;
+  if (shouldResumeContext(i.contextState, i.wantPlaying)) {
+    // Giving up pauses the app, so the stale morph goes with it (its wall clock has run on without any sound).
+    if (i.stoppedForMs >= RESUME_PATIENCE_MS) return { resume: false, dropMorph: dropIfMorph, giveUp: true };
+    return { resume: true, dropMorph: false, giveUp: false };
+  }
   const audioClockBehind = i.wallDeltaMs >= AUDIO_GAP_ABANDON_MS && i.audioDeltaMs < i.wallDeltaMs * AUDIO_CLOCK_LAG_RATIO;
   const wasStopped = i.stoppedForMs >= AUDIO_GAP_ABANDON_MS;
-  return { resume: false, dropMorph: i.morphActive && !i.crossfadeScheduled && (audioClockBehind || wasStopped) };
+  return { resume: false, dropMorph: dropIfMorph && (audioClockBehind || wasStopped), giveUp: false };
 }
 
 /** How long a deck's gain may sit near zero while its track is playing and nothing is fading it, before it is judged stuck. */
 export const STUCK_MUTE_MS = 2500;
 /** A gain under this, outside any fade, is a muted deck. */
 export const MUTED_GAIN = 0.05;
+/** An output level (RMS of the deck's samples after its gain) under this is silence. */
+export const SILENT_OUTPUT_RMS = 0.002;
+
+/** The RMS level of a block of samples (0 for none), for reading how loud a deck really is. */
+export function rmsLevel(samples: ArrayLike<number>): number {
+  if (samples.length === 0) return 0;
+  let sumSquares = 0;
+  for (let i = 0; i < samples.length; i++) sumSquares += samples[i] * samples[i];
+  return Math.sqrt(sumSquares / samples.length);
+}
 
 /**
- * A playing deck whose gain stayed at (almost) zero when no transition, fade-in or fade-out is accounting for it: the
- * leftover of an automation that never finished (for instance a crossfade that was frozen with the audio context).
- * `mutedSinceMs` is when it was first seen like that (null if it wasn't), `nowMs` the current time; true means "lift it".
+ * A deck that looks muted right now: its gain reads near zero AND nothing audible is coming out of it. The gain alone is
+ * not trusted: AudioParam.value is the live automated value in Chrome, but a browser that reports the last value that
+ * was set instead (it can be 0 from a finished fade-in) would show a healthy deck as muted. The measured output is the
+ * ground truth; a deck whose output is audible is not muted whatever its gain reads.
+ */
+export function looksMuted(gain: number, outputRms: number): boolean {
+  return gain < MUTED_GAIN && outputRms < SILENT_OUTPUT_RMS;
+}
+
+/**
+ * A playing deck that has looked muted (looksMuted) for long enough when no transition, fade-in or fade-out is
+ * accounting for it: the leftover of an automation that never finished (for instance a crossfade that was frozen with
+ * the audio context). `mutedSinceMs` is when it was first seen like that (null if it wasn't), `nowMs` the current time;
+ * true means "lift it".
  */
 export function isStuckMuted(args: {
   gain: number;
+  outputRms: number;
   mutedSinceMs: number | null;
   nowMs: number;
 }): boolean {
-  return args.gain < MUTED_GAIN && args.mutedSinceMs != null && args.nowMs - args.mutedSinceMs >= STUCK_MUTE_MS;
+  return looksMuted(args.gain, args.outputRms) && args.mutedSinceMs != null && args.nowMs - args.mutedSinceMs >= STUCK_MUTE_MS;
 }

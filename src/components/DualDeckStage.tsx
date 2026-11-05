@@ -48,7 +48,7 @@ import { LOOKUP_LOOKAHEAD, reachableTracks } from "@/lib/lookahead";
 import { withTimeout } from "@/lib/withTimeout";
 import { voiceCutoffSec, voiceMapFromStem } from "@/lib/voiceMap";
 import { SONG_SYNC_ENABLED, STEM_FEATURES_ENABLED, VOCAL_MASHUP_ENABLED } from "@/lib/featureFlags";
-import { MUTED_GAIN, isStuckMuted, shouldResumeContext, wakeVerdict } from "@/lib/backgroundAudio";
+import { isStuckMuted, looksMuted, rmsLevel, shouldResumeContext, wakeVerdict } from "@/lib/backgroundAudio";
 import { TRANSITION_FX_ENABLED, buildSyncReport } from "@/lib/syncEngine";
 import {
   SONG_SYNC_CROSSFADE_BARS,
@@ -4099,13 +4099,18 @@ export function DualDeckStage() {
     let lastCheckWallMs = performance.now();
     let lastCheckAudioMs: number | null = null;
     let mutedSinceMs: number | null = null;
+    const muteProbe = new Float32Array(256);
 
     /**
      * Wakes an audio context the OS stopped, and drops a Song Sync morph the stop left stranded. What counts as a stop
      * is decided by wakeVerdict from the two clocks: the audio clock (ctx.currentTime) against real time, so a page whose
      * main thread merely hung for a few seconds (the audio thread carried on) is not mistaken for a suspended context.
+     *
+     * It keeps waking a stopped context only for a while (RESUME_PATIENCE_MS): a call or another app that took the audio
+     * is not something to fight, so past that the stop is treated as a pause and the user brings the music back. The page
+     * being touched or returned to (`userBack`) is a reason to try again, so it starts that wait over instead.
      */
-    function wakeAudioContext() {
+    function wakeAudioContext(userBack = false) {
       const ctx = audioCtxRef.current;
       if (!ctx) return;
       const now = performance.now();
@@ -4124,6 +4129,17 @@ export function DualDeckStage() {
         morphActive: morph != null,
         crossfadeScheduled: morph?.crossfadeScheduled ?? false,
       });
+      if (verdict.giveUp) {
+        if (userBack) {
+          audioStoppedSinceMs = now;
+          ctx.resume().catch(() => {});
+          return;
+        }
+        audioStoppedSinceMs = null;
+        useStore.setState({ isPlaying: false });
+        if (verdict.dropMorph) cancelSongSync();
+        return;
+      }
       if (verdict.resume) {
         audioStoppedSinceMs ??= now - Math.min(wallDeltaMs, 500);
         ctx.resume().catch(() => {});
@@ -4161,14 +4177,18 @@ export function DualDeckStage() {
         mutedSinceMs = null;
         return;
       }
+      // The gain alone isn't trusted (AudioParam.value may report the last value set, not the automated one, on some
+      // browsers): the deck's real output, off its metering tap, has to be silent too.
       const gain = nodes.gain.gain.value;
-      if (gain >= MUTED_GAIN) {
+      nodes.meterAnalyser.getFloatTimeDomainData(muteProbe);
+      const outputRms = rmsLevel(muteProbe);
+      if (!looksMuted(gain, outputRms)) {
         mutedSinceMs = null;
         return;
       }
       const now = performance.now();
       mutedSinceMs ??= now;
-      if (isStuckMuted({ gain, mutedSinceMs, nowMs: now })) {
+      if (isStuckMuted({ gain, outputRms, mutedSinceMs, nowMs: now })) {
         mutedSinceMs = null;
         const at = ctx.currentTime;
         nodes.gain.gain.cancelScheduledValues(at);
@@ -4178,7 +4198,7 @@ export function DualDeckStage() {
     }
 
     // Coming back to the page, or touching it, is the moment a browser that refused to restart the audio will allow it.
-    const onWake = () => wakeAudioContext();
+    const onWake = () => wakeAudioContext(true);
     document.addEventListener("visibilitychange", onWake);
     window.addEventListener("pageshow", onWake);
     window.addEventListener("focus", onWake);

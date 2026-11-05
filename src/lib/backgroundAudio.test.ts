@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { AUDIO_GAP_ABANDON_MS, MUTED_GAIN, STUCK_MUTE_MS, isStuckMuted, mediaPositionState, shouldResumeContext, silentWavDataUri, wakeVerdict, type WakeInput } from "./backgroundAudio";
+import { AUDIO_GAP_ABANDON_MS, MUTED_GAIN, RESUME_PATIENCE_MS, SILENT_OUTPUT_RMS, STUCK_MUTE_MS, isStuckMuted, looksMuted, mediaPositionState, rmsLevel, shouldResumeContext, silentWavDataUri, wakeVerdict, type WakeInput } from "./backgroundAudio";
 
 describe("shouldResumeContext", () => {
   it("wakes a context that stopped while the app wants sound", () => {
@@ -83,11 +83,11 @@ describe("wakeVerdict", () => {
   const verdict = (over: Partial<WakeInput>) => wakeVerdict({ ...healthy, ...over });
 
   it("leaves a healthy, running morph alone", () => {
-    expect(verdict({})).toEqual({ resume: false, dropMorph: false });
+    expect(verdict({})).toEqual({ resume: false, dropMorph: false, giveUp: false });
   });
 
   it("wakes a stopped context and waits to judge the morph until it runs again", () => {
-    expect(verdict({ contextState: "suspended", stoppedForMs: 9000 })).toEqual({ resume: true, dropMorph: false });
+    expect(verdict({ contextState: "suspended", stoppedForMs: 9000 })).toEqual({ resume: true, dropMorph: false, giveUp: false });
     expect(verdict({ contextState: "interrupted" }).resume).toBe(true);
   });
 
@@ -124,19 +124,80 @@ describe("wakeVerdict", () => {
   it("does not try to wake a context while paused", () => {
     expect(verdict({ contextState: "suspended", wantPlaying: false }).resume).toBe(false);
   });
+
+  it("keeps trying to wake a context for the whole patience window", () => {
+    expect(verdict({ contextState: "interrupted", stoppedForMs: RESUME_PATIENCE_MS - 1 })).toEqual({
+      resume: true,
+      dropMorph: false,
+      giveUp: false,
+    });
+  });
+
+  it("gives up on a context that stays stopped, instead of fighting the interruption", () => {
+    expect(verdict({ contextState: "interrupted", stoppedForMs: RESUME_PATIENCE_MS })).toEqual({
+      resume: false,
+      dropMorph: true,
+      giveUp: true,
+    });
+  });
+
+  it("takes the stale morph down with it when it gives up, unless its crossfade is already scheduled", () => {
+    expect(verdict({ contextState: "suspended", stoppedForMs: RESUME_PATIENCE_MS, morphActive: false }).dropMorph).toBe(false);
+    expect(verdict({ contextState: "suspended", stoppedForMs: RESUME_PATIENCE_MS, crossfadeScheduled: true }).dropMorph).toBe(false);
+  });
+
+  it("never gives up while the app is paused", () => {
+    expect(verdict({ contextState: "suspended", wantPlaying: false, stoppedForMs: RESUME_PATIENCE_MS }).giveUp).toBe(false);
+  });
+});
+
+describe("rmsLevel", () => {
+  it("is 0 for silence and for no samples", () => {
+    expect(rmsLevel(new Float32Array(256))).toBe(0);
+    expect(rmsLevel([])).toBe(0);
+  });
+
+  it("is the sample size for a constant signal", () => {
+    expect(rmsLevel([0.5, -0.5, 0.5, -0.5])).toBeCloseTo(0.5);
+  });
+
+  it("is about 0.707 for a full-scale sine", () => {
+    const sine = Array.from({ length: 1000 }, (_, i) => Math.sin((2 * Math.PI * i * 5) / 1000));
+    expect(rmsLevel(sine)).toBeCloseTo(Math.SQRT1_2, 2);
+  });
+});
+
+describe("looksMuted", () => {
+  it("is muted when the gain is low and nothing audible comes out", () => {
+    expect(looksMuted(0, 0)).toBe(true);
+  });
+
+  it("is not muted when the output is audible, whatever the gain reads", () => {
+    // a browser that reports a stale 0 for a deck that is really at full gain
+    expect(looksMuted(0, 0.2)).toBe(false);
+    expect(looksMuted(0, SILENT_OUTPUT_RMS)).toBe(false);
+  });
+
+  it("is not muted at an audible gain", () => {
+    expect(looksMuted(MUTED_GAIN, 0)).toBe(false);
+  });
 });
 
 describe("isStuckMuted", () => {
   it("is not stuck the moment it is first seen quiet", () => {
-    expect(isStuckMuted({ gain: 0, mutedSinceMs: 1000, nowMs: 1000 })).toBe(false);
+    expect(isStuckMuted({ gain: 0, outputRms: 0, mutedSinceMs: 1000, nowMs: 1000 })).toBe(false);
   });
 
   it("is stuck once it has stayed quiet long enough", () => {
-    expect(isStuckMuted({ gain: 0, mutedSinceMs: 1000, nowMs: 1000 + STUCK_MUTE_MS })).toBe(true);
+    expect(isStuckMuted({ gain: 0, outputRms: 0, mutedSinceMs: 1000, nowMs: 1000 + STUCK_MUTE_MS })).toBe(true);
   });
 
   it("is not stuck at an audible gain, or when it was never seen quiet", () => {
-    expect(isStuckMuted({ gain: MUTED_GAIN, mutedSinceMs: 0, nowMs: 100000 })).toBe(false);
-    expect(isStuckMuted({ gain: 0, mutedSinceMs: null, nowMs: 100000 })).toBe(false);
+    expect(isStuckMuted({ gain: MUTED_GAIN, outputRms: 0, mutedSinceMs: 0, nowMs: 100000 })).toBe(false);
+    expect(isStuckMuted({ gain: 0, outputRms: 0, mutedSinceMs: null, nowMs: 100000 })).toBe(false);
+  });
+
+  it("is not stuck while the deck is audibly playing, even if its gain reads zero", () => {
+    expect(isStuckMuted({ gain: 0, outputRms: 0.1, mutedSinceMs: 0, nowMs: 100000 })).toBe(false);
   });
 });
