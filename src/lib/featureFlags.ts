@@ -15,6 +15,14 @@ export const STEM_FEATURES_ENABLED = process.env.NEXT_PUBLIC_STEM_FEATURES === "
 export const SONG_SYNC_ENABLED = process.env.NEXT_PUBLIC_SONG_SYNC !== "off";
 
 /**
+ * The in-app "Run Sync Test — Same Beat" suite (lib/syncTest.ts, syncTestRunner.ts, components/SyncTestPanel.tsx): the
+ * button on the DJ board, the pair-by-pair verification run, the "Fix Issues Automatically" loop, the results panel and
+ * the Export Log. Switched off: none of it renders or runs, and the Same Beat playlist is an ordinary playlist that
+ * plays with the normal sync/morph behaviour. All the test code stays in place; flip this to true to bring it back.
+ */
+export const SYNC_TEST_ENABLED = false;
+
+/**
  * The vocal mashup (lib/vocalMashup.ts): when the playing track's singing is over, the next track's vocal rides its
  * instrumental. Independent of the paused stem features above: it separates only the one next track of a mashable
  * pair, on demand, under the same server-side budget, and builds voice maps only to know when singing has ended. Off

@@ -3,7 +3,7 @@
 import { useMemo, useRef, useState } from "react";
 import { useStore } from "@/lib/store";
 import { formatTime } from "@/lib/format";
-import { HALLOWEEN_AFFINITY, hasHalloweenAffinity, withHalloweenAffinity } from "@/lib/fxAffinity";
+import { HALLOWEEN_AFFINITY, getEligibleFX, hasHalloweenAffinity, isHalloweenFx, withHalloweenAffinity } from "@/lib/fxAffinity";
 import { PlayIcon, PlusIcon, CloseIcon } from "@/components/Icons";
 import { effectsPool } from "@/lib/spookyFx";
 import { effectiveAutoFxChoice } from "@/lib/autoFxSettings";
@@ -29,7 +29,9 @@ function AutoFxControls() {
   const autoFx = useStore((s) => s.autoFx);
   const setAutoFx = useStore((s) => s.setAutoFx);
   const fxLibrary = useStore((s) => s.fxLibrary);
-  const effects = useMemo(() => effectsPool(fxLibrary), [fxLibrary]);
+  const spooky = useStore((s) => s.activePlaylistTheme === "spooky");
+  // Only effects the active playlist may use can be assigned (Halloween ones only in Spooky Music, never elsewhere).
+  const effects = useMemo(() => effectsPool(getEligibleFX(fxLibrary, spooky)), [fxLibrary, spooky]);
   // A saved choice whose sound was deleted (or is no longer an Effects sound) plays as "random" — show that, not a blank.
   const peakChoice = effectiveAutoFxChoice(autoFx.peakFx, effects);
   const valleyChoice = effectiveAutoFxChoice(autoFx.valleyFx, effects);
@@ -80,6 +82,9 @@ function AutoFxControls() {
 /** The FX Library tab inside QueuePanel — upload, browse/filter/search, preview, and hand-edit metadata for FX sounds (spec #1-3, #6). */
 export function FxLibraryPanel() {
   const fxLibrary = useStore((s) => s.fxLibrary);
+  // Halloween sounds play only in Spooky Music, and only they do there (lib/fxAffinity.ts's getEligibleFX): the others are
+  // shown locked, and can't be previewed — a preview is a sound too.
+  const spooky = useStore((s) => s.activePlaylistTheme === "spooky");
   const fxLibraryLoaded = useStore((s) => s.fxLibraryLoaded);
   const uploadFxSound = useStore((s) => s.uploadFxSound);
   const updateFxSound = useStore((s) => s.updateFxSound);
@@ -173,6 +178,7 @@ export function FxLibraryPanel() {
   }
 
   function playPreview(fx: FxSound) {
+    if (isHalloweenFx(fx) !== spooky) return;
     stopPreview();
     const audio = new Audio(fx.sourceUrl);
     audio.volume = 0.8;
@@ -292,19 +298,22 @@ export function FxLibraryPanel() {
         </p>
       ) : (
         <div className="flex flex-col gap-1">
-          {filtered.map((fx) => (
+          {filtered.map((fx) => {
+            const lockedLabel = isHalloweenFx(fx) === spooky ? null : spooky ? "Not used in Spooky Music" : "Spooky Music only";
+            return (
             <div
               key={fx.id}
-              className="flex flex-col gap-1.5 rounded-md px-2 py-2 transition-colors hover:bg-surface-hover border border-transparent hover:border-border/10"
+              className={`flex flex-col gap-1.5 rounded-md px-2 py-2 transition-colors hover:bg-surface-hover border border-transparent hover:border-border/10 ${lockedLabel ? "opacity-60" : ""}`}
             >
               <div className="flex items-center gap-2">
                 <button
                   type="button"
                   onClick={() => (previewingId === fx.id ? stopPreview() : playPreview(fx))}
+                  disabled={lockedLabel != null}
                   className="btn-icon text-accent-teal hover:text-accent-purple shrink-0"
-                  title={previewingId === fx.id ? "Stop preview" : "Preview (5s)"}
+                  title={lockedLabel ?? (previewingId === fx.id ? "Stop preview" : "Preview (5s)")}
                 >
-                  <PlayIcon size={14} />
+                  {lockedLabel ? <span aria-hidden="true" className="text-xs leading-none">🔒</span> : <PlayIcon size={14} />}
                 </button>
                 <div className="min-w-0 flex-1">
                   <p className="text-sm font-medium break-words line-clamp-2" title={fx.name}>
@@ -317,6 +326,11 @@ export function FxLibraryPanel() {
                     <span className="shrink-0 text-[10px] leading-none px-1.5 py-1 rounded-full bg-accent-teal/20 text-accent-teal font-medium capitalize">
                       {fx.category}
                     </span>
+                    {lockedLabel && (
+                      <span className="shrink-0 text-[10px] leading-none px-1.5 py-1 rounded-full bg-accent-purple/15 text-accent-purple font-medium">
+                        🔒 {lockedLabel}
+                      </span>
+                    )}
                     <span className="text-xs text-muted shrink-0">{formatTime(fx.durationSec)}</span>
                     <span className="text-xs text-muted break-all line-clamp-1 min-w-0" title={fx.fileName}>
                       {fx.fileName}
@@ -410,7 +424,8 @@ export function FxLibraryPanel() {
                 />
               </div>
             </div>
-          ))}
+            );
+          })}
         </div>
       )}
     </div>

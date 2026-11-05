@@ -5,6 +5,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { useStore } from "@/lib/store";
 import { formatTime } from "@/lib/format";
 import { TrackThumbnail } from "@/components/TrackThumbnail";
+import { AddMusicBar } from "@/components/AddMusicBar";
 
 /**
  * The playlist name as a textarea that grows with its content, not an
@@ -70,6 +71,7 @@ function PlaylistContent() {
   const playPlaylist = useStore((s) => s.playPlaylist);
   const currentTrack = useStore((s) => s.currentTrack);
   const setTrackPlayPreference = useStore((s) => s.setTrackPlayPreference);
+  const analyzingTrackIds = useStore((s) => s.analyzingTrackIds);
 
   if (!playlist) {
     return (
@@ -165,6 +167,11 @@ function PlaylistContent() {
                 <div className="min-w-0 flex-1 basis-32">
                   <p className="text-sm font-medium break-words line-clamp-2">{track.title}</p>
                   <p className="text-xs text-muted break-words line-clamp-1">{track.artist}</p>
+                  {analyzingTrackIds.has(track.id) && (
+                    <p className="text-[10px] font-medium text-accent-purple" aria-live="polite">
+                      Analyzing…
+                    </p>
+                  )}
                 </div>
                 <div className="ml-auto flex shrink-0 items-center gap-2">
                 <span className="text-xs text-muted">
@@ -251,6 +258,9 @@ function PlaylistContent() {
           </div>
         </>
       )}
+
+      {/* On every playlist, Spooky Music and Same Beat included; pinned to the bottom of the visible page. */}
+      <AddMusicBar key={playlist.id} playlist={playlist} />
     </div>
   );
 }

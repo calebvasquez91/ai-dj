@@ -1,6 +1,6 @@
 import { describe, expect, it, beforeEach, vi, afterEach } from "vitest";
 import { useStore } from "./store";
-import type { Track } from "@/types/music";
+import type { Playlist, Track } from "@/types/music";
 
 function makeTrack(id: string, playPreference?: Track["playPreference"]): Track {
   return {
@@ -205,5 +205,73 @@ describe("transition FX are off (Song Sync Mode)", () => {
     const state = useStore.getState();
     expect(state.aiFxPickId).toBeNull();
     expect(state.aiFxPickLoading).toBe(false);
+  });
+});
+
+describe("addTrackToPlaylist while that playlist is playing", () => {
+  const failingSave = () => vi.fn().mockResolvedValue(new Response(JSON.stringify({ error: "nope" }), { status: 500 }));
+  const okSave = () => vi.fn().mockResolvedValue(new Response("{}", { status: 200 }));
+
+  function playing(shuffle = false) {
+    const playlist = { id: "p1", name: "P", theme: null, tracks: [makeTrack("a"), makeTrack("c")] } as unknown as Playlist;
+    useStore.setState({ playlists: [playlist, { id: "p2", name: "Other", theme: null, tracks: [] } as unknown as Playlist] });
+    useStore.getState().playPlaylist(playlist, { shuffle });
+  }
+
+  afterEach(() => vi.unstubAllGlobals());
+
+  it("joins the live queue and asks for background analysis", () => {
+    vi.stubGlobal("fetch", okSave());
+    playing();
+    const added = makeTrack("b");
+    useStore.getState().addTrackToPlaylist("p1", added);
+    const state = useStore.getState();
+    expect(state.queue.some((t) => t.id === "b")).toBe(true);
+    expect(state.analysisRequests.map((t) => t.id)).toEqual(["b"]);
+    expect(state.playlists[0].tracks.map((t) => t.id)).toContain("b");
+  });
+
+  it("joins the shuffle pool, not the queue, in a shuffle", () => {
+    vi.stubGlobal("fetch", okSave());
+    playing(true);
+    useStore.getState().addTrackToPlaylist("p1", makeTrack("b"));
+    const state = useStore.getState();
+    expect(state.shuffleSession!.pool.some((t) => t.id === "b")).toBe(true);
+    expect(state.shuffleSession!.unplayedIds).toContain("b");
+    expect(state.queue.some((t) => t.id === "b")).toBe(false);
+  });
+
+  it("leaves a Do-Not-Play track out of the live session", () => {
+    vi.stubGlobal("fetch", okSave());
+    playing();
+    useStore.getState().addTrackToPlaylist("p1", makeTrack("b", "do-not"));
+    expect(useStore.getState().queue.some((t) => t.id === "b")).toBe(false);
+  });
+
+  it("does not touch the live session when it is added to some other playlist", () => {
+    vi.stubGlobal("fetch", okSave());
+    playing();
+    useStore.getState().addTrackToPlaylist("p2", makeTrack("b"));
+    expect(useStore.getState().queue.some((t) => t.id === "b")).toBe(false);
+  });
+
+  it("undoes the playlist entry and the queue entry when the save fails", async () => {
+    vi.stubGlobal("fetch", failingSave());
+    playing();
+    useStore.getState().addTrackToPlaylist("p1", makeTrack("b"));
+    await vi.waitFor(() => expect(useStore.getState().syncError).not.toBeNull());
+    const state = useStore.getState();
+    expect(state.playlists[0].tracks.some((t) => t.id === "b")).toBe(false);
+    expect(state.queue.some((t) => t.id === "b")).toBe(false);
+  });
+
+  it("keeps a copy of the track that was already queued when the save fails", async () => {
+    vi.stubGlobal("fetch", failingSave());
+    playing();
+    const b = makeTrack("b");
+    useStore.getState().enqueue(b); // queued by hand before it was added to the playlist
+    useStore.getState().addTrackToPlaylist("p1", b);
+    await vi.waitFor(() => expect(useStore.getState().syncError).not.toBeNull());
+    expect(useStore.getState().queue.filter((t) => t.id === "b")).toHaveLength(1);
   });
 });

@@ -13,6 +13,7 @@
 
 import { analyzeTrackFromUrl, fallbackAnalysis } from "@/lib/audio-analysis";
 import { tempoChanged } from "@/lib/analysisJobs";
+import { SYNC_TEST_ENABLED } from "@/lib/featureFlags";
 import { useStore } from "@/lib/store";
 import { buildSyncReport } from "@/lib/syncEngine";
 import { planSongSync, type SongSyncPhase, type SongSyncStatus } from "@/lib/songSync";
@@ -320,6 +321,7 @@ export function cancelSyncTest() {
 }
 
 export async function startSyncTest(): Promise<void> {
+  if (!SYNC_TEST_ENABLED) return;
   if (ui().phase === "running" || ui().fixing) return;
   const run = ++activeRun;
   playbackTakenOver = false;
@@ -401,6 +403,7 @@ async function reanalyzeTrack(track: LocalTrack): Promise<string> {
  * (a lock a few ms over the limit, a pitch that stops short) is listed as needing an engine change, not hidden.
  */
 export async function fixIssuesAutomatically(): Promise<void> {
+  if (!SYNC_TEST_ENABLED) return;
   if (ui().phase === "running" || ui().fixing) return;
   const plan = planFixes(ui().pairs);
   const run = ++activeRun;

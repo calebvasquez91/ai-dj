@@ -27,7 +27,7 @@ import { RECENT_TRANSITIONS_KEPT, planArgsFromState, planTransition } from "@/li
 import { useDjWeights } from "@/lib/dj-weights";
 import { TRANSITION_FX_ENABLED, buildSyncReport, candidateSyncSummary } from "@/lib/syncEngine";
 import { jsonInit, syncRequest } from "@/lib/syncRequest";
-import { hasHalloweenAffinity } from "@/lib/fxAffinity";
+import { getEligibleFX } from "@/lib/fxAffinity";
 import {
   AMBIENCE_DEFAULT_LEVEL,
   FX_DEFAULT_LEVEL,
@@ -45,6 +45,8 @@ import { VOICE_CUT_DEFAULTS, loadVoiceCutSettings, saveVoiceCutSettings, type Vo
 import type { VoiceMap } from "@/lib/voiceMap";
 
 const MAX_HISTORY = 50;
+/** How many Add Music tracks can wait for background analysis at once; the oldest requests drop first. */
+const MAX_ANALYSIS_REQUESTS = 50;
 
 /** One upcoming track the audio engineer has judged for stems, and where its separation stands. */
 export interface StemPick {
@@ -170,6 +172,9 @@ interface PlayerState {
   /** Cached "does this track have a ready, real isolated vocal stem" check per track id (from StemSeparationJob, via the existing GET /api/tracks/[id]/stems) — absent if never checked, null if checked and not ready, a string (the vocalsUrl) once ready. Checked once per track, never invalidated, same convention as trackLyricalFingerprints. Used only to gate the "vocal-layering" transition's eligibility — never triggers separation itself. */
   stemAvailability: Record<string, string | null>;
   analyzingTrackIds: Set<string>;
+  /** Tracks asked to be analysed ahead of time (just added to a playlist from Add Music); the background analyser gets to them after the playing track and the next few (DualDeckStage.tsx, lib/analysisJobs.ts). */
+  analysisRequests: Track[];
+  requestTrackAnalysis: (track: Track) => void;
   styleGenreHint: string | null;
   djMode: DjSetMode;
   /** Manually pinned transition id for the upcoming mix — cleared automatically once that mix starts. */
@@ -250,6 +255,8 @@ interface PlayerState {
   setTagNewFxForSpooky: (tag: boolean) => void;
   /** The `theme` of whichever playlist the current queue was sourced from (playTrackList's `sourcePlaylistTheme` param) — e.g. "spooky" while playing the Spooky Music playlist, null otherwise. Drives all Halloween theming/audio. Cleared by any non-playlist playback (direct track click, a Shuffle Play over the whole library) the same way aiNextPickTrackId is; Shuffle Play on a themed playlist keeps it. */
   activePlaylistTheme: string | null;
+  /** The playlist playback was started from (null for any other playback): what lets a track added to it while it plays join the queue or the shuffle pool. */
+  activePlaylistId: string | null;
   libraryLoaded: boolean;
   /** The most recent failed background save (an optimistic change that the server rejected and the store rolled back) — surfaced as a toast by TopBar. Null when there is nothing to report. */
   syncError: string | null;
@@ -267,12 +274,12 @@ interface PlayerState {
   setQueue: (tracks: Track[]) => void;
   enqueue: (track: Track) => void;
   removeFromQueue: (trackId: string) => void;
-  /** `sourcePlaylistTheme` is the playlist's `theme` field when playback was started from a themed playlist (e.g. "spooky"), omitted/null for any other playback — sets activePlaylistTheme so Halloween theming/audio knows to engage. */
-  playTrackList: (tracks: Track[], startIndex: number, sourcePlaylistTheme?: string | null) => void;
+  /** `sourcePlaylistTheme` is the playlist's `theme` field when playback was started from a themed playlist (e.g. "spooky"), omitted/null for any other playback — sets activePlaylistTheme so Halloween theming/audio knows to engage. `sourcePlaylistId` is the playlist being played, so a track added to it meanwhile can join the queue (see addTrackToPlaylist). */
+  playTrackList: (tracks: Track[], startIndex: number, sourcePlaylistTheme?: string | null, sourcePlaylistId?: string | null) => void;
   /** Starts a true, DJ-driven shuffle session: queues an initial compatibility-aware, non-repeating batch and marks the session active so `next()` keeps extending it as it runs low. See lib/shuffle.ts. */
-  startShuffle: (tracks: Track[], sourcePlaylistTheme?: string | null) => void;
+  startShuffle: (tracks: Track[], sourcePlaylistTheme?: string | null, sourcePlaylistId?: string | null) => void;
   /** Plays a playlist (from `startIndex`, or as a Shuffle Play session), carrying its `theme` so a themed playlist can't lose its look by one entry point forgetting to pass it. Use this, not playTrackList/startShuffle, for anything that plays a whole playlist. */
-  playPlaylist: (playlist: Pick<Playlist, "tracks" | "theme">, options?: { startIndex?: number; shuffle?: boolean }) => void;
+  playPlaylist: (playlist: Pick<Playlist, "tracks" | "theme"> & { id?: string }, options?: { startIndex?: number; shuffle?: boolean }) => void;
   /**
    * Asks the Anthropic API (via /api/dj/next-track) to pick the best next
    * track for a shuffle session, then reorders it to the front of the
@@ -432,6 +439,7 @@ export const useStore = create<PlayerState>()(
       aiFxPickReason: null,
       aiFxPickLoading: false,
       activePlaylistTheme: null,
+      activePlaylistId: null,
       currentTrack: null,
       isPlaying: false,
       volume: 1,
@@ -460,6 +468,7 @@ export const useStore = create<PlayerState>()(
       stemAvailability: {},
       trackLyricalFingerprints: {},
       analyzingTrackIds: new Set<string>(),
+      analysisRequests: [],
       styleGenreHint: null,
       djMode: "auto",
       forcedTransitionId: null,
@@ -519,7 +528,7 @@ export const useStore = create<PlayerState>()(
       removeFromQueue: (trackId) =>
         set((s) => ({ queue: s.queue.filter((t) => t.id !== trackId) })),
 
-      playTrackList: (tracks, startIndex, sourcePlaylistTheme = null) => {
+      playTrackList: (tracks, startIndex, sourcePlaylistTheme = null, sourcePlaylistId = null) => {
         const { currentTrack, history } = get();
         const nextHistory = currentTrack
           ? [...history, currentTrack].slice(-MAX_HISTORY)
@@ -547,14 +556,15 @@ export const useStore = create<PlayerState>()(
           aiFxPickVolumeMultiplier: null,
           aiFxPickReason: null,
           activePlaylistTheme: sourcePlaylistTheme,
+          activePlaylistId: sourcePlaylistId,
         });
       },
 
-      startShuffle: (tracks, sourcePlaylistTheme = null) => {
+      startShuffle: (tracks, sourcePlaylistTheme = null, sourcePlaylistId = null) => {
         const { trackAnalysis, trackLyricalFingerprints, recentShuffleOpeningIds, playTrackList: play } = get();
         const pool = buildShuffleSessionPool(tracks);
         const batch = buildInitialShuffleBatch(pool, trackAnalysis, trackLyricalFingerprints, recentShuffleOpeningIds);
-        play(batch, 0, sourcePlaylistTheme);
+        play(batch, 0, sourcePlaylistTheme, sourcePlaylistId);
         const batchIds = new Set(batch.map((t) => t.id));
         set({
           shuffleSession: { pool, unplayedIds: pool.filter((t) => !batchIds.has(t.id)).map((t) => t.id) },
@@ -564,8 +574,9 @@ export const useStore = create<PlayerState>()(
 
       playPlaylist: (playlist, { startIndex = 0, shuffle = false } = {}) => {
         const theme = playlist.theme ?? null;
-        if (shuffle) get().startShuffle(playlist.tracks, theme);
-        else get().playTrackList(playlist.tracks, startIndex, theme);
+        const id = playlist.id ?? null;
+        if (shuffle) get().startShuffle(playlist.tracks, theme, id);
+        else get().playTrackList(playlist.tracks, startIndex, theme, id);
       },
 
       requestAiNextPick: async () => {
@@ -725,13 +736,8 @@ export const useStore = create<PlayerState>()(
           };
         };
 
-        // While the Spooky Music playlist is active, only halloween-affinied
-        // FX are eligible — see DualDeckStage.tsx's 3-layer Halloween audio
-        // system. Elsewhere, the whole library is in play.
-        const isSpooky = activePlaylistTheme === "spooky";
-        const eligibleFx = isSpooky
-          ? fxLibrary.filter((fx) => hasHalloweenAffinity(fx.playlistAffinity))
-          : fxLibrary;
+        // Only what getEligibleFX allows reaches Claude: Halloween sounds in Spooky Music, everything but them elsewhere.
+        const eligibleFx = getEligibleFX(fxLibrary, activePlaylistTheme === "spooky");
         const toCandidate = (fx: FxSound): AiFxCandidate => ({
           id: fx.id,
           name: fx.name,
@@ -914,6 +920,12 @@ export const useStore = create<PlayerState>()(
           next.delete(trackId);
           return { analyzingTrackIds: next };
         }),
+      requestTrackAnalysis: (track) =>
+        set((s) =>
+          track.source !== "local" || s.trackAnalysis[track.id] || s.analysisRequests.some((t) => t.id === track.id)
+            ? s
+            : { analysisRequests: [...s.analysisRequests, track].slice(-MAX_ANALYSIS_REQUESTS) }
+        ),
       setStyleGenreHint: (genreId) => set({ styleGenreHint: genreId }),
       setDjMode: (mode) => set({ djMode: mode }),
       setForcedTransitionId: (id) => set({ forcedTransitionId: id }),
@@ -1050,6 +1062,7 @@ export const useStore = create<PlayerState>()(
             shuffleSession: null,
             // Nothing left to play, so nothing left to theme — otherwise the Halloween backdrop, Que's costume and the ambient layer outlive the playlist.
             activePlaylistTheme: null,
+            activePlaylistId: null,
             aiNextPickTrackId: null,
             aiNextPickTransitionNote: null,
             aiNextPickRecommendedCrossfadeSec: null,
@@ -1183,6 +1196,32 @@ export const useStore = create<PlayerState>()(
               : p
           ),
         }));
+        // What this add put into the live session, so a failed save undoes exactly that and not a copy that was already there.
+        let joinedQueue = false;
+        let joinedPool = false;
+        if (!wasPresent) {
+          // Added to the playlist that is playing right now: it joins the live queue (or, in a shuffle, the pool the DJ
+          // picks from), so it is heard this session and not only the next time the playlist starts.
+          const live = get();
+          if (live.activePlaylistId === playlistId && live.currentTrack?.id !== track.id && track.playPreference !== "do-not") {
+            if (live.shuffleSession) {
+              if (!live.shuffleSession.pool.some((t) => t.id === track.id)) {
+                joinedPool = true;
+                set({
+                  shuffleSession: {
+                    pool: [...live.shuffleSession.pool, track],
+                    unplayedIds: [...live.shuffleSession.unplayedIds, track.id],
+                  },
+                });
+              }
+            } else if (!live.queue.some((t) => t.id === track.id)) {
+              joinedQueue = true;
+              set({ queue: [...live.queue, track] });
+            }
+          }
+          // Analysed in the background from now, not only once it reaches the front of a queue.
+          get().requestTrackAnalysis(track);
+        }
         void syncRequest(`/api/playlists/${playlistId}/tracks`, jsonInit("POST", { trackId: track.id })).then((r) => {
           if (r.ok) return;
           if (!wasPresent) {
@@ -1190,6 +1229,14 @@ export const useStore = create<PlayerState>()(
               playlists: s.playlists.map((p) =>
                 p.id === playlistId ? { ...p, tracks: p.tracks.filter((t) => t.id !== track.id) } : p
               ),
+              queue: joinedQueue ? s.queue.filter((t) => t.id !== track.id) : s.queue,
+              shuffleSession:
+                s.shuffleSession && joinedPool
+                  ? {
+                      pool: s.shuffleSession.pool.filter((t) => t.id !== track.id),
+                      unplayedIds: s.shuffleSession.unplayedIds.filter((id) => id !== track.id),
+                    }
+                  : s.shuffleSession,
             }));
           }
           get().reportSyncError(`Couldn't add the track to the playlist: ${r.error}`);

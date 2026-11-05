@@ -84,7 +84,7 @@ import { INITIAL_AUTO_FX_STATE, decideAutoFx, type AutoFxState } from "@/lib/aut
 import { effectiveAutoFxChoice } from "@/lib/autoFxSettings";
 import { FX_LOAD_IDLE, beginFxRequest, finishFxRequest, pressFx, resetFxLoad, type FxLoadState } from "@/lib/fxLayer";
 import { energyProfileFromPeaks } from "@/lib/energyProfile";
-import { hasHalloweenAffinity } from "@/lib/fxAffinity";
+import { getEligibleFX, isHalloweenFx } from "@/lib/fxAffinity";
 import { requestLoopPick } from "@/lib/loopApi";
 import {
   SPOOKY_FX_BASE_GAIN,
@@ -279,9 +279,21 @@ interface ActiveSongSync {
   tickIntervalId: ReturnType<typeof setInterval> | null;
 }
 /** A playing FX registered so the FX slider can rescale it and the "FX Playing" indicator can follow it (see trackLiveFx). */
-type LiveFx = { gain: GainNode; base: number; audible: boolean; timer: ReturnType<typeof setTimeout> | null };
+type LiveFx = {
+  gain: GainNode;
+  base: number;
+  audible: boolean;
+  timer: ReturnType<typeof setTimeout> | null;
+  source: AudioBufferSourceNode;
+  /** A Halloween sound: faded out and stopped when the active playlist stops being Spooky Music (fadeOutHalloweenFx). */
+  halloween: boolean;
+  /** Already being faded out by fadeOutHalloweenFx: the 500ms tick calls it again and must not restart the fade. */
+  fading: boolean;
+};
 /** How long the FX layer's sound takes to fade out when the FX button is pressed again, or another effect replaces it. */
 const FX_STOP_FADE_SEC = 0.2;
+/** How long Halloween sounds (the loop, a playing effect) take to fade out when the active playlist stops being Spooky Music. */
+const HALLOWEEN_STOP_FADE_SEC = 1;
 /** Short fade at the <audio>-element/buffer-voice swap boundary (both directions) — belt-and-suspenders against a click even though both sides play identical content from the same position. */
 const TEMPO_RAMP_SWAP_FADE_SEC = 0.03;
 
@@ -479,7 +491,7 @@ export function DualDeckStage() {
     lastFxId: string | null;
     next: FxSound | null;
     failed: Set<string>;
-    poolMemo: { library: FxSound[]; failedCount: number; pool: FxSound[] } | null;
+    poolMemo: { library: FxSound[]; spooky: boolean; failedCount: number; pool: FxSound[] } | null;
   }>({
     trackId: null,
     state: { lastPlayedSec: null, lastRollSec: null },
@@ -578,6 +590,9 @@ export function DualDeckStage() {
   const stemAvailability = useStore((s) => s.stemAvailability);
   const aiFxPickId = useStore((s) => s.aiFxPickId);
   const fxLibrary = useStore((s) => s.fxLibrary);
+  const activePlaylistTheme = useStore((s) => s.activePlaylistTheme);
+  // Tracks added to a playlist from Add Music: analysed in the background after the playing track and the next few.
+  const analysisRequests = useStore((s) => s.analysisRequests);
   const isPlaying = useStore((s) => s.isPlaying);
   const volume = useStore((s) => s.volume);
   const seekRequest = useStore((s) => s.seekRequest);
@@ -816,6 +831,7 @@ export function DualDeckStage() {
       queue,
       trackAnalysis: useStore.getState().trackAnalysis,
       inFlightId: analyzingIdRef.current,
+      requested: analysisRequests,
     });
     if (!job || job.track.source !== "local") return;
     const { track, kind } = job;
@@ -850,7 +866,7 @@ export function DualDeckStage() {
         if (kind === "fresh") useStore.getState().stopAnalyzing(track.id);
         setAnalysisTick((tick) => tick + 1);
       });
-  }, [currentTrack, queue, analysisTick]);
+  }, [currentTrack, queue, analysisTick, analysisRequests]);
 
   // Same reachability rule as the analysis effect above (the playing track and
   // the next few, lib/lookahead.ts), for the lyrical fingerprint
@@ -966,7 +982,8 @@ export function DualDeckStage() {
   // as the vocal-stem prefetch above. startTransition reads straight from
   // the cache and simply skips the FX overlay if this hasn't resolved yet.
   useEffect(() => {
-    const fx = aiFxPickId ? fxLibrary.find((f) => f.id === aiFxPickId) : null;
+    // Only a sound the active playlist may use is fetched: a pick made in Spooky Music is dropped if the playlist changed since.
+    const fx = aiFxPickId ? getEligibleFX(fxLibrary, activePlaylistTheme === "spooky").find((f) => f.id === aiFxPickId) : null;
     const url = fx?.sourceUrl ?? null;
     const ctx = audioCtxRef.current;
     if (!url || !ctx || mashupBufferCacheRef.current[url]) return;
@@ -979,7 +996,7 @@ export function DualDeckStage() {
       .catch(() => {
         // Left uncached — startTransition's cache read just comes up empty and skips the FX overlay.
       });
-  }, [aiFxPickId, fxLibrary]);
+  }, [aiFxPickId, fxLibrary, activePlaylistTheme]);
 
   // Build the Web Audio graph once per <audio> element pair, ever. Each
   // deck: <audio> -> MediaElementSource -> BiquadFilter (neutral "allpass"
@@ -1388,8 +1405,8 @@ export function DualDeckStage() {
     }
 
     /** Registers a playing FX so the FX slider can rescale it live and the "FX Playing" indicator reflects it: the indicator lights once it is audible (`delaySec` after now), not when it was scheduled, and clears when the source ends. */
-    function trackLiveFx(source: AudioBufferSourceNode, gain: GainNode, base: number, delaySec: number) {
-      const live: LiveFx = { gain, base, audible: false, timer: null };
+    function trackLiveFx(source: AudioBufferSourceNode, gain: GainNode, base: number, delaySec: number, halloween = false) {
+      const live: LiveFx = { gain, base, audible: false, timer: null, source, halloween, fading: false };
       fxLiveRef.current.add(live);
       live.timer = setTimeout(() => {
         live.timer = null;
@@ -1413,15 +1430,36 @@ export function DualDeckStage() {
       syncFxPlaying();
     }
 
-    /** The Effects pool (lib/spookyFx.ts's effectsPool) minus any file that failed to load this session — memoized on the library so the 500ms tick doesn't re-filter it. */
+    /** The Effects pool (lib/spookyFx.ts's effectsPool) of the sounds this playlist may use (getEligibleFX: Halloween ones only in Spooky Music, never elsewhere), minus any file that failed to load this session — memoized so the 500ms tick doesn't re-filter it. */
     function effectsPoolNow(): FxSound[] {
       const lined = spookyFxRef.current;
-      const library = useStore.getState().fxLibrary;
+      const { fxLibrary: library, activePlaylistTheme } = useStore.getState();
+      const spooky = activePlaylistTheme === "spooky";
       const memo = lined.poolMemo;
-      if (memo && memo.library === library && memo.failedCount === lined.failed.size) return memo.pool;
-      const pool = effectsPool(library).filter((fx) => !lined.failed.has(fx.id));
-      lined.poolMemo = { library, failedCount: lined.failed.size, pool };
+      if (memo && memo.library === library && memo.spooky === spooky && memo.failedCount === lined.failed.size) return memo.pool;
+      const pool = effectsPool(getEligibleFX(library, spooky)).filter((fx) => !lined.failed.has(fx.id));
+      lined.poolMemo = { library, spooky, failedCount: lined.failed.size, pool };
       return pool;
+    }
+
+    /** Fades out and stops every Halloween sound that is playing (the one-shot effect layer and any transition FX overlay): the active playlist is no longer Spooky Music. */
+    function fadeOutHalloweenFx(fadeSec = HALLOWEEN_STOP_FADE_SEC) {
+      if (fxLayerRef.current?.live.halloween) stopFxLayer(fadeSec);
+      const ctx = audioCtxRef.current;
+      if (!ctx) return;
+      fxLiveRef.current.forEach((live) => {
+        if (!live.halloween || live.fading) return;
+        live.fading = true;
+        const now = ctx.currentTime;
+        try {
+          live.gain.gain.cancelScheduledValues(now);
+          live.gain.gain.setValueAtTime(live.gain.gain.value, now);
+          live.gain.gain.linearRampToValueAtTime(0, now + fadeSec);
+          live.source.stop(now + fadeSec + 0.02);
+        } catch {
+          // already stopped — harmless
+        }
+      });
     }
 
     /** An effect file that won't fetch/decode: never picked again this session, and not left lined up. */
@@ -1532,6 +1570,11 @@ export function DualDeckStage() {
       }
       const finished = finishFxRequest(fxLoadRef.current, begun.token, buffer != null, fxLayerRef.current != null);
       fxLoadRef.current = finished.state;
+      // The playlist may have changed while it decoded: a sound the active playlist may not use never starts.
+      if (isHalloweenFx(fx) !== (useStore.getState().activePlaylistTheme === "spooky")) {
+        if (!fxLayerRef.current) useStore.getState().setFxLayerActive(false);
+        return "cancelled";
+      }
       if (finished.outcome === "cancelled" || !buffer) {
         if (finished.outcome === "failed" && !fxLayerRef.current) useStore.getState().setFxLayerActive(false);
         return finished.outcome === "cancelled" ? "cancelled" : "failed";
@@ -1550,7 +1593,7 @@ export function DualDeckStage() {
       source.connect(gain);
       gain.connect(masterGain);
       gain.gain.value = scaledFxGain(SPOOKY_FX_BASE_GAIN, useStore.getState().fxLevel);
-      const live = trackLiveFx(source, gain, SPOOKY_FX_BASE_GAIN, delaySec);
+      const live = trackLiveFx(source, gain, SPOOKY_FX_BASE_GAIN, delaySec, isHalloweenFx(fx));
       const layer = { source, gain, live };
       fxLayerRef.current = layer;
       useStore.getState().setFxLayerActive(true);
@@ -1610,10 +1653,16 @@ export function DualDeckStage() {
         return;
       }
       if (effectsPoolNow().length === 0) {
-        const reason = noEffectsReason(state.fxLibrary);
+        const spooky = state.activePlaylistTheme === "spooky";
+        const reason = noEffectsReason(getEligibleFX(state.fxLibrary, spooky));
+        const hasEffectsHere = state.fxLibrary.some((fx) => fx.category === "effect");
         state.reportSyncError(
-          reason === "none"
-            ? "No effects yet — upload sounds in the FX Library tab and set their category to Effects."
+          reason === "none" && hasEffectsHere
+            ? spooky
+              ? "Spooky Music only plays Halloween effects — tag an Effects sound Halloween or Spooky in the FX Library tab."
+              : "Your Effects sounds are all Halloween ones, which play only in Spooky Music."
+            : reason === "none"
+              ? "No effects yet — upload sounds in the FX Library tab and set their category to Effects."
             : reason === "unusable"
               ? `Your Effects sounds are empty or longer than ${SPOOKY_FX_MAX_SEC}s — add shorter ones.`
               : "None of your effects would load — check those files in the FX Library tab."
@@ -1686,7 +1735,8 @@ export function DualDeckStage() {
       buffer: AudioBuffer,
       startOffsetSec: number,
       volumeMultiplier: number,
-      windowSec: number
+      windowSec: number,
+      halloween = false
     ): OverlayNodes | null {
       const masterGain = masterGainRef.current;
       if (!masterGain) return null;
@@ -1706,7 +1756,7 @@ export function DualDeckStage() {
       // The AI's (capped) multiplier, scaled by the "FX" slider — remembered
       // unscaled so moving the slider mid-sound re-scales it live.
       gain.gain.setValueAtTime(scaledFxGain(safeVolume, useStore.getState().fxLevel), now + delaySec);
-      trackLiveFx(source, gain, safeVolume, delaySec);
+      trackLiveFx(source, gain, safeVolume, delaySec, halloween);
 
       source.start(now + delaySec);
       source.stop(now + delaySec + buffer.duration + 0.05);
@@ -1860,12 +1910,13 @@ export function DualDeckStage() {
       // has no FX layer.
       const fxOverlayNodes = (() => {
         if (!TRANSITION_FX_ENABLED) return null; // Song Sync Mode: only the music
-        const { aiFxPickId, aiFxPickStartOffsetSec, aiFxPickVolumeMultiplier, fxLibrary } = useStore.getState();
+        const { aiFxPickId, aiFxPickStartOffsetSec, aiFxPickVolumeMultiplier, fxLibrary, activePlaylistTheme } = useStore.getState();
         if (!aiFxPickId) return null;
-        const fx = fxLibrary.find((f) => f.id === aiFxPickId);
+        // Re-checked at the moment it would sound: the playlist may have changed since the pick was made.
+        const fx = getEligibleFX(fxLibrary, activePlaylistTheme === "spooky").find((f) => f.id === aiFxPickId);
         const buf = fx ? mashupBufferCacheRef.current[fx.sourceUrl] : null;
-        return buf
-          ? startFxOverlayLayer(ctx, buf, aiFxPickStartOffsetSec ?? 0, aiFxPickVolumeMultiplier ?? 0.5, plan.windowSec)
+        return fx && buf
+          ? startFxOverlayLayer(ctx, buf, aiFxPickStartOffsetSec ?? 0, aiFxPickVolumeMultiplier ?? 0.5, plan.windowSec, isHalloweenFx(fx))
           : null;
       })();
 
@@ -3569,15 +3620,10 @@ export function DualDeckStage() {
       return useStore.getState().ambienceLevel * duckRatio(ambientDuckStateRef.current);
     }
 
-    /** Every halloween/spooky-affinied "background" FX (falling back to any background FX) — the pool a loop is chosen from. */
+    /** Every Halloween "background" FX — the pool a loop is chosen from, and only ever while Spooky Music is active. No fallback to other sounds: with no Halloween loop there is simply no ambient layer. */
     function ambientLoopPool(): FxSound[] {
-      const library = useStore.getState().fxLibrary;
-      const pool = library.filter(
-        (fx) =>
-          fx.category === "background" &&
-          hasHalloweenAffinity(fx.playlistAffinity)
-      );
-      return pool.length > 0 ? pool : library.filter((fx) => fx.category === "background");
+      const { fxLibrary, activePlaylistTheme } = useStore.getState();
+      return getEligibleFX(fxLibrary, activePlaylistTheme === "spooky").filter((fx) => fx.category === "background");
     }
 
     /** Asks Claude (via /api/dj/next-loop; a random loop that isn't the previous one after 3s or on any failure — lib/loopApi.ts) which loop suits the current track. Never rejects; null only when there is no eligible loop. */
@@ -3645,7 +3691,7 @@ export function DualDeckStage() {
     }
 
     /** Fades both slots out (whichever is actually active, plus the other in case a crossfade was mid-flight) and stops them — the smooth "theme reset" this layer's half of, matching the 1s visual theme transition elsewhere. */
-    function stopAmbientLayer() {
+    function stopAmbientLayer(fadeSec = AMBIENT_FADE_SEC, unload = false) {
       if (!ambientRunningRef.current) return;
       ambientRunningRef.current = false;
       ambientCrossfadingRef.current = false;
@@ -3660,9 +3706,20 @@ export function DualDeckStage() {
         if (ctx) {
           slot.gain.gain.cancelScheduledValues(ctx.currentTime);
           slot.gain.gain.setValueAtTime(slot.gain.gain.value, ctx.currentTime);
-          slot.gain.gain.linearRampToValueAtTime(0, ctx.currentTime + AMBIENT_FADE_SEC);
+          slot.gain.gain.linearRampToValueAtTime(0, ctx.currentTime + fadeSec);
         }
-        scheduleAmbientPause(key, slot.el, AMBIENT_FADE_SEC * 1000 + 100);
+        // `unload`: drop the file too, so a Halloween loop isn't left loaded once its playlist is gone.
+        scheduleAmbientPause(
+          key,
+          slot.el,
+          fadeSec * 1000 + 100,
+          unload
+            ? () => {
+                slot.el.removeAttribute("src");
+                slot.el.load();
+              }
+            : undefined
+        );
       });
     }
 
@@ -3729,7 +3786,9 @@ export function DualDeckStage() {
     function tryHalloweenAmbientLayer() {
       const isSpooky = useStore.getState().activePlaylistTheme === "spooky";
       if (!isSpooky) {
-        stopAmbientLayer();
+        // Switched away from Spooky Music (or never in it): no Halloween loop, effect or overlay keeps sounding or stays loaded.
+        stopAmbientLayer(HALLOWEEN_STOP_FADE_SEC, true);
+        fadeOutHalloweenFx(HALLOWEEN_STOP_FADE_SEC);
         return;
       }
       // Song Sync Mode (TRANSITION_FX_ENABLED off): the loop pauses when a crossfade begins and stays paused until the

@@ -18,6 +18,7 @@ import { AccountMenu } from "@/components/AccountMenu";
 import { useIsDesktop } from "@/lib/useIsDesktop";
 import { sidebarShowing, toggledSidebarChoice } from "@/lib/viewport";
 import { TrackThumbnail } from "@/components/TrackThumbnail";
+import { getEligibleFX } from "@/lib/fxAffinity";
 import type { FxSound, Playlist, Track } from "@/types/music";
 
 /**
@@ -214,6 +215,7 @@ export function TopBar() {
   const localLibrary = useStore((s) => s.localLibrary);
   const playlists = useStore((s) => s.playlists);
   const fxLibrary = useStore((s) => s.fxLibrary);
+  const spookyActive = useStore((s) => s.activePlaylistTheme === "spooky");
   const libraryLoaded = useStore((s) => s.libraryLoaded);
 
   const inputRef = useRef<HTMLInputElement>(null);
@@ -281,13 +283,16 @@ export function TopBar() {
   // deferred copy, so a slow render of results can be interrupted by the next
   // keystroke instead of delaying it.
   const deferredQuery = useDeferredValue(query);
+  // FX results are auditions, so they (and the keyword suggestions drawn from the same names) follow the same rule as
+  // every other FX path (getEligibleFX).
+  const eligibleFx = useMemo(() => getEligibleFX(fxLibrary, spookyActive), [fxLibrary, spookyActive]);
   const groups = useMemo(
-    () => searchAll({ tracks: localLibrary, playlists, fx: fxLibrary }, deferredQuery),
-    [localLibrary, playlists, fxLibrary, deferredQuery]
+    () => searchAll({ tracks: localLibrary, playlists, fx: eligibleFx }, deferredQuery),
+    [localLibrary, playlists, eligibleFx, deferredQuery]
   );
   const suggestions = useMemo(
-    () => (onSearchPage ? suggestKeywords({ tracks: localLibrary, playlists, fx: fxLibrary }, deferredQuery) : []),
-    [onSearchPage, localLibrary, playlists, fxLibrary, deferredQuery]
+    () => (onSearchPage ? suggestKeywords({ tracks: localLibrary, playlists, fx: eligibleFx }, deferredQuery) : []),
+    [onSearchPage, localLibrary, playlists, eligibleFx, deferredQuery]
   );
   const { rows, headerAt } = useMemo(() => buildRows(groups, suggestions), [groups, suggestions]);
   const hasQuery = deferredQuery.trim().length > 0;
