@@ -48,6 +48,7 @@ import { LOOKUP_LOOKAHEAD, reachableTracks } from "@/lib/lookahead";
 import { withTimeout } from "@/lib/withTimeout";
 import { voiceCutoffSec, voiceMapFromStem } from "@/lib/voiceMap";
 import { SONG_SYNC_ENABLED, STEM_FEATURES_ENABLED, VOCAL_MASHUP_ENABLED } from "@/lib/featureFlags";
+import { isStuckMuted, looksMuted, rmsLevel, shouldResumeContext, wakeVerdict } from "@/lib/backgroundAudio";
 import { TRANSITION_FX_ENABLED, buildSyncReport } from "@/lib/syncEngine";
 import {
   SONG_SYNC_CROSSFADE_BARS,
@@ -1021,6 +1022,12 @@ export function DualDeckStage() {
         window.AudioContext ||
         (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
       const ctx = new AudioContextCtor();
+      // The OS suspends the context when the screen locks, a call comes in or the app is backgrounded ("interrupted" on
+      // iOS). The app's own state still says "playing" and nothing used to start it again, so the sound stayed gone:
+      // wake it as soon as it stops, and again on every touch, return to the page and tick (wakeAudioContext below).
+      ctx.addEventListener("statechange", () => {
+        if (shouldResumeContext(ctx.state, useStore.getState().isPlaying)) ctx.resume().catch(() => {});
+      });
       // Load the tempo/pitch stretcher worklet now so voices created later (synchronously) can use it; if it is
       // unavailable they fall back to the main-thread voice.
       void preloadTimeStretch(ctx);
@@ -2007,6 +2014,13 @@ export function DualDeckStage() {
           if (toDeckEl) {
             toDeckEl.playbackRate = t.tempoRatioStart + (1 - t.tempoRatioStart) * progress;
           }
+        }
+        // A browser that refused to start the incoming deck (a backgrounded page) is asked again each tick, so the
+        // crossfade never ends on a deck that is fading in but not playing.
+        if (progress < 1 && useStore.getState().isPlaying) {
+          const incoming = deckEl(t.toDeckId);
+          // (never an ended one: play() on an element that reached its end starts it over)
+          if (incoming && incoming.paused && !incoming.ended && incoming.src) incoming.play().catch(() => {});
         }
         if (progress >= 1) {
           if (t.tickIntervalId != null) clearInterval(t.tickIntervalId);
@@ -4139,8 +4153,120 @@ export function DualDeckStage() {
       }
     }
 
+    // ---- Keeping the sound on (lib/backgroundAudio.ts) ----
+    let audioStoppedSinceMs: number | null = null;
+    let lastCheckWallMs = performance.now();
+    let lastCheckAudioMs: number | null = null;
+    let mutedSinceMs: number | null = null;
+    const muteProbe = new Float32Array(256);
+
+    /**
+     * Wakes an audio context the OS stopped, and drops a Song Sync morph the stop left stranded. What counts as a stop
+     * is decided by wakeVerdict from the two clocks: the audio clock (ctx.currentTime) against real time, so a page whose
+     * main thread merely hung for a few seconds (the audio thread carried on) is not mistaken for a suspended context.
+     *
+     * It keeps waking a stopped context only for a while (RESUME_PATIENCE_MS): a call or another app that took the audio
+     * is not something to fight, so past that the stop is treated as a pause and the user brings the music back. The page
+     * being touched or returned to (`userBack`) is a reason to try again, so it starts that wait over instead.
+     */
+    function wakeAudioContext(userBack = false) {
+      const ctx = audioCtxRef.current;
+      if (!ctx) return;
+      const now = performance.now();
+      const audioNowMs = ctx.currentTime * 1000;
+      const wallDeltaMs = now - lastCheckWallMs;
+      const audioDeltaMs = lastCheckAudioMs == null ? wallDeltaMs : audioNowMs - lastCheckAudioMs;
+      lastCheckWallMs = now;
+      lastCheckAudioMs = audioNowMs;
+      const morph = songSyncRef.current;
+      const verdict = wakeVerdict({
+        contextState: ctx.state,
+        wantPlaying: useStore.getState().isPlaying,
+        stoppedForMs: audioStoppedSinceMs != null ? now - audioStoppedSinceMs : 0,
+        wallDeltaMs,
+        audioDeltaMs,
+        morphActive: morph != null,
+        crossfadeScheduled: morph?.crossfadeScheduled ?? false,
+      });
+      if (verdict.giveUp) {
+        if (userBack) {
+          audioStoppedSinceMs = now;
+          ctx.resume().catch(() => {});
+          return;
+        }
+        audioStoppedSinceMs = null;
+        useStore.setState({ isPlaying: false });
+        if (verdict.dropMorph) cancelSongSync();
+        return;
+      }
+      if (verdict.resume) {
+        audioStoppedSinceMs ??= now - Math.min(wallDeltaMs, 500);
+        ctx.resume().catch(() => {});
+        return;
+      }
+      audioStoppedSinceMs = null;
+      if (verdict.dropMorph) cancelSongSync();
+    }
+
+    /**
+     * A playing deck whose gain sits at zero while nothing is fading it is a transition whose automation never finished
+     * (for example a crossfade frozen with the audio context): the track "plays" in silence. Lifts it back to full.
+     */
+    function liftStuckMute() {
+      const ctx = audioCtxRef.current;
+      const state = useStore.getState();
+      const nodes = deckNodesRef.current[activeDeckRef.current];
+      const el = deckEl(activeDeckRef.current);
+      const busy =
+        transitionRef.current ||
+        mashupRef.current ||
+        loopRef.current ||
+        backspinRef.current ||
+        tempoRampRef.current ||
+        reverseRef.current ||
+        songSyncRef.current ||
+        songSyncStartingRef.current ||
+        vocalMashupPrepRef.current ||
+        crossSourceFadeTimeoutRef.current != null;
+      const fading =
+        el != null &&
+        Number.isFinite(el.duration) &&
+        (el.currentTime < TRACK_FADE_IN_SEC + 1 || el.duration - el.currentTime < TRACK_FADE_OUT_SEC + 2);
+      if (!ctx || ctx.state !== "running" || !nodes || !el || el.paused || !state.isPlaying || busy || fading || state.currentTrack?.source !== "local") {
+        mutedSinceMs = null;
+        return;
+      }
+      // The gain alone isn't trusted (AudioParam.value may report the last value set, not the automated one, on some
+      // browsers): the deck's real output, off its metering tap, has to be silent too.
+      const gain = nodes.gain.gain.value;
+      nodes.meterAnalyser.getFloatTimeDomainData(muteProbe);
+      const outputRms = rmsLevel(muteProbe);
+      if (!looksMuted(gain, outputRms)) {
+        mutedSinceMs = null;
+        return;
+      }
+      const now = performance.now();
+      mutedSinceMs ??= now;
+      if (isStuckMuted({ gain, outputRms, mutedSinceMs, nowMs: now })) {
+        mutedSinceMs = null;
+        const at = ctx.currentTime;
+        nodes.gain.gain.cancelScheduledValues(at);
+        nodes.gain.gain.setValueAtTime(gain, at);
+        nodes.gain.gain.linearRampToValueAtTime(1, at + 0.3);
+      }
+    }
+
+    // Coming back to the page, or touching it, is the moment a browser that refused to restart the audio will allow it.
+    const onWake = () => wakeAudioContext(true);
+    document.addEventListener("visibilitychange", onWake);
+    window.addEventListener("pageshow", onWake);
+    window.addEventListener("focus", onWake);
+    window.addEventListener("pointerdown", onWake, true);
+
     const interval = setInterval(() => {
       if (useStore.getState().currentTrack?.source !== "local") return; // owned by YouTubeDeckStage
+      wakeAudioContext();
+      liftStuckMute();
       const activeEl = deckEl(activeDeckRef.current);
       if (activeEl) {
         // Same reasoning as tryAutoTransition's own currentTime read: the
@@ -4299,6 +4425,10 @@ export function DualDeckStage() {
 
     return () => {
       clearInterval(interval);
+      document.removeEventListener("visibilitychange", onWake);
+      window.removeEventListener("pageshow", onWake);
+      window.removeEventListener("focus", onWake);
+      window.removeEventListener("pointerdown", onWake, true);
       unsubscribe();
       if (transitionRef.current?.tickIntervalId != null) {
         clearInterval(transitionRef.current.tickIntervalId);
