@@ -8,6 +8,8 @@ import { ChevronDownIcon, NextIcon, PauseIcon, PlayIcon, PreviousIcon } from "@/
 import { Que } from "@/components/Que";
 import { SpookySparkles } from "@/components/SpookyBackdrop";
 import { LayerIndicator } from "@/components/LayerIndicator";
+import { LikeButton } from "@/components/LikeButton";
+import { NowPlayingTabs } from "@/components/NowPlayingTabs";
 
 const PARTICLE_EMOJIS = ["🍂", "🕸️", "⚡"];
 const PARTICLE_LIFETIME_MS = 4000;
@@ -36,6 +38,8 @@ export function NowPlayingView() {
   const queue = useStore((s) => s.queue);
   const isTransitioning = useStore((s) => s.isTransitioning);
   const spooky = useStore((s) => s.activePlaylistTheme === "spooky");
+  const volume = useStore((s) => s.volume);
+  const setVolume = useStore((s) => s.setVolume);
 
   // Nothing left to show full-screen (track ended, nothing queued) — drop
   // back to whatever the user was browsing rather than leaving an empty
@@ -135,12 +139,10 @@ export function NowPlayingView() {
       </div>
 
       {currentTrack && (
-        // Outer box scrolls, inner box centers: on a short or landscape
-        // screen the content scrolls instead of being clipped by this
-        // panel's overflow-hidden (centering alone would cut off the top).
+        // The outer box scrolls: the artwork, the transport and the tabs together are taller than a phone.
         <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain">
-        <div className="min-h-full flex flex-col items-center justify-center gap-4 sm:gap-8 pl-[max(1rem,env(safe-area-inset-left))] pr-[max(1rem,env(safe-area-inset-right))] sm:pl-[max(1.5rem,env(safe-area-inset-left))] sm:pr-[max(1.5rem,env(safe-area-inset-right))] pb-[max(1.5rem,env(safe-area-inset-bottom))]">
-          <div className="relative w-[min(100%,24rem,38dvh)] aspect-square">
+        <div className="mx-auto flex w-full max-w-2xl flex-col items-center gap-4 pl-[max(1rem,env(safe-area-inset-left))] pr-[max(1rem,env(safe-area-inset-right))] sm:pl-[max(1.5rem,env(safe-area-inset-left))] sm:pr-[max(1.5rem,env(safe-area-inset-right))] pb-[max(1.5rem,env(safe-area-inset-bottom))]">
+          <div className="relative w-[min(100%,20rem,34dvh)] aspect-square">
             <TrackThumbnailFill thumbnailUrl={currentTrack.thumbnailUrl} title={currentTrack.title} />
             {particles.map((p) => (
               <span
@@ -164,6 +166,7 @@ export function NowPlayingView() {
                 {currentTrack.artist}
               </p>
             </div>
+            <LikeButton trackId={currentTrack.id} title={currentTrack.title} size={24} />
           </div>
 
           {spooky && <LayerIndicator />}
@@ -174,14 +177,14 @@ export function NowPlayingView() {
                 Mixing into &ldquo;{queue[0].title}&rdquo;
               </p>
             ) : (
-              <div className="flex items-center gap-3 text-xs text-muted">
+              <div className="flex items-center gap-3 font-mono text-xs tabular-nums text-muted">
                 <span>{formatTime(currentTimeSec)}</span>
                 <div
                   className="flex-1 h-2 rounded-full bg-surface overflow-hidden cursor-pointer"
                   onClick={handleSeekClick}
                 >
                   <div
-                    className="h-full rounded-full bg-gradient-to-r from-accent-teal to-accent-purple"
+                    className="accent-gradient h-full rounded-full"
                     style={{ width: `${progressPercent}%` }}
                   />
                 </div>
@@ -194,7 +197,7 @@ export function NowPlayingView() {
             <button
               type="button"
               onClick={previous}
-              className="btn-icon text-3xl text-accent-purple hover:text-accent-pink"
+              className="btn-icon text-3xl text-muted hover:text-foreground"
               title="Previous (←)"
             >
               <PreviousIcon size={28} />
@@ -202,7 +205,7 @@ export function NowPlayingView() {
             <button
               type="button"
               onClick={togglePlay}
-              className="w-16 h-16 rounded-full bg-gradient-to-br from-accent-teal to-accent-purple text-white flex items-center justify-center shadow-elevate-md transition-transform hover:scale-105 active:scale-95"
+              className="accent-gradient w-16 h-16 rounded-full text-background flex items-center justify-center shadow-elevate-md transition-transform hover:scale-105 active:scale-95"
               title={isPlaying ? "Pause (Space)" : "Play (Space)"}
             >
               {isPlaying ? <PauseIcon size={28} /> : <PlayIcon size={28} className="translate-x-0.5" />}
@@ -210,12 +213,25 @@ export function NowPlayingView() {
             <button
               type="button"
               onClick={next}
-              className="btn-icon text-3xl text-accent-purple hover:text-accent-pink"
+              className="btn-icon text-3xl text-muted hover:text-foreground"
               title="Next (→)"
             >
               <NextIcon size={28} />
             </button>
           </div>
+
+          <input
+            type="range"
+            min={0}
+            max={1}
+            step={0.01}
+            value={volume}
+            onChange={(e) => setVolume(Number(e.target.value))}
+            aria-label="Volume"
+            className="w-full max-w-xs accent-accent-purple"
+          />
+
+          <NowPlayingTabs />
         </div>
         </div>
       )}

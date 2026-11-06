@@ -12,28 +12,37 @@ import { CloseIcon, MicIcon } from "@/components/Icons";
  * Nothing here is user-adjustable; the user's only input into a mix is Mix
  * Now or the Auto-DJ toggle.
  */
-export function Mixer() {
+/** `embedded`: the mixer without its overlay (no backdrop, no close button, shown whether or not the overlay is open), for the Now Playing sheet's DJ tab. */
+export function Mixer({ embedded = false }: { embedded?: boolean } = {}) {
   const open = useStore((s) => s.mixerPanelOpen);
   const toggle = useStore((s) => s.toggleMixerPanel);
   const vocalLayerVoiceLevel = useStore((s) => s.vocalLayerVoiceLevel);
 
-  if (!open) return null;
+  if (!open && !embedded) return null;
 
   return (
     <>
-      <div className="fixed inset-x-0 top-0 bottom-[var(--dock-h)] z-40 bg-black/50" onClick={toggle} aria-hidden="true" />
+      {!embedded && <div className="fixed inset-x-0 top-0 bottom-[var(--dock-h)] z-40 bg-black/50" onClick={toggle} aria-hidden="true" />}
       {/* See DeckView's note: sized against the space between the top bar and Que's lane above the player bar. */}
-      <div className="fixed left-[max(1rem,env(safe-area-inset-left))] right-[max(1rem,env(safe-area-inset-right))] bottom-[calc(var(--chrome-bottom)+0.5rem)] z-50 mx-auto max-w-3xl max-h-[calc(100dvh-var(--chrome-bottom)-var(--topbar-h)-1rem)] overflow-y-auto overscroll-contain rounded-2xl bg-surface/95 backdrop-blur-xl p-4 flex flex-col gap-4 shadow-elevate-lg">
+      <div
+        className={
+          embedded
+            ? "flex flex-col gap-4"
+            : "fixed left-[max(1rem,env(safe-area-inset-left))] right-[max(1rem,env(safe-area-inset-right))] bottom-[calc(var(--chrome-bottom)+0.5rem)] z-50 mx-auto max-w-3xl max-h-[calc(100dvh-var(--chrome-bottom)-var(--topbar-h)-1rem)] overflow-y-auto overscroll-contain rounded-2xl bg-surface/95 backdrop-blur-xl p-4 flex flex-col gap-4 shadow-elevate-lg"
+        }
+      >
         <div className="flex items-center justify-between">
           <h2 className="text-sm heading">Mixer</h2>
-          <button
-            type="button"
-            onClick={toggle}
-            className="btn-icon text-accent-purple hover:text-accent-pink"
-            title="Close"
-          >
-            <CloseIcon />
-          </button>
+          {!embedded && (
+            <button
+              type="button"
+              onClick={toggle}
+              className="btn-icon text-accent-purple hover:text-accent-pink"
+              title="Close"
+            >
+              <CloseIcon />
+            </button>
+          )}
         </div>
         <p className="text-xs text-muted -mt-2">
           A live view of the AI&apos;s own mixing — press Mix Now or turn on Auto-DJ to watch the crossfader, filter,
