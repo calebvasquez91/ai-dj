@@ -3,7 +3,9 @@
 import { Suspense, useCallback, useEffect, useLayoutEffect, useRef } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useStore } from "@/lib/store";
-import { formatTime } from "@/lib/format";
+import { formatTime, formatTotalDuration } from "@/lib/format";
+import { CoverMosaic, IconButton, Text } from "@/ui";
+import { PlayIcon } from "@/components/Icons";
 import { TrackThumbnail } from "@/components/TrackThumbnail";
 import { AddMusicBar } from "@/components/AddMusicBar";
 
@@ -85,26 +87,52 @@ function PlaylistContent() {
 
   return (
     <div className="p-4 sm:p-6 flex flex-col gap-6">
-      <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
-        <div className="min-w-0 flex-1 basis-56">
+      <div className="flex flex-col gap-4 sm:flex-row sm:items-end">
+        <div className="h-40 w-40 shrink-0 sm:h-48 sm:w-48">
+          <CoverMosaic title={playlist.name} items={playlist.tracks.map((t) => ({ title: t.title, src: t.thumbnailUrl }))} />
+        </div>
+        <div className="flex min-w-0 flex-1 flex-col gap-3">
+          <Text variant="caption">{playlist.theme === "spooky" ? "Playlist · Spooky Music" : "Playlist"}</Text>
           <PlaylistTitleField
             value={playlist.name}
             onChange={(name) => renamePlaylist(playlist.id, name)}
             onCommit={() => persistPlaylistName(playlist.id)}
           />
+          <Text variant="secondary">
+            {playlist.tracks.length} song{playlist.tracks.length === 1 ? "" : "s"}
+            {playlist.tracks.length > 0 && ` · ${formatTotalDuration(playlist.tracks.reduce((sum, t) => sum + (t.durationSec || 0), 0))}`}
+          </Text>
+          <div className="flex flex-wrap items-center gap-3">
+            {playlist.tracks.length > 0 && (
+              <>
+                <IconButton label="Play playlist" variant="play" onClick={() => playPlaylist(playlist)}>
+                  <PlayIcon size={22} className="translate-x-0.5" />
+                </IconButton>
+                <button
+                  type="button"
+                  onClick={() => playPlaylist(playlist, { shuffle: true })}
+                  disabled={playlist.tracks.filter((t) => t.playPreference !== "do-not").length < 2}
+                  className="btn-outline"
+                  title="Play this playlist ordered by tempo/key/energy/theme compatibility — skips Do-Not-Play tracks, puts Must-Play tracks first"
+                >
+                  🔀 Shuffle Play
+                </button>
+              </>
+            )}
+            {!playlist.theme && (
+              <button
+                type="button"
+                onClick={() => {
+                  removePlaylist(playlist.id);
+                  router.push("/");
+                }}
+                className="btn-outline !text-xs hover:!text-accent-pink shrink-0"
+              >
+                Delete playlist
+              </button>
+            )}
+          </div>
         </div>
-        {!playlist.theme && (
-          <button
-            type="button"
-            onClick={() => {
-              removePlaylist(playlist.id);
-              router.push("/");
-            }}
-            className="btn-outline !text-xs hover:!text-accent-pink shrink-0"
-          >
-            Delete playlist
-          </button>
-        )}
       </div>
 
       {playlist.tracks.length === 0 ? (
@@ -113,25 +141,6 @@ function PlaylistContent() {
         </p>
       ) : (
         <>
-          <div className="flex items-center gap-3">
-            <button
-              type="button"
-              onClick={() => playPlaylist(playlist)}
-              className="btn self-start"
-            >
-              ▶ Play
-            </button>
-            <button
-              type="button"
-              onClick={() => playPlaylist(playlist, { shuffle: true })}
-              disabled={playlist.tracks.filter((t) => t.playPreference !== "do-not").length < 2}
-              className="btn-outline self-start"
-              title="Play this playlist ordered by tempo/key/energy/theme compatibility — skips Do-Not-Play tracks, puts Must-Play tracks first"
-            >
-              🔀 Shuffle Play
-            </button>
-          </div>
-
           <div className="flex flex-col gap-1">
             {playlist.tracks.map((track, index) => {
               // Auto-included via a tag-matching rule (e.g. Spooky Music's

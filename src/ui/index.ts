@@ -3,6 +3,7 @@ export { Card } from "./Card";
 export { Carousel } from "./Carousel";
 export { Chip, ChipRow } from "./Chip";
 export { CoverArt } from "./CoverArt";
+export { CoverMosaic } from "./CoverMosaic";
 export { IconButton } from "./IconButton";
 export { MediaCard } from "./MediaCard";
 export { PageDots } from "./PageDots";

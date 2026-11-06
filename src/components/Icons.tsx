@@ -141,6 +141,20 @@ export function CloseIcon({ size = 16, className }: IconProps) {
   );
 }
 
+export function HeartIcon({ size = 16, className, filled = false }: IconProps & { filled?: boolean }) {
+  return (
+    <svg {...base(size)} className={className} aria-hidden="true">
+      <path
+        d="M12 20.2s-7.5-4.6-7.5-10.1A4.3 4.3 0 0 1 12 7.4a4.3 4.3 0 0 1 7.5 2.7c0 5.5-7.5 10.1-7.5 10.1Z"
+        fill={filled ? "currentColor" : "none"}
+        stroke="currentColor"
+        strokeWidth="1.7"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
 export function StarIcon({ size = 16, className, filled = false }: IconProps & { filled?: boolean }) {
   return (
     <svg {...base(size)} className={className} aria-hidden="true">

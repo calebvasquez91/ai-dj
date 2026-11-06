@@ -5,6 +5,7 @@ import { useStore } from "@/lib/store";
 import { formatRelativeTime, isRecentlyAdded } from "@/lib/format";
 import { useNow } from "@/lib/useNow";
 import { AddToPlaylistButton } from "@/components/AddToPlaylistButton";
+import { LikeButton } from "@/components/LikeButton";
 import { SeparateStemsButton } from "@/components/SeparateStemsButton";
 import { TrackThumbnail } from "@/components/TrackThumbnail";
 import { CloseIcon, NoEntryIcon, PauseIcon, PlayIcon, StarIcon } from "@/components/Icons";
@@ -159,6 +160,7 @@ const TrackCard = memo(function TrackCard({
 
       {!selectMode && (
         <div className="mt-1 flex items-center gap-0.5 opacity-100 md:opacity-0 md:group-hover:opacity-100 focus-within:opacity-100 transition-opacity">
+          <LikeButton trackId={track.id} title={track.title} />
           <button
             type="button"
             onClick={(e) => {

@@ -1,9 +1,10 @@
 "use client";
 
-import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useStore } from "@/lib/store";
-import { PlusIcon, QueueIcon } from "@/components/Icons";
+import { pinnedFirst } from "@/lib/homeSections";
+import { PlusIcon } from "@/components/Icons";
+import { Button, CoverMosaic, MediaCard, Skeleton, Text } from "@/ui";
 
 export default function PlaylistsPage() {
   const router = useRouter();
@@ -16,41 +17,60 @@ export default function PlaylistsPage() {
     if (id) router.push(`/playlist?id=${id}`);
   }
 
+  const ordered = pinnedFirst(playlists);
+  const spooky = ordered.find((p) => p.theme === "spooky");
+  const others = ordered.filter((p) => p.theme !== "spooky");
+  const count = (n: number) => `${n} song${n === 1 ? "" : "s"}`;
+
   return (
-    <div className="p-4 sm:p-6 flex flex-col gap-4 max-w-2xl">
+    <div className="flex flex-col gap-6 p-4 sm:p-6">
       <div className="flex items-center justify-between gap-3">
-        <h1 className="text-2xl heading">Playlists</h1>
-        <button type="button" onClick={handleCreate} className="btn-outline" title="Create playlist">
+        <h1 className="text-2xl font-bold tracking-tight">Playlists</h1>
+        <Button variant="primary" onClick={handleCreate}>
           <PlusIcon size={14} />
           New playlist
-        </button>
+        </Button>
       </div>
 
-      {playlists.length === 0 ? (
-        <p className="text-sm text-muted">
-          {playlistsLoaded ? "Playlists you create will show up here." : "Loading…"}
-        </p>
-      ) : (
-        <ul className="flex flex-col gap-2">
-          {playlists.map((playlist) => (
-            <li key={playlist.id}>
-              <Link
-                href={`/playlist?id=${playlist.id}`}
-                className="flex items-center gap-3 rounded-2xl bg-surface p-3 shadow-elevate-sm hover:bg-surface-hover"
-              >
-                <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-accent-teal/20 to-accent-purple/20 text-accent-purple">
-                  <QueueIcon size={20} />
-                </span>
-                <span className="min-w-0 flex-1">
-                  <span className="block truncate text-sm font-semibold">{playlist.name}</span>
-                  <span className="block text-xs text-muted">
-                    {playlist.tracks.length} {playlist.tracks.length === 1 ? "track" : "tracks"}
-                  </span>
-                </span>
-              </Link>
-            </li>
+      {!playlistsLoaded ? (
+        <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 desktop:grid-cols-5" aria-busy="true" aria-label="Loading playlists">
+          {Array.from({ length: 4 }, (_, i) => (
+            <Skeleton key={i} className="aspect-square" />
           ))}
-        </ul>
+        </div>
+      ) : playlists.length === 0 ? (
+        <Text variant="secondary">Playlists you create will show up here.</Text>
+      ) : (
+        <>
+          {spooky && (
+            <button
+              type="button"
+              onClick={() => router.push(`/playlist?id=${spooky.id}`)}
+              className="spooky-card-pulse flex w-full items-center gap-4 rounded-card p-4 text-left text-white transition-transform hover:-translate-y-0.5 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent sm:max-w-md"
+              style={{ background: "linear-gradient(135deg, #1a0500, #3d1200)" }}
+            >
+              <span className="text-4xl" aria-hidden="true">
+                🎃
+              </span>
+              <span className="min-w-0">
+                <span className="block truncate text-lg font-bold">{spooky.name}</span>
+                <span className="block text-sm text-white/70">{count(spooky.tracks.length)}</span>
+              </span>
+            </button>
+          )}
+          <ul className="grid grid-cols-2 gap-4 sm:grid-cols-3 desktop:grid-cols-5">
+            {others.map((p) => (
+              <li key={p.id}>
+                <MediaCard
+                  href={`/playlist?id=${p.id}`}
+                  cover={<CoverMosaic title={p.name} items={p.tracks.map((t) => ({ title: t.title, src: t.thumbnailUrl }))} />}
+                  title={p.name}
+                  subtitle={count(p.tracks.length)}
+                />
+              </li>
+            ))}
+          </ul>
+        </>
       )}
     </div>
   );
