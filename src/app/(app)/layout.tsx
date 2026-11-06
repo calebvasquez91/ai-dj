@@ -12,7 +12,7 @@ import { NavRail } from "@/components/NavRail";
 import { TopBar } from "@/components/TopBar";
 import { PlayerBar } from "@/components/PlayerBar";
 import { BottomNav } from "@/components/BottomNav";
-import { QueDock } from "@/components/QueDock";
+import { QUE_ENABLED, QueDock } from "@/features/que";
 import { NowPlayingView } from "@/components/NowPlayingView";
 import { QueuePanel } from "@/components/QueuePanel";
 import { DeckView } from "@/components/DeckView";
@@ -50,7 +50,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
       </div>
       <PlayerBar />
       <BottomNav />
-      <QueDock />
+      {QUE_ENABLED && <QueDock />}
       <NowPlayingView />
       <DeckView />
       <Mixer />

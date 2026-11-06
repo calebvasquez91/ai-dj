@@ -650,7 +650,7 @@ describe("mashupGainCurves", () => {
   });
 });
 
-describe("planTransition — shortWhy (Que's terse reason)", () => {
+describe("planTransition — shortWhy (the mascot's terse reason)", () => {
   it("credits tempo + key match when both are strong and learned weight isn't a factor", () => {
     const plan = planTransition({
       current: { track: makeTrack("a", 240), analysis: makeAnalysis({ bpm: 128, camelotKey: "8A" }) },
@@ -951,7 +951,7 @@ describe("chooseTransition — vocal stem bonus", () => {
     }
   });
 
-  it("explains the pick in Que's short why when the stem bonus decided it", () => {
+  it("explains the pick in the mascot's short why when the stem bonus decided it", () => {
     const plan = planTransition({
       current: { track: makeTrack("a", 240), analysis: makeAnalysis({ bpm: 124 }) },
       next: { track: makeTrack("b", 240), analysis: makeAnalysis({ bpm: 125, energyOnsetSec: 8 }) },

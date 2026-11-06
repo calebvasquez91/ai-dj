@@ -1,4 +1,5 @@
 import Image from "next/image";
+import { CoverArt } from "@/ui";
 
 export function TrackThumbnail({
   thumbnailUrl,
@@ -9,16 +10,8 @@ export function TrackThumbnail({
   title: string;
   size: number;
 }) {
-  if (!thumbnailUrl) {
-    return (
-      <div
-        style={{ width: size, height: size }}
-        className="rounded-lg shrink-0 shadow-elevate-sm bg-gradient-to-br from-accent-teal to-accent-purple flex items-center justify-center text-white"
-      >
-        ♪
-      </div>
-    );
-  }
+  // No artwork (a local file has none): the generated cover, a stable gradient with the title's first letter.
+  if (!thumbnailUrl) return <CoverArt title={title} size={size} className="shadow-elevate-sm" />;
   return (
     <Image
       src={thumbnailUrl}

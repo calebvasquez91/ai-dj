@@ -23,7 +23,7 @@ export function Mixer({ embedded = false }: { embedded?: boolean } = {}) {
   return (
     <>
       {!embedded && <div className="fixed inset-x-0 top-0 bottom-[var(--dock-h)] z-40 bg-black/50" onClick={toggle} aria-hidden="true" />}
-      {/* See DeckView's note: sized against the space between the top bar and Que's lane above the player bar. */}
+      {/* See DeckView's note: sized against the space between the top bar and the mascot's lane above the player bar. */}
       <div
         className={
           embedded

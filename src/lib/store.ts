@@ -188,7 +188,7 @@ interface PlayerState {
   quantizeEnabled: boolean;
   /** Rationale text for the mix currently in progress, captured at the moment it started — so the DJ Decks panel keeps showing what's actually playing out instead of a live recompute that goes stale the instant a one-shot override clears. */
   activeTransitionRationale: string | null;
-  /** Terse version of the same rationale, for Que's dismissible player-side label — set/cleared at the exact same moments as activeTransitionRationale, see mix-engine.ts's shortWhy. */
+  /** Terse version of the same rationale, for the mascot's dismissible player-side label — set/cleared at the exact same moments as activeTransitionRationale, see mix-engine.ts's shortWhy. */
   activeTransitionShortWhy: string | null;
   /** Occasional mid-track FX (filter/riser builds, echo throws on breakdowns) — separate from transition FX, which always fire regardless of this setting. */
   ambienceEnabled: boolean;
@@ -1060,7 +1060,7 @@ export const useStore = create<PlayerState>()(
             currentTimeSec: 0,
             history: nextHistory,
             shuffleSession: null,
-            // Nothing left to play, so nothing left to theme — otherwise the Halloween backdrop, Que's costume and the ambient layer outlive the playlist.
+            // Nothing left to play, so nothing left to theme — otherwise the Halloween backdrop, the mascot's costume and the ambient layer outlive the playlist.
             activePlaylistTheme: null,
             activePlaylistId: null,
             aiNextPickTrackId: null,

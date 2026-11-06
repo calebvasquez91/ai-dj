@@ -1,0 +1,209 @@
+/* Que's styles (features/que). Moved out of app/globals.css with the component: only loaded with him. */
+
+/* ---- Que — the AI DJ's mascot (Part B) ----
+   Idle: a slow breathing bob + occasional blink, always running so Que
+   reads as "watching the set," not inert. Reacting: a quick squash-and-
+   bounce plus an expanding ring pulse, fired once per transition pick — see
+   components/Que.tsx. */
+
+.que-stage {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  border-radius: 9999px;
+  background: var(--surface);
+  box-shadow: 0 2px 8px color-mix(in srgb, var(--foreground) calc(10% * var(--shadow-boost)), transparent);
+}
+
+.que-body {
+  transform-origin: 42px 46px;
+  animation: que-idle-bob 2.8s ease-in-out infinite;
+}
+
+/* Repurposed for the helmet's ear-cup pair — same idle wobble/react rotate
+   as the old headphone band, just applied to a different pair of shapes. */
+.que-band {
+  transform-origin: 42px 45px;
+  animation: que-idle-band 2.8s ease-in-out infinite;
+}
+
+.que-eye {
+  animation: que-idle-blink 4.4s ease-in-out infinite;
+  transform-origin: center;
+}
+
+/* The face reads as a small backlit LED matrix behind the visor glass. */
+.que-led {
+  filter: drop-shadow(0 0 1.5px rgba(127, 240, 221, 0.9));
+}
+
+/* Blinking is suppressed while Que is mid-sentence — see the .talking
+   class Que.tsx adds to .que-stage for as long as the why-pill is up. */
+.que-stage.talking .que-eye {
+  animation: none;
+}
+
+.que-ring {
+  opacity: 0;
+  transform-origin: 42px 46px;
+}
+
+@keyframes que-idle-bob {
+  0%, 100% { transform: translateY(0) scale(1, 1); }
+  50% { transform: translateY(-2px) scale(1.015, 0.985); }
+}
+
+@keyframes que-idle-band {
+  0%, 100% { transform: rotate(0deg); }
+  50% { transform: rotate(-2deg); }
+}
+
+@keyframes que-idle-blink {
+  0%, 92%, 100% { transform: scaleY(1); }
+  96% { transform: scaleY(0.15); }
+}
+
+/* Bobbing along with the beat — applied whenever a track is actually
+   playing (Que.tsx's `playing` class), replacing the slow idle breathing
+   with a snappier, more energetic nod. Declared before .reacting below so
+   a transition's one-shot bounce still wins the cascade on the rare frame
+   both classes are present together. */
+.que-stage.playing .que-body {
+  animation: que-groove-bob 0.5s ease-in-out infinite;
+}
+
+.que-stage.playing .que-band {
+  animation: que-groove-band 0.5s ease-in-out infinite;
+}
+
+@keyframes que-groove-bob {
+  0%, 100% { transform: translateY(0) rotate(0deg) scale(1, 1); }
+  50% { transform: translateY(-4px) rotate(-3deg) scale(1.03, 0.97); }
+}
+
+@keyframes que-groove-band {
+  0%, 100% { transform: rotate(0deg); }
+  50% { transform: rotate(-6deg); }
+}
+
+.que-stage.reacting .que-body {
+  animation: que-react-bounce 0.6s cubic-bezier(0.34, 1.7, 0.64, 1);
+}
+
+.que-stage.reacting .que-band {
+  animation: que-react-band 0.6s cubic-bezier(0.34, 1.7, 0.64, 1);
+}
+
+.que-stage.reacting .que-ring {
+  animation: que-react-ring 0.6s ease-out;
+}
+
+@keyframes que-react-bounce {
+  0% { transform: translateY(0) scale(1, 1); }
+  35% { transform: translateY(-7px) scale(1.08, 0.92); }
+  60% { transform: translateY(1px) scale(0.95, 1.06); }
+  100% { transform: translateY(0) scale(1, 1); }
+}
+
+@keyframes que-react-band {
+  0% { transform: rotate(0deg); }
+  35% { transform: rotate(-10deg); }
+  70% { transform: rotate(5deg); }
+  100% { transform: rotate(0deg); }
+}
+
+@keyframes que-react-ring {
+  0% { opacity: 0.5; transform: scale(0.6); }
+  100% { opacity: 0; transform: scale(2); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .que-body,
+  .que-band,
+  .que-eye,
+  .que-stage.playing .que-body,
+  .que-stage.playing .que-band,
+  .que-stage.reacting .que-body,
+  .que-stage.reacting .que-band,
+  .que-stage.reacting .que-ring {
+    animation: none;
+  }
+}
+
+/* A real speech bubble, not a one-line pill: wraps instead of overflowing,
+   and its max-width (set inline by Que.tsx, scaled off the `size` prop) is
+   never much larger than Que's own footprint — so a long transition
+   rationale breaks across a few short lines next to Que instead of
+   stretching into a wide banner. The sharp bottom-left corner reads as a
+   tail pointing back at Que, who always sits to the bubble's left. */
+.que-why-pill {
+  display: inline-flex;
+  align-items: flex-start;
+  gap: 6px;
+  font-size: 0.75rem;
+  line-height: 1.35;
+  color: var(--foreground);
+  background: var(--surface);
+  border-radius: 16px 16px 16px 4px;
+  padding: 8px 11px;
+  box-shadow: 0 2px 8px color-mix(in srgb, var(--foreground) calc(10% * var(--shadow-boost)), transparent);
+  overflow-wrap: break-word;
+  text-align: left;
+  cursor: pointer;
+}
+
+.que-why-pill span {
+  color: var(--muted);
+  font-size: 0.7rem;
+}
+
+.que-why-pill:hover span {
+  color: var(--foreground);
+}
+
+@keyframes que-halloween-shake {
+  0%, 100% { transform: translateX(0) scale(1); }
+  10% { transform: translateX(-4px) scale(1); }
+  20% { transform: translateX(4px) scale(1); }
+  30% { transform: translateX(-4px) scale(1); }
+  40% { transform: translateX(3px) scale(1.3); }
+  65% { transform: translateX(0) scale(0.9); }
+  100% { transform: translateX(0) scale(1); }
+}
+
+@keyframes que-halloween-tint {
+  0%, 100% { background-color: var(--surface); }
+  20%, 60% { background-color: #ff6b00; }
+  40%, 80% { background-color: #8b00ff; }
+}
+
+/* One-shot entrance when Que crosses from the default theme into spooky — see Que.tsx's `theme` prop. */
+.que-stage.halloween-transform {
+  animation: que-halloween-shake 0.6s cubic-bezier(0.34, 1.56, 0.64, 1), que-halloween-tint 0.6s ease-out;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .que-stage.halloween-transform {
+    animation: none;
+  }
+}
+
+/* ---- Que's Halloween costumes (components/QueCostumes.tsx) ---- */
+
+/* Moonlit disc with an orange glow behind whichever costume Que is wearing. */
+.que-stage.spooky {
+  background: radial-gradient(circle at 50% 35%, #3b1204 0%, #1a0630 72%);
+  box-shadow: 0 0 0 1.5px rgba(255, 107, 0, 0.55), 0 0 14px rgba(255, 107, 0, 0.45);
+}
+
+/* During the one-shot transformation the flashing tint (a background-color
+   keyframe) has to show through, so the gradient steps aside for its 0.6s. */
+.que-stage.spooky.halloween-transform {
+  background-image: none;
+}
+
+/* Glowing eyes/nose/mouth on the costumes, matching the default face's .que-led. */
+.que-glow-yellow { filter: drop-shadow(0 0 2.5px rgba(255, 214, 74, 0.95)); }
+.que-glow-green { filter: drop-shadow(0 0 2.5px rgba(125, 255, 77, 0.95)); }
+.que-glow-red { filter: drop-shadow(0 0 2.5px rgba(255, 59, 59, 0.95)); }

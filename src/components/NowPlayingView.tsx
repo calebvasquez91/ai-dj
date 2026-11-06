@@ -5,7 +5,8 @@ import Image from "next/image";
 import { useStore } from "@/lib/store";
 import { formatTime } from "@/lib/format";
 import { ChevronDownIcon, NextIcon, PauseIcon, PlayIcon, PreviousIcon } from "@/components/Icons";
-import { Que } from "@/components/Que";
+import { QUE_ENABLED, QueMascot } from "@/features/que";
+import { CoverArt } from "@/ui";
 import { SpookySparkles } from "@/components/SpookyBackdrop";
 import { LayerIndicator } from "@/components/LayerIndicator";
 import { LikeButton } from "@/components/LikeButton";
@@ -57,7 +58,7 @@ export function NowPlayingView() {
   useEffect(() => {
     if (!spooky) {
       // Resets immediately on exit, same "not derivable at render time"
-      // reasoning as Que.tsx's own talkFrame reset.
+      // reasoning as the mascot's own talkFrame reset.
       // eslint-disable-next-line react-hooks/set-state-in-effect
       setParticles([]);
       return;
@@ -157,7 +158,7 @@ export function NowPlayingView() {
           </div>
 
           <div className="flex items-center gap-3 w-full max-w-md min-w-0">
-            <Que size={spooky ? 48 : 30} visible={expanded} />
+            {QUE_ENABLED ? <QueMascot size={spooky ? 48 : 30} visible={expanded} /> : <span className="w-6 shrink-0" aria-hidden="true" />}
             <div className="text-center flex-1 min-w-0">
               <p className="text-xl sm:text-2xl font-bold break-words line-clamp-2 transition-colors duration-1000">
                 {currentTrack.title}
@@ -242,9 +243,10 @@ export function NowPlayingView() {
 /** TrackThumbnail sized to fill its parent instead of a fixed pixel size — the full-screen view needs a responsive square, not one more fixed-size icon. */
 function TrackThumbnailFill({ thumbnailUrl, title }: { thumbnailUrl?: string; title: string }) {
   if (!thumbnailUrl) {
+    // The generated cover (a stable gradient with the title's first letter), larger letter for the big artwork.
     return (
-      <div className="w-full h-full rounded-2xl shadow-elevate-md bg-gradient-to-br from-accent-teal to-accent-purple flex items-center justify-center text-white text-6xl">
-        ♪
+      <div className="h-full w-full shadow-elevate-md rounded-2xl">
+        <CoverArt title={title} className="!rounded-2xl [&>span]:!text-7xl" />
       </div>
     );
   }

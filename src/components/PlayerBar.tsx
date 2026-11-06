@@ -52,7 +52,7 @@ export function PlayerBar() {
   const nowPlayingExpanded = useStore((s) => s.nowPlayingExpanded);
   const setNowPlayingExpanded = useStore((s) => s.setNowPlayingExpanded);
 
-  // Publishes the bar's real height (it wraps to more rows on a narrow phone) so the overlays and Que's dock can be sized
+  // Publishes the bar's real height (it wraps to more rows on a narrow phone) so the overlays and the mascot's dock can be sized
   // to stop at its top edge: --player-bar-h in globals.css.
   const barRef = useRef<HTMLElement>(null);
   useEffect(() => {

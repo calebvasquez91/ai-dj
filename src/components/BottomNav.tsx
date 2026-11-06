@@ -14,7 +14,7 @@ import { NAV_ICONS } from "@/components/navIcons";
  *
  * It sits in the page's column after the player bar, so the player bar rides on top of it. Its measured height is
  * published as --bottom-nav-h (0 when it is not displayed) for everything that is sized to stop above the bottom chrome:
- * Que's dock and the deck / mixer / queue overlays (see --dock-h in globals.css).
+ * the mascot's dock and the deck / mixer / queue overlays (see --dock-h in globals.css).
  */
 export function BottomNav() {
   const pathname = usePathname();

@@ -508,7 +508,7 @@ export const TEMPO_RAMP_MAX_BPM_DELTA = 0.2;
 /**
  * The same additive terms scoreTransition always computed, just kept
  * separate instead of folded straight into one number — this is what lets
- * the "why" UI (Que) say which factor actually won a pick instead of only
+ * the "why" UI (the mascot) say which factor actually won a pick instead of only
  * knowing the final score. Nothing about the scoring itself changes: `total`
  * is still the exact sum every candidate is compared on.
  */
@@ -599,7 +599,7 @@ export function chooseTransition(ctx: TransitionContext): TransitionEntry {
  * Same pick as chooseTransition, but also hands back the winning
  * candidate's score breakdown (null when forced — a manual pick bypasses
  * scoring entirely, so there's nothing to explain) for planTransition to
- * turn into Que's short "why" text.
+ * turn into the mascot's short "why" text.
  */
 export function chooseTransitionWithBreakdown(
   ctx: TransitionContext
@@ -628,7 +628,7 @@ export interface TransitionPlan {
   tempoRatioStart: number; // incoming deck's playbackRate at transition start (1 = no adjustment)
   effect: TransitionEffect;
   rationale: string;
-  /** A terse, single-factor-led version of `rationale` for Que's dismissible player-side label — see buildShortWhy(). */
+  /** A terse, single-factor-led version of `rationale` for the mascot's dismissible player-side label — see buildShortWhy(). */
   shortWhy: string;
 }
 
@@ -741,7 +741,7 @@ function buildRationale(
 /**
  * Below this, a learned-weight nudge isn't confidently "your usual pick"
  * yet — dj-weights.ts's LEARNING_NUDGE_UP is +2 per override, so this
- * requires roughly two-plus consistent overrides before Que credits
+ * requires roughly two-plus consistent overrides before the mascot credits
  * learned preference as the deciding factor rather than one lucky nudge.
  */
 const LEARNED_WEIGHT_CALLOUT_THRESHOLD = 4;

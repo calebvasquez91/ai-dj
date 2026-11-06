@@ -136,8 +136,8 @@ export function QueuePanel() {
         onClick={toggle}
         aria-hidden="true"
       />
-      {/* Below the desktop width an overlay from the right that stops above the player bar and Que's lane (--chrome-bottom):
-          the Queue button that opened it is still there to close it, and Que (who is drawn above every panel) never sits
+      {/* Below the desktop width an overlay from the right that stops above the player bar and the mascot's lane (--chrome-bottom):
+          the Queue button that opened it is still there to close it, and the mascot (who is drawn above every panel) never sits
           on top of its last rows. From the desktop width it is docked, a column in the page's row (see the app layout). */}
       <aside className="fixed top-0 right-0 bottom-[var(--chrome-bottom)] z-50 w-[min(85vw,20rem)] pt-[env(safe-area-inset-top)] pr-[env(safe-area-inset-right)] surface-glass border-l border-border/10 shadow-elevate-left flex flex-col desktop:static desktop:z-auto desktop:w-80 desktop:shrink-0 desktop:pt-0 desktop:pr-0 desktop:shadow-none">
         <div

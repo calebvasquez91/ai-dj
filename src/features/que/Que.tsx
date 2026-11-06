@@ -2,7 +2,8 @@
 
 import { useEffect, useId, useRef, useState } from "react";
 import { useStore } from "@/lib/store";
-import { HALLOWEEN_FACES, HalloweenQue, type HalloweenFace } from "@/components/QueCostumes";
+import { HALLOWEEN_FACES, HalloweenQue, type HalloweenFace } from "./QueCostumes";
+import "./que.css";
 
 /** How long the reaction bounce plays — matches the CSS animation duration in globals.css. */
 const REACT_DURATION_MS = 650;

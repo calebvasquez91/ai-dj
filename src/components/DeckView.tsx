@@ -535,9 +535,9 @@ export function DeckView({ embedded = false }: { embedded?: boolean } = {}) {
   return (
     <>
       {!embedded && <div className="fixed inset-x-0 top-0 bottom-[var(--dock-h)] z-40 bg-black/50" onClick={toggle} aria-hidden="true" />}
-      {/* max-h is "the space between the top bar and the lane Que owns above the player bar, minus a margin", not a
+      {/* max-h is "the space between the top bar and the lane the mascot owns above the player bar, minus a margin", not a
           flat 70vh — 70vh + the bottom offset overshoots short screens and pushes the title bar off the top. The bar's
-          real height (it wraps on a phone), the phone's bottom navigation and Que's lane come from --dock-h / --chrome-bottom. */}
+          real height (it wraps on a phone), the phone's bottom navigation and the mascot's lane come from --dock-h / --chrome-bottom. */}
       <div
         className={
           embedded
