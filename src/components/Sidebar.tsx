@@ -5,7 +5,7 @@ import { usePathname, useRouter } from "next/navigation";
 import { useSession, signOut } from "next-auth/react";
 import { useStore } from "@/lib/store";
 import { ThemeToggle } from "@/components/ThemeToggle";
-import { HomeIcon, LibraryIcon, SparklesIcon } from "@/components/Icons";
+import { HomeIcon, LibraryIcon, SearchIcon, SlidersIcon, SparklesIcon } from "@/components/Icons";
 import type { ComponentType } from "react";
 
 function NavLink({
@@ -22,14 +22,13 @@ function NavLink({
   return (
     <Link
       href={href}
+      aria-current={active ? "page" : undefined}
       className={`relative flex items-center gap-3 rounded-full pl-2.5 pr-3 py-2 text-sm font-semibold transition-colors ${
-        active
-          ? "bg-gradient-to-r from-accent-teal/20 to-accent-purple/20 text-accent-purple border border-accent-purple/25"
-          : "text-muted hover:text-foreground hover:bg-surface-hover border border-transparent"
+        active ? "bg-surface-raised text-foreground" : "text-muted hover:text-foreground hover:bg-surface-hover"
       }`}
     >
       <span
-        className={`h-4 w-1 rounded-full shrink-0 transition-opacity ${active ? "bg-gradient-to-b from-accent-teal to-accent-purple opacity-100" : "opacity-0"}`}
+        className={`accent-gradient h-4 w-1 rounded-full shrink-0 transition-opacity ${active ? "opacity-100" : "opacity-0"}`}
         aria-hidden="true"
       />
       <Icon size={18} />
@@ -50,9 +49,10 @@ export function Sidebar() {
     if (id) router.push(`/playlist?id=${id}`);
   }
 
-  // Desktop and tablet only: a phone navigates with the buttons under the player bar (BottomNav), so the panel is never
-  // displayed below the md breakpoint, whatever was chosen. Above it, the panel is open until the hamburger collapses it.
-  const visibility = sidebarOpen === false ? "hidden" : "max-md:hidden";
+  // Desktop only: a tablet has the icon rail (NavRail) and a phone the buttons under the player bar (BottomNav), so the
+  // panel is never displayed below the desktop width, whatever was chosen. From it, the panel is open until the
+  // hamburger collapses it.
+  const visibility = sidebarOpen === false ? "hidden" : "max-desktop:hidden";
 
   return (
     <>
@@ -68,7 +68,9 @@ export function Sidebar() {
         <nav className="flex flex-col gap-1">
           <NavLink href="/" icon={HomeIcon} label="Home" />
           <NavLink href="/library" icon={LibraryIcon} label="Music Library" />
+          <NavLink href="/search" icon={SearchIcon} label="Search" />
           <NavLink href="/inspiration" icon={SparklesIcon} label="DJ Inspiration" />
+          <NavLink href="/settings" icon={SlidersIcon} label="Settings" />
         </nav>
 
         <div className="flex items-center justify-between px-2 pt-2">

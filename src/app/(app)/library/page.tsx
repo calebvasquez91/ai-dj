@@ -5,11 +5,15 @@ import { useSearchParams } from "next/navigation";
 import { useStore } from "@/lib/store";
 import { filesToTracks } from "@/lib/localAudio";
 import { searchTracks } from "@/lib/search";
+import { useLiked } from "@/lib/liked";
+import { LIBRARY_VIEWS, artistsOf, likedTracks, parseLibraryView, type LibraryView } from "@/lib/library";
 import { TrackGrid } from "@/components/TrackGrid";
 import { AddSelectedToPlaylistButton } from "@/components/AddSelectedToPlaylistButton";
 import { ConnectYouTubeButton } from "@/components/ConnectYouTubeButton";
 import { YouTubeImportModal } from "@/components/YouTubeImportModal";
+import { FxLibraryPanel } from "@/components/FxLibraryPanel";
 import { CloseIcon, PlusIcon, ShuffleIcon } from "@/components/Icons";
+import { Chip, ChipRow, CoverMosaic, MediaCard, Text } from "@/ui";
 
 type SourceFilter = "all" | "local" | "youtube";
 
@@ -26,8 +30,13 @@ function LibraryContent() {
   // dropdown stay instant while the heavy grid re-render yields to the next
   // keystroke instead of blocking it. The initial value comes from the ?q=
   // param so a reload/shared link renders already-filtered with no flash.
-  const urlQuery = useSearchParams().get("q") ?? "";
+  const params = useSearchParams();
+  const urlQuery = params.get("q") ?? "";
   const [query, setQuery] = useState(urlQuery);
+  // The segment (Songs, Artists, Liked, FX) starts from ?view= so a link can open on one; after that it is local state,
+  // since the top search box keeps rewriting the URL's ?q= and must not fight over it.
+  const [view, setView] = useState<LibraryView>(() => parseLibraryView(params.get("view")));
+  const likedIds = useLiked((s) => s.ids);
   useEffect(() => {
     const sync = (q: string) => startTransition(() => setQuery(q));
     // Whenever this page mounts the URL is the source of truth (TopBar
@@ -39,10 +48,13 @@ function LibraryContent() {
   }, []);
   const [sourceFilter, setSourceFilter] = useState<SourceFilter>("all");
 
+  // Liked is the library narrowed to the songs liked on this device; every other control works on whatever is shown.
+  const pool = useMemo(() => (view === "liked" ? likedTracks(localLibrary, likedIds) : localLibrary), [view, localLibrary, likedIds]);
   const searched = useMemo(
-    () => (query.trim() ? searchTracks(localLibrary, query).map((h) => h.item) : localLibrary),
-    [localLibrary, query]
+    () => (query.trim() ? searchTracks(pool, query).map((h) => h.item) : pool),
+    [pool, query]
   );
+  const artists = useMemo(() => artistsOf(localLibrary), [localLibrary]);
   const filtered = useMemo(
     () => (sourceFilter === "all" ? searched : searched.filter((t) => t.source === sourceFilter)),
     [searched, sourceFilter]
@@ -104,10 +116,10 @@ function LibraryContent() {
   );
 
   return (
-    <div className="p-6 flex flex-col gap-4">
+    <div className="p-4 sm:p-6 flex flex-col gap-4">
       <div className="flex flex-col sm:flex-row sm:flex-wrap sm:items-center sm:justify-between gap-3 sm:gap-4">
         <h1 className="text-2xl heading">Music Library</h1>
-        <div className="flex flex-wrap items-center justify-between sm:justify-end gap-1.5 sm:gap-3">
+        <div className={`flex flex-wrap items-center justify-between sm:justify-end gap-1.5 sm:gap-3 ${view === "songs" || view === "liked" ? "" : "hidden"}`}>
           <button
             type="button"
             onClick={() => startShuffle(filtered)}
@@ -150,6 +162,25 @@ function LibraryContent() {
         />
       </div>
 
+      <ChipRow label="Library sections">
+        {LIBRARY_VIEWS.map((v) => (
+          <Chip key={v.id} selected={view === v.id} onClick={() => setView(v.id)}>
+            {v.label}
+          </Chip>
+        ))}
+      </ChipRow>
+
+      {(view === "songs" || view === "liked") && (
+      <>
+      {query.trim() && (
+        // The top search box that set this filter is hidden on a phone, so the filter shows (and clears) itself here.
+        <div className="flex flex-wrap items-center gap-2 text-sm text-muted">
+          <span>Showing songs matching</span>
+          <Chip selected onClick={() => useStore.getState().setSearchQuery("")} aria-label={`Clear filter ${query.trim()}`} title="Clear filter">
+            &ldquo;{query.trim()}&rdquo; ✕
+          </Chip>
+        </div>
+      )}
       {selectMode && (
         <div className="flex flex-wrap items-center gap-3 rounded-xl bg-surface shadow-elevate-sm px-4 py-2">
           <label className="flex items-center gap-2 text-sm cursor-pointer">
@@ -195,7 +226,11 @@ function LibraryContent() {
         </p>
       ) : filtered.length === 0 ? (
         <p className="text-sm text-muted">
-          {query.trim() ? `No tracks match "${query.trim()}".` : "No tracks in this filter."}
+          {query.trim()
+            ? `No tracks match "${query.trim()}".`
+            : view === "liked"
+              ? "Songs you like show up here. Tap the heart on any song; likes are saved on this device."
+              : "No tracks in this filter."}
         </p>
       ) : (
         <TrackGrid
@@ -204,6 +239,37 @@ function LibraryContent() {
           selectedIds={selectMode ? selectedIds : undefined}
           onToggleSelect={selectMode ? toggleSelect : undefined}
         />
+      )}
+
+      </>
+      )}
+
+      {view === "artists" &&
+        (artists.length === 0 ? (
+          <Text variant="secondary">Artists show up here once you add music.</Text>
+        ) : (
+          <ul className="grid grid-cols-2 gap-4 sm:grid-cols-3 desktop:grid-cols-5">
+            {artists.map((a) => (
+              <li key={a.name}>
+                <MediaCard
+                  cover={<CoverMosaic title={a.name} items={a.tracks.map((t) => ({ title: t.title, src: t.thumbnailUrl }))} />}
+                  title={a.name}
+                  subtitle={`${a.tracks.length} song${a.tracks.length === 1 ? "" : "s"}`}
+                  onClick={() => {
+                    // Their songs: the Songs segment, searched for the artist (the top search box shows it too).
+                    useStore.getState().setSearchQuery(a.name);
+                    setView("songs");
+                  }}
+                />
+              </li>
+            ))}
+          </ul>
+        ))}
+
+      {view === "fx" && (
+        <div className="flex max-w-2xl flex-col rounded-card border border-border-subtle bg-surface">
+          <FxLibraryPanel />
+        </div>
       )}
 
       {youtubeModalOpen && <YouTubeImportModal onClose={() => setYoutubeModalOpen(false)} />}

@@ -15,7 +15,7 @@ import {
 import { formatTime } from "@/lib/format";
 import { CloseIcon, LibraryIcon, MenuIcon, PlayIcon, QueueIcon, SearchIcon } from "@/components/Icons";
 import { AccountMenu } from "@/components/AccountMenu";
-import { useIsDesktop } from "@/lib/useIsDesktop";
+import { useIsDesktop, useIsPhone } from "@/lib/useMediaQuery";
 import { sidebarShowing, toggledSidebarChoice } from "@/lib/viewport";
 import { TrackThumbnail } from "@/components/TrackThumbnail";
 import { getEligibleFX } from "@/lib/fxAffinity";
@@ -211,6 +211,7 @@ export function TopBar() {
   const sidebarOpen = useStore((s) => s.sidebarOpen);
   const setSidebarOpen = useStore((s) => s.setSidebarOpen);
   const desktop = useIsDesktop();
+  const phone = useIsPhone();
   const playTrackList = useStore((s) => s.playTrackList);
   const localLibrary = useStore((s) => s.localLibrary);
   const playlists = useStore((s) => s.playlists);
@@ -231,7 +232,7 @@ export function TopBar() {
   const onSearchPage = pathname === "/search";
   // Only a phone keeps the results up on that page. A tablet or desktop has the search box on every page, so there the
   // panel opens and closes (outside click, Escape) like it does anywhere else.
-  const resultsStayOpen = onSearchPage && !desktop;
+  const resultsStayOpen = onSearchPage && phone;
 
   // ---- URL mirror -------------------------------------------------------
   // Values we've written to the URL and not yet seen come back through
@@ -466,7 +467,7 @@ export function TopBar() {
     <header className="h-[var(--topbar-h)] shrink-0 flex items-center gap-3 sm:gap-4 pt-[env(safe-area-inset-top)] pl-[max(1rem,env(safe-area-inset-left))] pr-[max(1rem,env(safe-area-inset-right))] sm:pl-[max(1.5rem,env(safe-area-inset-left))] sm:pr-[max(1.5rem,env(safe-area-inset-right))] shadow-elevate-md surface-glass">
       {/* The hamburger is for the side panel, which a phone doesn't have (it uses the buttons under the player bar). It sits
           in a wrapper that is hidden there: .btn-icon's own display would beat a hidden class put on the button itself. */}
-      <div className="hidden md:block shrink-0">
+      <div className="hidden desktop:block shrink-0">
         <button
           type="button"
           onClick={() => setSidebarOpen(toggledSidebarChoice(sidebarOpen, desktop))}
@@ -481,8 +482,8 @@ export function TopBar() {
       </div>
       {/* A phone's top bar: the wordmark, with the search box swapped in for it on the Search page, and the account button
           at the right on every page (Log out and Dark mode live there now that there is no side panel). */}
-      {!onSearchPage && <span className="md:hidden flex-1 min-w-0 text-xl wordmark">AI DJ</span>}
-      <div ref={wrapRef} className={`flex-1 min-w-0 max-w-xl mx-auto relative ${onSearchPage ? "" : "max-md:hidden"}`}>
+      {!onSearchPage && <span className="tablet:hidden flex-1 min-w-0 text-xl wordmark">AI DJ</span>}
+      <div ref={wrapRef} className={`flex-1 min-w-0 max-w-xl mx-auto relative ${onSearchPage ? "" : "max-tablet:hidden"}`}>
         <span className="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 text-muted text-sm">
           🔍
         </span>
@@ -520,7 +521,7 @@ export function TopBar() {
         )}
       </div>
 
-      <div className="md:hidden shrink-0">
+      <div className="tablet:hidden shrink-0">
         <AccountMenu />
       </div>
 

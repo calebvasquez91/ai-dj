@@ -2,7 +2,7 @@
 
 import { useEffect } from "react";
 import { useStore } from "@/lib/store";
-import { Que } from "@/components/Que";
+import { Que } from "./Que";
 
 /** The strip above the player bar that Que owns, in rem: his 40px stage plus a little air. Every overlay stops short of it (see --que-lane-h in globals.css). */
 const QUE_LANE_REM = 2.75;

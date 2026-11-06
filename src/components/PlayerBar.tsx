@@ -52,7 +52,7 @@ export function PlayerBar() {
   const nowPlayingExpanded = useStore((s) => s.nowPlayingExpanded);
   const setNowPlayingExpanded = useStore((s) => s.setNowPlayingExpanded);
 
-  // Publishes the bar's real height (it wraps to more rows on a narrow phone) so the overlays and Que's dock can be sized
+  // Publishes the bar's real height (it wraps to more rows on a narrow phone) so the overlays and the mascot's dock can be sized
   // to stop at its top edge: --player-bar-h in globals.css.
   const barRef = useRef<HTMLElement>(null);
   useEffect(() => {
@@ -83,10 +83,16 @@ export function PlayerBar() {
   return (
     <footer
       ref={barRef}
-      className="relative min-h-20 shrink-0 shadow-elevate-top surface-glass border-t border-border/10 pt-2 pb-2 md:pb-[max(0.5rem,env(safe-area-inset-bottom))] pl-[max(1rem,env(safe-area-inset-left))] pr-[max(1rem,env(safe-area-inset-right))] flex flex-wrap items-center gap-2 lg:gap-4"
+      className="relative min-h-20 max-tablet:min-h-16 max-tablet:flex-nowrap shrink-0 shadow-elevate-top surface-glass border-t border-border/10 pt-2 pb-2 tablet:pb-[max(0.5rem,env(safe-area-inset-bottom))] pl-[max(1rem,env(safe-area-inset-left))] pr-[max(1rem,env(safe-area-inset-right))] flex flex-wrap items-center gap-2 lg:gap-4"
       inert={nowPlayingExpanded ? true : undefined}
     >
-      <div className="flex items-center gap-3 w-28 sm:w-48 lg:w-64 min-w-0 shrink-0">
+      {/* On a phone the bar is a mini player: the song, play/pause and next, and a thin progress line along its top edge.
+          Everything else (seek bar, previous, FX, decks, mixer, queue, Mix Now, Auto-DJ, the settings) is in the Now Playing
+          sheet, which the song area below opens. */}
+      <div className="tablet:hidden absolute inset-x-0 top-0 h-0.5 bg-background" aria-hidden="true">
+        <div className="accent-gradient h-full" style={{ width: `${progressPercent}%` }} />
+      </div>
+      <div className="flex items-center gap-3 w-28 sm:w-48 lg:w-64 min-w-0 shrink-0 max-tablet:w-auto max-tablet:flex-1">
         {currentTrack ? (
           <>
             <DualDeckStage />
@@ -110,7 +116,10 @@ export function PlayerBar() {
               </div>
               <div className="min-w-0">
                 <p className="text-sm font-medium truncate">{currentTrack.title}</p>
-                <p className="text-xs text-muted truncate">{currentTrack.artist}</p>
+                <p className={`text-xs text-muted truncate ${isTransitioning && queue[0] ? "max-tablet:hidden" : ""}`}>{currentTrack.artist}</p>
+                {isTransitioning && queue[0] && (
+                  <p className="tablet:hidden text-xs font-semibold text-accent-pink truncate">Mixing into &ldquo;{queue[0].title}&rdquo;</p>
+                )}
               </div>
             </div>
           </>
@@ -119,13 +128,13 @@ export function PlayerBar() {
         )}
       </div>
 
-      <div className="flex-1 flex flex-col items-center gap-1 max-w-xl mx-auto min-w-0">
+      <div className="flex-1 flex flex-col items-center gap-1 max-w-xl mx-auto min-w-0 max-tablet:flex-none max-tablet:mx-0">
         <div className="flex items-center gap-4">
           <button
             type="button"
             onClick={previous}
             disabled={!currentTrack}
-            className="btn-icon text-accent-purple hover:text-accent-pink disabled:text-muted"
+            className="btn-icon text-accent-purple hover:text-accent-pink disabled:text-muted max-tablet:hidden!"
             title="Previous (←)"
           >
             <PreviousIcon />
@@ -134,7 +143,7 @@ export function PlayerBar() {
             type="button"
             onClick={togglePlay}
             disabled={!currentTrack}
-            className="w-10 h-10 rounded-full bg-gradient-to-br from-accent-teal to-accent-purple text-white flex items-center justify-center disabled:opacity-40 shadow-elevate-md transition-transform hover:scale-105 active:scale-95"
+            className="accent-gradient w-10 h-10 rounded-full text-background flex items-center justify-center disabled:opacity-40 shadow-elevate-md transition-transform hover:scale-105 active:scale-95"
             title={isPlaying ? "Pause (Space)" : "Play (Space)"}
           >
             {isPlaying ? <PauseIcon size={18} /> : <PlayIcon size={18} className="translate-x-0.5" />}
@@ -149,7 +158,7 @@ export function PlayerBar() {
             <NextIcon />
           </button>
         </div>
-        <div className="w-full flex items-center gap-2 text-xs text-muted">
+        <div className="w-full flex items-center gap-2 font-mono text-xs tabular-nums text-muted max-tablet:hidden">
           {isTransitioning && queue[0] ? (
             <span className="flex-1 text-center text-accent-pink font-semibold truncate">
               Mixing into &ldquo;{queue[0].title}&rdquo;
@@ -162,7 +171,7 @@ export function PlayerBar() {
                 onClick={handleSeekClick}
               >
                 <div
-                  className="h-full rounded-full bg-gradient-to-r from-accent-teal to-accent-purple"
+                  className="accent-gradient h-full rounded-full"
                   style={{ width: `${progressPercent}%` }}
                 />
               </div>
@@ -173,7 +182,7 @@ export function PlayerBar() {
       </div>
 
       {/* Own row below 850px: between ~768 and ~815px the transport column is narrower than its own buttons and Next would sit on top of FX. */}
-      <div className="flex flex-wrap items-center gap-x-1 gap-y-1 sm:gap-x-2 justify-between min-[850px]:justify-end short-landscape:justify-end w-full min-[850px]:w-auto short-landscape:w-auto shrink-0">
+      <div className="max-tablet:hidden flex flex-wrap items-center gap-x-1 gap-y-1 sm:gap-x-2 justify-between min-[850px]:justify-end short-landscape:justify-end w-full min-[850px]:w-auto short-landscape:w-auto shrink-0">
         <button
           type="button"
           onClick={() => requestFx()}

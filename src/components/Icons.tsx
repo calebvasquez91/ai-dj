@@ -141,6 +141,20 @@ export function CloseIcon({ size = 16, className }: IconProps) {
   );
 }
 
+export function HeartIcon({ size = 16, className, filled = false }: IconProps & { filled?: boolean }) {
+  return (
+    <svg {...base(size)} className={className} aria-hidden="true">
+      <path
+        d="M12 20.2s-7.5-4.6-7.5-10.1A4.3 4.3 0 0 1 12 7.4a4.3 4.3 0 0 1 7.5 2.7c0 5.5-7.5 10.1-7.5 10.1Z"
+        fill={filled ? "currentColor" : "none"}
+        stroke="currentColor"
+        strokeWidth="1.7"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
 export function StarIcon({ size = 16, className, filled = false }: IconProps & { filled?: boolean }) {
   return (
     <svg {...base(size)} className={className} aria-hidden="true">
@@ -177,6 +191,17 @@ export function PlusIcon({ size = 16, className }: IconProps) {
   return (
     <svg {...base(size)} className={className} aria-hidden="true">
       <path d="M12 5v14M5 12h14" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+export function SlidersIcon({ size = 18, className }: IconProps) {
+  return (
+    <svg {...base(size)} className={className} aria-hidden="true">
+      <path d="M4 7h9M17 7h3M4 12h3M11 12h9M4 17h11M19 17h1" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+      <circle cx="15" cy="7" r="2" stroke="currentColor" strokeWidth="1.8" />
+      <circle cx="9" cy="12" r="2" stroke="currentColor" strokeWidth="1.8" />
+      <circle cx="17" cy="17" r="2" stroke="currentColor" strokeWidth="1.8" />
     </svg>
   );
 }

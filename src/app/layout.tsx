@@ -1,26 +1,23 @@
 import type { Metadata, Viewport } from "next";
-import { Geist, Geist_Mono, Bungee } from "next/font/google";
+import { DM_Sans, Space_Mono, Bungee } from "next/font/google";
 import "./globals.css";
 import { ServiceWorkerRegister } from "@/components/ServiceWorkerRegister";
 import { ThemeInit } from "@/components/ThemeInit";
-import { THEME_COLORS, THEME_STORAGE_KEY } from "@/lib/theme";
+import { THEME_COLORS, themeInitScript } from "@/lib/theme";
 
-// Runs before first paint so dark mode never flashes light on load — reads
-// the same zustand-persist localStorage key lib/theme.ts writes to,
-// directly (not through the store, which hasn't hydrated yet this early).
-const THEME_INIT_SCRIPT = `(function(){try{var r=localStorage.getItem(${JSON.stringify(
-  THEME_STORAGE_KEY
-)});var t=r?JSON.parse(r).state.theme:null;if(t==="dark"){document.documentElement.setAttribute("data-theme","dark");var m=document.querySelectorAll('meta[name="theme-color"]');for(var i=0;i<m.length;i++)m[i].setAttribute("content",${JSON.stringify(
-  THEME_COLORS.dark
-)});}}catch(e){}})();`;
+// Runs before first paint so the chosen theme never flashes the wrong one on load: lib/theme.ts reads the stored choice
+// straight from localStorage (not through the store, which hasn't hydrated yet this early). Dark when nothing is stored.
+const THEME_INIT_SCRIPT = themeInitScript();
 
-const geistSans = Geist({
-  variable: "--font-geist-sans",
+// DM Sans for text; Space Mono for the numerals that should line up (time, BPM).
+const dmSans = DM_Sans({
+  variable: "--font-dm-sans",
   subsets: ["latin"],
 });
 
-const geistMono = Geist_Mono({
-  variable: "--font-geist-mono",
+const spaceMono = Space_Mono({
+  variable: "--font-space-mono",
+  weight: ["400", "700"],
   subsets: ["latin"],
 });
 
@@ -47,9 +44,10 @@ export const metadata: Metadata = {
 export const viewport: Viewport = {
   width: "device-width",
   initialScale: 1,
-  // The browser's own chrome (Android address bar, iOS Safari's tinted status area) follows the app's own light/dark
-  // switch, not the phone's: lib/theme.ts re-tints this tag when the theme changes (and the script above does on load).
-  themeColor: THEME_COLORS.light,
+  // The browser's own chrome (Android address bar, iOS Safari's tinted status area) follows the app's own theme choice,
+  // not the phone's: lib/theme.ts re-tints this tag when the theme changes (and the script above does on load). Dark is
+  // the default, so that is what the server renders.
+  themeColor: THEME_COLORS.dark,
   // Lets the layout extend under a notch/home-indicator; the player bar and
   // overlay panels pad themselves with env(safe-area-inset-*) so nothing
   // important ends up underneath it.
@@ -64,7 +62,8 @@ export default function RootLayout({
   return (
     <html
       lang="en"
-      className={`${geistSans.variable} ${geistMono.variable} ${retroDisplay.variable} h-full antialiased`}
+      className={`${dmSans.variable} ${spaceMono.variable} ${retroDisplay.variable} h-full antialiased`}
+      data-theme="dark"
       // The inline theme script below intentionally sets data-theme on this
       // element before React hydrates (to avoid a flash of the wrong
       // theme) — that deliberate mismatch is exactly what

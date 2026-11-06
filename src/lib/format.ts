@@ -5,6 +5,16 @@ export function formatTime(totalSeconds: number): string {
   return `${m}:${s.toString().padStart(2, "0")}`;
 }
 
+/** A total running time for a playlist: "45 min", "1 hr 2 min" (rounded up to the minute; "0 min" for none). */
+export function formatTotalDuration(totalSeconds: number): string {
+  const safeSeconds = Number.isFinite(totalSeconds) ? Math.max(0, totalSeconds) : 0;
+  const minutes = Math.ceil(safeSeconds / 60);
+  const hours = Math.floor(minutes / 60);
+  const rest = minutes % 60;
+  if (hours === 0) return `${minutes} min`;
+  return rest === 0 ? `${hours} hr` : `${hours} hr ${rest} min`;
+}
+
 /** A track counts as newly added for this long after its addedAt timestamp. */
 export const NEW_TRACK_WINDOW_MS = 2 * 60 * 60 * 1000;
 

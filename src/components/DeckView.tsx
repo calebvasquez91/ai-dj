@@ -391,7 +391,8 @@ function TapTempoControl({ trackId }: { trackId: string }) {
  * between them right now (recomputed from the same planTransition() the
  * real mix engine uses — read-only here, purely for display).
  */
-export function DeckView() {
+/** `embedded`: the board without its overlay (no backdrop, no close button, shown whether or not the overlay is open), for the Now Playing sheet's DJ tab. */
+export function DeckView({ embedded = false }: { embedded?: boolean } = {}) {
   const open = useStore((s) => s.deckViewOpen);
   const toggle = useStore((s) => s.toggleDeckView);
   const activeDeckId = useStore((s) => s.activeDeckId);
@@ -510,7 +511,7 @@ export function DeckView() {
     return planned.ok ? planned.plan : null;
   }, [syncReport, songSyncAuto]);
 
-  if (!open) return null;
+  if (!open && !embedded) return null;
 
   const progressRatio =
     currentTrack && currentTrack.durationSec > 0
@@ -533,11 +534,17 @@ export function DeckView() {
 
   return (
     <>
-      <div className="fixed inset-x-0 top-0 bottom-[var(--dock-h)] z-40 bg-black/50" onClick={toggle} aria-hidden="true" />
-      {/* max-h is "the space between the top bar and the lane Que owns above the player bar, minus a margin", not a
+      {!embedded && <div className="fixed inset-x-0 top-0 bottom-[var(--dock-h)] z-40 bg-black/50" onClick={toggle} aria-hidden="true" />}
+      {/* max-h is "the space between the top bar and the lane the mascot owns above the player bar, minus a margin", not a
           flat 70vh — 70vh + the bottom offset overshoots short screens and pushes the title bar off the top. The bar's
-          real height (it wraps on a phone), the phone's bottom navigation and Que's lane come from --dock-h / --chrome-bottom. */}
-      <div className="fixed left-[max(1rem,env(safe-area-inset-left))] right-[max(1rem,env(safe-area-inset-right))] bottom-[calc(var(--chrome-bottom)+0.5rem)] z-50 mx-auto max-w-3xl max-h-[calc(100dvh-var(--chrome-bottom)-var(--topbar-h)-1rem)] overflow-y-auto overscroll-contain rounded-2xl bg-surface/95 backdrop-blur-xl p-4 flex flex-col gap-3 shadow-elevate-lg">
+          real height (it wraps on a phone), the phone's bottom navigation and the mascot's lane come from --dock-h / --chrome-bottom. */}
+      <div
+        className={
+          embedded
+            ? "flex flex-col gap-3"
+            : "fixed left-[max(1rem,env(safe-area-inset-left))] right-[max(1rem,env(safe-area-inset-right))] bottom-[calc(var(--chrome-bottom)+0.5rem)] z-50 mx-auto max-w-3xl max-h-[calc(100dvh-var(--chrome-bottom)-var(--topbar-h)-1rem)] overflow-y-auto overscroll-contain rounded-2xl bg-surface/95 backdrop-blur-xl p-4 flex flex-col gap-3 shadow-elevate-lg"
+        }
+      >
         <div className="flex flex-wrap items-center justify-between gap-2">
           <h2 className="text-sm heading">DJ Decks</h2>
           <div className="flex flex-wrap items-center gap-3">
@@ -603,14 +610,16 @@ export function DeckView() {
               />
               Quantize
             </label>
-            <button
-              type="button"
-              onClick={toggle}
-              className="btn-icon text-accent-purple hover:text-accent-pink"
-              title="Close"
-            >
-              <CloseIcon />
-            </button>
+            {!embedded && (
+              <button
+                type="button"
+                onClick={toggle}
+                className="btn-icon text-accent-purple hover:text-accent-pink"
+                title="Close"
+              >
+                <CloseIcon />
+              </button>
+            )}
           </div>
         </div>
 
