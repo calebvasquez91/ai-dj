@@ -232,7 +232,7 @@ export function NowPlayingView() {
             className="w-full max-w-xs accent-accent-purple"
           />
 
-          <NowPlayingTabs />
+          <NowPlayingTabs active={expanded} />
         </div>
         </div>
       )}

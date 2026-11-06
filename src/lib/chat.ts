@@ -26,6 +26,23 @@ export interface ChatContext {
   queue: ChatTrack[];
 }
 
+export type ChatOutcome = { kind: "reply"; reply: string } | { kind: "error"; message: string };
+
+export const CHAT_UNREACHABLE = "The AI DJ couldn't be reached. Try again.";
+
+/**
+ * What the chat panel does with the route's response. A real answer is a reply; anything else is an error to show and
+ * retry: a failed request, an unusable body, or the stock "can't answer right now" text the route sends when the model
+ * couldn't be reached (`usedFallback`), which must not become something the DJ said or part of the history.
+ */
+export function interpretChatResponse(ok: boolean, data: unknown): ChatOutcome {
+  const r = (typeof data === "object" && data !== null ? data : {}) as { reply?: unknown; usedFallback?: unknown; error?: unknown };
+  if (!ok) return { kind: "error", message: typeof r.error === "string" && r.error ? r.error : CHAT_UNREACHABLE };
+  if (typeof r.reply !== "string" || !r.reply.trim()) return { kind: "error", message: CHAT_UNREACHABLE };
+  if (r.usedFallback === true) return { kind: "error", message: r.reply };
+  return { kind: "reply", reply: r.reply };
+}
+
 /** The most messages sent to the model, newest kept. */
 export const MAX_CHAT_MESSAGES = 20;
 /** The longest a single message may be, in characters. */

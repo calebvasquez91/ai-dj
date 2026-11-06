@@ -2,11 +2,13 @@ import { describe, expect, it } from "vitest";
 import type { TrackAnalysis } from "@/lib/audio-analysis-core";
 import type { Track } from "@/types/music";
 import {
+  CHAT_UNREACHABLE,
   MAX_CHAT_MESSAGES,
   MAX_MESSAGE_CHARS,
   MAX_QUEUE_CONTEXT,
   buildChatContext,
   buildChatSystemPrompt,
+  interpretChatResponse,
   sanitizeContext,
   sanitizeMessages,
 } from "./chat";
@@ -103,6 +105,33 @@ describe("sanitizeMessages", () => {
     expect(sanitizeMessages(undefined)).toEqual([]);
     expect(sanitizeMessages("hi")).toEqual([]);
     expect(sanitizeMessages([{ role: "assistant", content: "only me" }])).toEqual([]);
+  });
+});
+
+describe("interpretChatResponse", () => {
+  it("takes a real answer as a reply", () => {
+    expect(interpretChatResponse(true, { reply: "Play something slower.", usedFallback: false })).toEqual({
+      kind: "reply",
+      reply: "Play something slower.",
+    });
+  });
+
+  it("takes the stock fallback as an error, never a reply", () => {
+    expect(interpretChatResponse(true, { reply: "The AI DJ can't answer right now.", usedFallback: true })).toEqual({
+      kind: "error",
+      message: "The AI DJ can't answer right now.",
+    });
+  });
+
+  it("shows the server's own error when the request failed", () => {
+    expect(interpretChatResponse(false, { error: "Not signed in." })).toEqual({ kind: "error", message: "Not signed in." });
+  });
+
+  it("is a generic error for a failed request with no usable body, or an OK one with no reply", () => {
+    expect(interpretChatResponse(false, null)).toEqual({ kind: "error", message: CHAT_UNREACHABLE });
+    expect(interpretChatResponse(true, {})).toEqual({ kind: "error", message: CHAT_UNREACHABLE });
+    expect(interpretChatResponse(true, { reply: "   " })).toEqual({ kind: "error", message: CHAT_UNREACHABLE });
+    expect(interpretChatResponse(true, "nope")).toEqual({ kind: "error", message: CHAT_UNREACHABLE });
   });
 });
 

@@ -19,9 +19,10 @@ const NO_SWIPE = "input, select, textarea, canvas, [role=slider], [data-no-swipe
  * The Now Playing sheet's three sections: Queue (the queue, with the AI's pick and the "Mixing into" pill), DJ (the DJ
  * controls, the deck board and the mixer, the same ones as the overlays) and Chat (the AI DJ). Tap a tab, press the
  * arrow keys on the tab bar, or swipe the panel. Queue and DJ are only mounted while shown (they recompute as the music
- * plays); Chat stays mounted so its conversation survives a trip to another tab.
+ * plays), and only while the sheet is open (`active`): a closed sheet must not keep the deck board and the mixer
+ * re-rendering behind it. Chat stays mounted so its conversation survives a trip to another tab or a closed sheet.
  */
-export function NowPlayingTabs() {
+export function NowPlayingTabs({ active }: { active: boolean }) {
   const [tab, setTab] = useState<NowPlayingTab>("queue");
   const start = useRef<{ x: number; y: number } | null>(null);
 
@@ -73,12 +74,12 @@ export function NowPlayingTabs() {
           if (delta !== 0) setTab((current) => moveTab(TABS, current, delta));
         }}
       >
-        {tab === "queue" && (
+        {active && tab === "queue" && (
           <div id="np-panel-queue" role="tabpanel" aria-labelledby="np-tab-queue" className="flex flex-col">
             <QueueBody />
           </div>
         )}
-        {tab === "dj" && (
+        {active && tab === "dj" && (
           <div id="np-panel-dj" role="tabpanel" aria-labelledby="np-tab-dj" className="flex flex-col gap-6">
             <DjControls />
             <DeckView embedded />

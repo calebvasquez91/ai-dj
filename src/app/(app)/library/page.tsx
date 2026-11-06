@@ -172,6 +172,15 @@ function LibraryContent() {
 
       {(view === "songs" || view === "liked") && (
       <>
+      {query.trim() && (
+        // The top search box that set this filter is hidden on a phone, so the filter shows (and clears) itself here.
+        <div className="flex flex-wrap items-center gap-2 text-sm text-muted">
+          <span>Showing songs matching</span>
+          <Chip selected onClick={() => useStore.getState().setSearchQuery("")} aria-label={`Clear filter ${query.trim()}`} title="Clear filter">
+            &ldquo;{query.trim()}&rdquo; ✕
+          </Chip>
+        </div>
+      )}
       {selectMode && (
         <div className="flex flex-wrap items-center gap-3 rounded-xl bg-surface shadow-elevate-sm px-4 py-2">
           <label className="flex items-center gap-2 text-sm cursor-pointer">

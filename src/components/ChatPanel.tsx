@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { useStore } from "@/lib/store";
-import { buildChatContext, type ChatMessage } from "@/lib/chat";
+import { buildChatContext, interpretChatResponse, type ChatMessage } from "@/lib/chat";
 import { Button, Chip, Text } from "@/ui";
 
 const STARTERS = ["What should I play next?", "Build me a chill set", "How will the next mix sound?"];
@@ -27,6 +27,12 @@ export function ChatPanel() {
     const content = text.trim();
     if (!content || pending) return;
     const next: ChatMessage[] = [...messages, { role: "user", content }];
+    // A failed send leaves the conversation as it was and gives the text back to the box, so it is one tap to retry.
+    const fail = (message: string) => {
+      setMessages(messages);
+      setDraft(content);
+      setError(message);
+    };
     setMessages(next);
     setDraft("");
     setError(null);
@@ -38,14 +44,14 @@ export function ChatPanel() {
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ messages: next, context: buildChatContext(currentTrack, queue, trackAnalysis) }),
       });
-      const data = (await res.json().catch(() => null)) as { reply?: string; error?: string } | null;
-      if (!res.ok || !data?.reply) {
-        setError(data?.error ?? "The AI DJ couldn't be reached. Try again.");
+      const outcome = interpretChatResponse(res.ok, await res.json().catch(() => null));
+      if (outcome.kind === "error") {
+        fail(outcome.message);
         return;
       }
-      setMessages([...next, { role: "assistant", content: data.reply }]);
+      setMessages([...next, { role: "assistant", content: outcome.reply }]);
     } catch {
-      setError("The AI DJ couldn't be reached. Check your connection and try again.");
+      fail("The AI DJ couldn't be reached. Check your connection and try again.");
     } finally {
       setPending(false);
     }

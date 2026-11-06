@@ -4,6 +4,7 @@ import { useCallback, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useStore } from "@/lib/store";
 import { useLiked } from "@/lib/liked";
+import { likedTracks } from "@/lib/library";
 import { buildMixes, tracksForMood } from "@/lib/moods";
 import { HOME_CHIPS, chipView, mixedForYou, pinnedFirst, quickPicks, recentlyAdded, recentlyPlayed, type HomeChip } from "@/lib/homeSections";
 import { coverGradient } from "@/lib/coverGradient";
@@ -82,7 +83,7 @@ export default function Home() {
   const startShuffle = useStore((s) => s.startShuffle);
   const playTrackList = useStore((s) => s.playTrackList);
   const playPlaylist = useStore((s) => s.playPlaylist);
-  const likedCount = useLiked((s) => s.ids.length);
+  const likedIds = useLiked((s) => s.ids);
   const [chip, setChip] = useState<HomeChip>("all");
   const view = chipView(chip);
 
@@ -135,6 +136,8 @@ export default function Home() {
     if (id) router.push(`/playlist?id=${id}`);
   }
 
+  // Likes of songs that have since left the library don't count: the tile would open an empty list.
+  const likedCount = useMemo(() => likedTracks(localLibrary, likedIds).length, [localLibrary, likedIds]);
   const canShuffle = localLibrary.filter((t) => t.playPreference !== "do-not").length >= 2;
   const hasSongRows = picks.length + added.length + played.length + mixed.length > 0;
 
