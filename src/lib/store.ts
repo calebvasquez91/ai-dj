@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import type { DeckId, FxSound, Playlist, Track } from "@/types/music";
+import type { DeckId, FxSound, LocalTrack, Playlist, Track } from "@/types/music";
 import type { TrackAnalysis } from "@/lib/audio-analysis";
 import type { DjSetMode } from "@/lib/mix-engine";
 import type { AmbienceFrequency } from "@/lib/ambience";
@@ -37,6 +37,7 @@ import {
 import { AUTO_FX_DEFAULTS, loadAutoFxSettings, saveAutoFxSettings, type AutoFxSettings } from "@/lib/autoFxSettings";
 import { loadStemAutoSettings, saveStemAutoSettings, type StemAutoSettings } from "@/lib/stemAutoSettings";
 import { loadSongSyncSettings, saveSongSyncSettings } from "@/lib/songSyncSettings";
+import { isTransitionTrack } from "@/lib/transitionSound";
 import type { SongSyncStatus } from "@/lib/songSync";
 import type { StemJobState } from "@/lib/stemAutopilot";
 import type { StemCounts } from "@/lib/stemStatus";
@@ -215,6 +216,8 @@ interface PlayerState {
   vocalMashup: VocalMashupStatus | null;
   /** Song Sync Mode's "Auto" switch: when on, every automatic transition is the morph (tempo and pitch bend onto the next track's, then a plain crossfade); when off the ordinary transitions run and SYNC only acts when pressed. Saved per device. */
   songSyncAuto: boolean;
+  /** Whether an automatic Song Sync change is carried by a sound from the FX library (lib/transitionSound.ts). Saved per device; only acts while songSyncAuto is on. */
+  transitionSoundsOn: boolean;
   /** Bumped by the SYNC button; DualDeckStage starts a morph into queue[0] on each change (same shape as mixNowRequestId). */
   songSyncRequestId: number;
   /** The morph in progress, or null. Written only by DualDeckStage (a mirror of the real morph); the DJ board reads it. */
@@ -305,7 +308,10 @@ interface PlayerState {
   setCurrentTime: (seconds: number) => void;
   requestSeek: (seconds: number) => void;
   clearSeekRequest: () => void;
+  /** The user's (or a media key's) skip: goes to the next song, passing over a transition sound that is queued first. */
   next: () => void;
+  /** Moves the queue on by one exactly as it stands, a queued transition sound included: the hand-over of a Song Sync that has just finished into it. */
+  advanceQueue: () => void;
   previous: () => void;
   setCrossfadeOverride: (seconds: number | null) => void;
   requestMixNow: () => void;
@@ -374,6 +380,11 @@ interface PlayerState {
   setStemAutopilotStatus: (status: StemAutopilotStatus) => void;
   setVocalMashup: (status: VocalMashupStatus | null) => void;
   setSongSyncAuto: (auto: boolean) => void;
+  setTransitionSoundsOn: (on: boolean) => void;
+  /** Queues a transition sound's stand-in track first in line, with the analysis the engine reads for it (written, not measured, so it is kept out of the server cache). */
+  queueTransitionSound: (track: LocalTrack, analysis: TrackAnalysis) => void;
+  /** Takes a queued transition sound out of the queue again (its change didn't start, or the user moved on), leaving the songs as they were. */
+  dropQueuedTransitionSound: (trackId: string) => void;
   /** Reads the saved Song Sync setting (browser only; called once on app load). */
   loadSongSync: () => void;
   requestSongSync: () => void;
@@ -492,6 +503,7 @@ export const useStore = create<PlayerState>()(
       stemAutopilot: INITIAL_STEM_AUTOPILOT_STATUS,
       vocalMashup: null,
       songSyncAuto: true,
+      transitionSoundsOn: true,
       songSyncRequestId: 0,
       songSync: null,
       mashupEnabled: true,
@@ -886,6 +898,7 @@ export const useStore = create<PlayerState>()(
       },
       setTrackAnalysis: (trackId, analysis) => {
         set((s) => ({ trackAnalysis: { ...s.trackAnalysis, [trackId]: analysis } }));
+        if (isTransitionTrack({ id: trackId })) return; // a transition sound's stand-in track has no row on the server
         // Cache it server-side so it's never recomputed for this track again. The song map stays out of the request:
         // the server has nowhere to store it, so sending it would only be wasted upload.
         const persistable: Partial<TrackAnalysis> = { ...analysis };
@@ -967,10 +980,29 @@ export const useStore = create<PlayerState>()(
       setStemAutopilotStatus: (stemAutopilot) => set({ stemAutopilot }),
       setVocalMashup: (vocalMashup) => set({ vocalMashup }),
       setSongSyncAuto: (songSyncAuto) => {
-        saveSongSyncSettings({ auto: songSyncAuto });
+        saveSongSyncSettings({ auto: songSyncAuto, transitionSounds: get().transitionSoundsOn });
         set({ songSyncAuto });
       },
-      loadSongSync: () => set({ songSyncAuto: loadSongSyncSettings().auto }),
+      setTransitionSoundsOn: (transitionSoundsOn) => {
+        saveSongSyncSettings({ auto: get().songSyncAuto, transitionSounds: transitionSoundsOn });
+        set({ transitionSoundsOn });
+      },
+      queueTransitionSound: (track, analysis) =>
+        set((s) => ({
+          queue: [track, ...s.queue.filter((t) => !isTransitionTrack(t))],
+          trackAnalysis: { ...s.trackAnalysis, [track.id]: analysis },
+        })),
+      dropQueuedTransitionSound: (trackId) =>
+        set((s) => {
+          if (s.queue[0]?.id !== trackId) return s;
+          const analyses = { ...s.trackAnalysis };
+          delete analyses[trackId];
+          return { queue: s.queue.slice(1), trackAnalysis: analyses };
+        }),
+      loadSongSync: () => {
+        const saved = loadSongSyncSettings();
+        set({ songSyncAuto: saved.auto, transitionSoundsOn: saved.transitionSounds });
+      },
       requestSongSync: () => set((s) => ({ songSyncRequestId: s.songSyncRequestId + 1 })),
       setSongSync: (songSync) => set({ songSync }),
       requestFx: () => set((s) => ({ fxRequestId: s.fxRequestId + 1 })),
@@ -1049,10 +1081,15 @@ export const useStore = create<PlayerState>()(
       },
 
       next: () => {
+        if (isTransitionTrack(get().queue[0])) set((s) => ({ queue: s.queue.filter((t) => !isTransitionTrack(t)) }));
+        get().advanceQueue();
+      },
+
+      advanceQueue: () => {
         const { queue, currentTrack, history, shuffleSession, trackAnalysis, trackLyricalFingerprints } = get();
-        const nextHistory = currentTrack
-          ? [...history, currentTrack].slice(-MAX_HISTORY)
-          : history;
+        // A transition sound isn't a song to go back to: it stays out of the history (Previous skips over it).
+        const nextHistory =
+          currentTrack && !isTransitionTrack(currentTrack) ? [...history, currentTrack].slice(-MAX_HISTORY) : history;
         if (queue.length === 0) {
           set({
             currentTrack: null,
@@ -1102,10 +1139,12 @@ export const useStore = create<PlayerState>()(
         const { history, currentTrack, queue } = get();
         if (history.length === 0) return;
         const previousTrack = history[history.length - 1];
+        // A transition sound is never gone back to: it is not put back in the queue, and one waiting there is dropped.
+        const songs = queue.filter((t) => !isTransitionTrack(t));
         set({
           history: history.slice(0, -1),
           currentTrack: previousTrack,
-          queue: currentTrack ? [currentTrack, ...queue] : queue,
+          queue: currentTrack && !isTransitionTrack(currentTrack) ? [currentTrack, ...songs] : songs,
           currentTimeSec: 0,
         });
       },
