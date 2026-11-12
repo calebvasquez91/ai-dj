@@ -68,17 +68,6 @@ import {
   type SongSyncStatus,
 } from "@/lib/songSync";
 import { overridesFromReview } from "@/lib/ai-sync";
-import {
-  chooseTransitionSound,
-  eligibleTransitionSounds,
-  encodeWav16,
-  isTransitionTrack,
-  makeTransitionTrack,
-  planTransitionLoop,
-  renderTransitionLoop,
-  transitionAnalysis,
-  type TransitionSoundChoice,
-} from "@/lib/transitionSound";
 import { requestSyncReview } from "@/lib/syncReviewClient";
 import {
   instrumentalFromMixAndVocal,
@@ -97,6 +86,9 @@ import { effectiveAutoFxChoice } from "@/lib/autoFxSettings";
 import { FX_LOAD_IDLE, beginFxRequest, finishFxRequest, pressFx, resetFxLoad, type FxLoadState } from "@/lib/fxLayer";
 import { energyProfileFromPeaks } from "@/lib/energyProfile";
 import { getEligibleFX, isHalloweenFx } from "@/lib/fxAffinity";
+import { requestFxPlan } from "@/lib/fxPlanClient";
+import { nextFxToSchedule, type PlannedFx } from "@/lib/fxScheduler";
+import { songMapMatchesBpm } from "@/lib/phrase-align";
 import { requestLoopPick } from "@/lib/loopApi";
 import {
   SPOOKY_FX_BASE_GAIN,
@@ -254,18 +246,6 @@ const AMBIENT_RESUME_SETTLE_MS = 1500;
  * onto the incoming track's. The incoming track pre-rolls silently on the idle deck and is nudged into phase; then a
  * four-bar volume hand-over runs and the incoming deck carries on at its own tempo and key.
  */
-/** A transition sound being got ready for one A -> B change, or ready: its stand-in track (a ~30 s file of the sound tiled on its own bar grid, held as a blob URL) and the analysis written for it. */
-type PreparedTransitionSound =
-  | { pair: string; key: string; status: "preparing" | "none" }
-  | { pair: string; key: string; status: "ready"; track: LocalTrack; analysis: TrackAnalysis; choice: TransitionSoundChoice };
-
-/** Time allowed to fetch (the whole file) and to decode a transition sound before the change goes ahead without one. */
-const TRANSITION_SOUND_LOAD_TIMEOUT_MS = 6000;
-/** A sound is prepared only once the playing track has this little left (the longest morph and crossfade fit well inside it), so a song that is skipped or stopped early never pays for one. */
-const TRANSITION_SOUND_PREPARE_WITHIN_SEC = 120;
-/** A sound still loading holds the exit only while this much of the track is left; with less, the change goes ahead without it rather than be late. */
-const TRANSITION_SOUND_HOLD_MIN_REMAINING_SEC = 30;
-
 interface ActiveSongSync {
   fromDeckId: DeckId;
   toDeckId: DeckId;
@@ -316,6 +296,8 @@ type LiveFx = {
 };
 /** How long the FX layer's sound takes to fade out when the FX button is pressed again, or another effect replaces it. */
 const FX_STOP_FADE_SEC = 0.2;
+/** A planned FX that could not start within this long of its time on the audio clock (its file was still decoding) is dropped rather than played late: a riser or impact off its bar line is worse than none. */
+const FX_LATE_TOLERANCE_SEC = 0.04;
 /** How long Halloween sounds (the loop, a playing effect) take to fade out when the active playlist stops being Spooky Music. */
 const HALLOWEEN_STOP_FADE_SEC = 1;
 /** Short fade at the <audio>-element/buffer-voice swap boundary (both directions) — belt-and-suspenders against a click even though both sides play identical content from the same position. */
@@ -525,6 +507,40 @@ export function DualDeckStage() {
     poolMemo: null,
   });
   const spookyFxSourcesRef = useRef<Set<AudioBufferSourceNode>>(new Set());
+  // Beat-matched FX (lib/fxCues.ts, lib/ai-fx-plan.ts, lib/fxScheduler.ts): the plan the audio engineer and the AI DJ made
+  // for the playing song, which effects in it were already scheduled (`done`, kept for the song so a seek back doesn't
+  // lose track), and the clock time a scheduled effect has yet to start at (`pendingAtCtx`), so a pause or a skip can cancel it.
+  const smartFxRef = useRef<{
+    trackId: string | null;
+    key: string;
+    status: "idle" | "planning" | "ready";
+    plan: PlannedFx[];
+    /** Ids scheduled and not given up on: not scheduled again. Un-marked when a schedule is cancelled or never started, so it can still be retried in time. */
+    done: Set<string>;
+    /** What really got scheduled this song, in song time: a re-plan counts these against its cap and spacing. */
+    played: { id: string; startSec: number; endSec: number }[];
+    /** The effect scheduled but not yet sounding, and when it will (audio clock). */
+    pendingId: string | null;
+    pendingAtCtx: number | null;
+    /** When our effect that is sounding now ends (audio clock), so a transition can fade it. */
+    activeUntilCtx: number | null;
+    lastTimeSec: number | null;
+    planAbort: AbortController | null;
+    recent: string[];
+  }>({
+    trackId: null,
+    key: "",
+    status: "idle",
+    plan: [],
+    done: new Set(),
+    played: [],
+    pendingId: null,
+    pendingAtCtx: null,
+    activeUntilCtx: null,
+    lastTimeSec: null,
+    planAbort: null,
+    recent: [],
+  });
   // Decoded random effects (in-flight promises included), bounded — see decodeSpookyFx.
   const spookyBuffersRef = useRef(new BoundedCache<Promise<AudioBuffer>>(SPOOKY_FX_CACHE_MAX));
   const fxLiveRef = useRef<Set<LiveFx>>(new Set());
@@ -599,13 +615,6 @@ export function DualDeckStage() {
   const songSyncStartingRef = useRef(false);
   const songSyncTriedRef = useRef<string | null>(null);
   const songSyncPlanCacheRef = useRef<{ key: string; plan: SongSyncPlan | null } | null>(null);
-  // Transition sounds (lib/transitionSound.ts): the sound prepared for the current A -> B pair, the blob URL behind each
-  // stand-in track (so it can be freed once the track is gone), a counter to keep two uses of one sound apart, and the
-  // FX ids used lately (so one sound doesn't carry every change).
-  const transitionSoundRef = useRef<PreparedTransitionSound | null>(null);
-  const transitionUrlsRef = useRef<Record<string, string>>({});
-  const transitionNonceRef = useRef(0);
-  const recentTransitionFxRef = useRef<string[]>([]);
   const ambientResumeAfterRef = useRef(0);
   // A local track ending into a YouTube track (or vice versa) has no shared
   // audio graph to blend through, so instead of an overlapping crossfade the
@@ -829,8 +838,6 @@ export function DualDeckStage() {
       // Already stopped — harmless.
     }
     s.voiceGain.disconnect();
-    // A morph that was meant to land on a transition sound but didn't: the sound goes back out of the queue.
-    if (isTransitionTrack(s.nextTrack)) store.dropQueuedTransitionSound(s.nextTrack.id);
     const fromEl = deckEl(s.fromDeckId);
     if (fromEl && store.currentTrack?.id === s.fromTrackId) {
       if (position != null) fromEl.currentTime = position;
@@ -1594,7 +1601,10 @@ export function DualDeckStage() {
     }
 
     /** The one FX layer: decodes `fx`, fades out whatever the layer is playing (0.2 s) and then starts it, through the master graph scaled by the FX slider. "cancelled" = the button was pressed again while it was still decoding. */
-    async function startFxSound(fx: FxSound): Promise<"played" | "no-audio" | "failed" | "cancelled"> {
+    async function startFxSound(
+      fx: FxSound,
+      opts: { atCtx?: number; rate?: number } = {}
+    ): Promise<"played" | "no-audio" | "failed" | "cancelled"> {
       const ctx = audioCtxRef.current;
       const masterGain = masterGainRef.current;
       if (!ctx || !masterGain) return "no-audio";
@@ -1622,12 +1632,20 @@ export function DualDeckStage() {
         useStore.getState().setFxLayerActive(false);
         return "no-audio"; // torn down while decoding
       }
+      // A planned effect whose file took too long to decode would now start off its bar line: drop it instead.
+      if (opts.atCtx != null && ctx.currentTime > opts.atCtx + FX_LATE_TOLERANCE_SEC) {
+        if (!fxLayerRef.current) useStore.getState().setFxLayerActive(false);
+        return "cancelled";
+      }
       // Only one FX at a time: fade the current one out first, then start this one as that fade ends.
       const replacing = finished.outcome === "replace";
       if (replacing) stopFxLayer(FX_STOP_FADE_SEC);
-      const delaySec = replacing ? FX_STOP_FADE_SEC : 0;
+      // A planned effect brings its own start time on the audio clock (so it lands on a beat) and its own speed (its tempo matched to the song's).
+      const startAt = opts.atCtx != null ? Math.max(ctx.currentTime, opts.atCtx) : ctx.currentTime + (replacing ? FX_STOP_FADE_SEC : 0);
+      const delaySec = Math.max(0, startAt - ctx.currentTime);
       const source = ctx.createBufferSource();
       source.buffer = buffer;
+      if (opts.rate != null && opts.rate > 0 && Math.abs(opts.rate - 1) > 1e-4) source.playbackRate.value = opts.rate;
       const gain = ctx.createGain();
       source.connect(gain);
       gain.connect(masterGain);
@@ -1650,7 +1668,7 @@ export function DualDeckStage() {
           // already disconnected — harmless
         }
       });
-      source.start(ctx.currentTime + delaySec);
+      source.start(startAt);
       return "played";
     }
 
@@ -2598,117 +2616,6 @@ export function DualDeckStage() {
       useStore.getState().setSongSync(s.status);
     }
 
-    /** Frees the blob URL (and the decoded copy) of every transition sound that is no longer playing, queued or ready. */
-    function sweepTransitionSounds() {
-      const s = useStore.getState();
-      const keep = new Set<string>();
-      if (s.currentTrack) keep.add(s.currentTrack.id);
-      if (s.queue[0]) keep.add(s.queue[0].id);
-      const held = transitionSoundRef.current;
-      if (held?.status === "ready") keep.add(held.track.id);
-      for (const [id, url] of Object.entries(transitionUrlsRef.current)) {
-        if (keep.has(id)) continue;
-        URL.revokeObjectURL(url);
-        delete mashupBufferCacheRef.current[url];
-        delete transitionUrlsRef.current[id];
-      }
-    }
-
-    /**
-     * Transition sounds: for an automatic change from A to B, picks a sound from the FX library whose tempo A and B can
-     * both be morphed through, tiles it on its own bar grid into one file of about thirty seconds of sound plus the room
-     * for the change out of it, and keeps it ready as a stand-in track. It joins the queue only when A's change starts
-     * (startCarriedSongSync); Song Sync then morphs A onto it and, once it has played, morphs it onto B. Returns the
-     * state for the pair: preparing (started now or earlier), none (nothing usable), or ready.
-     */
-    function transitionSoundFor(
-      pair: string,
-      aAnalysis: TrackAnalysis,
-      bAnalysis: TrackAnalysis
-    ): PreparedTransitionSound {
-      // The choice is made against the tempo and key of both songs, so it is made again when one of them is measured
-      // after all (a next song still being analysed has no tempo to choose against). A sound that is ready is kept.
-      const key = [pair, aAnalysis.bpm, aAnalysis.bpmConfidence, aAnalysis.camelotKey, bAnalysis.bpm, bAnalysis.bpmConfidence, bAnalysis.camelotKey].join("|");
-      const held = transitionSoundRef.current;
-      if (held?.pair === pair && (held.status === "ready" || held.key === key)) return held;
-      const entry: PreparedTransitionSound = { pair, key, status: "preparing" };
-      transitionSoundRef.current = entry;
-      sweepTransitionSounds();
-      void prepareTransitionSound(entry, aAnalysis, bAnalysis);
-      return entry;
-    }
-
-    async function prepareTransitionSound(entry: PreparedTransitionSound, aAnalysis: TrackAnalysis, bAnalysis: TrackAnalysis) {
-      const settle = (next: PreparedTransitionSound) => {
-        if (transitionSoundRef.current === entry) transitionSoundRef.current = next;
-      };
-      const yieldToMain = () => new Promise<void>((resolve) => setTimeout(resolve, 0));
-      try {
-        const ctx = audioCtxRef.current;
-        const state = useStore.getState();
-        const sounds = eligibleTransitionSounds(state.fxLibrary, state.activePlaylistTheme === "spooky");
-        const choice = chooseTransitionSound({ sounds, a: aAnalysis, b: bAnalysis, recentFxIds: recentTransitionFxRef.current });
-        if (!ctx || !choice) {
-          settle({ pair: entry.pair, key: entry.key, status: "none" });
-          return;
-        }
-        // The whole file (not just its headers) must arrive in time, or the change goes ahead without a sound.
-        const bytes = await withTimeout(
-          fetch(choice.sound.sourceUrl).then((res) => {
-            if (!res.ok) throw new Error(`Transition sound ${res.status}`);
-            return res.arrayBuffer();
-          }),
-          TRANSITION_SOUND_LOAD_TIMEOUT_MS,
-          "Transition sound file"
-        );
-        const decoded = await withTimeout(ctx.decodeAudioData(bytes), TRANSITION_SOUND_LOAD_TIMEOUT_MS, "Transition sound decode");
-        if (transitionSoundRef.current !== entry) return; // the pair moved on while it loaded
-        await yieldToMain(); // the tiling and encoding below are a burst of work on the page's thread: let a frame through first
-        if (transitionSoundRef.current !== entry) return;
-        const layout = planTransitionLoop({
-          bpm: choice.bpm,
-          soundDurationSec: decoded.duration,
-          exitMorphBars: choice.exitPlan.morphBars,
-        });
-        const source = Array.from({ length: Math.min(2, decoded.numberOfChannels) }, (_, i) => decoded.getChannelData(i));
-        const rendered = renderTransitionLoop(source, decoded.sampleRate, layout);
-        await yieldToMain();
-        if (transitionSoundRef.current !== entry) return;
-        const url = URL.createObjectURL(new Blob([encodeWav16(rendered, decoded.sampleRate)], { type: "audio/wav" }));
-        // The engine decodes a track through this cache; seed it with the audio already in hand.
-        const buffer = ctx.createBuffer(2, rendered[0].length, decoded.sampleRate);
-        buffer.copyToChannel(rendered[0], 0);
-        buffer.copyToChannel(rendered[1], 1);
-        mashupBufferCacheRef.current[url] = buffer;
-        transitionNonceRef.current += 1;
-        const track = makeTransitionTrack({ sound: choice.sound, url, layout, nonce: String(transitionNonceRef.current) });
-        transitionUrlsRef.current[track.id] = url;
-        settle({ pair: entry.pair, key: entry.key, status: "ready", track, analysis: transitionAnalysis(layout, choice.camelotKey), choice });
-      } catch {
-        // Fetch/decode/timeout failure: this change goes ahead without a sound.
-        settle({ pair: entry.pair, key: entry.key, status: "none" });
-      }
-    }
-
-    /**
-     * A's change starts, carried by a transition sound: the sound's stand-in track is queued ahead of B and A is morphed
-     * onto it. Once it has played, the ordinary Song Sync trigger runs again with the sound as the playing track and B
-     * next. If the first morph can't start, the sound leaves the queue and A is morphed straight onto B instead.
-     */
-    function startCarriedSongSync(carrier: Extract<PreparedTransitionSound, { status: "ready" }>, nextTrack: LocalTrack) {
-      useStore.getState().queueTransitionSound(carrier.track, carrier.analysis);
-      void startSongSync(carrier.track).then((started) => {
-        if (started) {
-          // Only a sound that has really carried a change counts as used lately.
-          recentTransitionFxRef.current = [...recentTransitionFxRef.current, carrier.choice.sound.id].slice(-6);
-          return;
-        }
-        const store = useStore.getState();
-        store.dropQueuedTransitionSound(carrier.track.id);
-        if (useStore.getState().queue[0]?.id === nextTrack.id) void startSongSync(nextTrack);
-      });
-    }
-
     /**
      * Song Sync Mode (lib/songSync.ts): the playing track becomes the next one. A fresh SyncReport is built and the AI
      * DJ confirms or overrides the plan while the playing track's buffer decodes; then, on the playing track's next
@@ -3124,8 +3031,7 @@ export function DualDeckStage() {
       setTimeout(() => {
         if (useStore.getState().songSync?.phase === "done") useStore.getState().setSongSync(null);
       }, SONG_SYNC_DONE_LINGER_MS);
-      store.advanceQueue(); // not next(): when the morph landed on a transition sound, the sound is meant to be played
-      sweepTransitionSounds();
+      store.next();
     }
 
     /** SYNC pressed, or Mix Now while Song Sync Mode is on: morph into the next track now. With nothing to morph (no trusted tempo, too far apart, no room) a Mix Now carries on with the ordinary transition; a SYNC press says why it couldn't. */
@@ -3672,6 +3578,153 @@ export function DualDeckStage() {
       }
     }
 
+    /**
+     * Beat-matched FX, in every playlist. The audio engineer finds the moments in the playing song that suit an effect
+     * (a build-up, a drop, a breakdown) and which sound fits each, landing on the beat (lib/fxCues.ts); the AI DJ picks
+     * which of those to play, with the engineer's own pick as the fallback (lib/ai-fx-plan.ts). This runs every tick:
+     * it makes the plan once the song's beat grid is known, decodes the next effect ahead of time, and schedules it on
+     * the audio clock a moment before it is due, from the deck's own position, so it starts on the beat chosen.
+     * Gated by the Ambience switch and its frequency; which sounds may be used is getEligibleFX (Halloween ones only in
+     * Spooky Music, and only they there). Never during a transition, mashup, loop or other special move, and never
+     * over another FX. Not part of Song Sync: during a morph the song plays through a stretching voice whose tempo
+     * moves bar by bar, so there is no steady grid to land on.
+     */
+    function trySmartFx() {
+      const ctx = audioCtxRef.current;
+      if (!ctx) return;
+      const state = useStore.getState();
+      const memo = smartFxRef.current;
+      const track = state.currentTrack;
+      const el = deckEl(activeDeckRef.current);
+      const playing = !!track && track.source === "local" && !!el && !el.paused && state.isPlaying;
+      const morphing = !!(transitionRef.current || songSyncRef.current || songSyncStartingRef.current);
+
+      /** Gives up the effect that was scheduled but has not sounded: it may be scheduled again if it is still in time. */
+      const cancelPending = () => {
+        if (memo.pendingId != null) {
+          const id = memo.pendingId;
+          memo.done.delete(id);
+          memo.played = memo.played.filter((p) => p.id !== id);
+        }
+        memo.pendingId = null;
+        memo.pendingAtCtx = null;
+        memo.activeUntilCtx = null;
+      };
+
+      if (memo.pendingAtCtx != null && ctx.currentTime > memo.pendingAtCtx + 0.1) memo.pendingAtCtx = null; // it has begun sounding
+      if (memo.activeUntilCtx != null && ctx.currentTime >= memo.activeUntilCtx) memo.activeUntilCtx = null; // and has finished
+      if (memo.pendingAtCtx != null && (!playing || memo.trackId !== track?.id || morphing)) {
+        // Scheduled but not sounding yet, and the moment is gone: a pause, a different song or a transition starting.
+        cancelPending();
+        stopFxLayer(0);
+      } else if (memo.activeUntilCtx != null && morphing) {
+        // Sounding as a transition begins: the bar grid it was placed on no longer holds, so let it go.
+        memo.activeUntilCtx = null;
+        stopFxLayer(0.5);
+      }
+      if (!track || !el || !playing) return;
+      if (!state.ambienceEnabled || state.ambienceFrequency === "off") return;
+      if (!state.fxLibraryLoaded) return;
+      if (morphing || mashupRef.current || loopRef.current || backspinRef.current || tempoRampRef.current) return;
+
+      if (memo.trackId !== track.id) {
+        memo.planAbort?.abort();
+        memo.trackId = track.id;
+        memo.key = "";
+        memo.status = "idle";
+        memo.plan = [];
+        memo.done = new Set();
+        memo.played = [];
+        memo.lastTimeSec = null;
+      }
+      const nowSec = el.currentTime;
+      if (memo.lastTimeSec != null && nowSec < memo.lastTimeSec - 2) {
+        // The playhead went back (a seek, or the song restarted): effects ahead of it may sound again.
+        const ahead = memo.played.filter((p) => p.startSec > nowSec);
+        for (const p of ahead) memo.done.delete(p.id);
+        memo.played = memo.played.filter((p) => p.startSec <= nowSec);
+      }
+      memo.lastTimeSec = nowSec;
+
+      const analysis = getAnalysis(track.id);
+      const map = analysis.songMap;
+      const pool = effectsPoolNow();
+      const spooky = state.activePlaylistTheme === "spooky";
+      const usableMap = !analysis.fallback && map && songMapMatchesBpm(map, analysis.bpm) ? map : null;
+      const key = `${track.id}|${spooky}|${state.ambienceFrequency}|${pool.length}|${usableMap ? Math.round(usableMap.bpm * 10) : "none"}`;
+
+      if (memo.key !== key) {
+        memo.planAbort?.abort(); // a plan for the old key is no longer wanted: stop its Claude call too
+        memo.key = key;
+        memo.plan = [];
+        memo.status = usableMap && pool.length > 0 ? "planning" : "ready"; // nothing to plan without a trustworthy grid or a sound
+        if (usableMap && pool.length > 0) {
+          const planKey = key;
+          const abort = new AbortController();
+          memo.planAbort = abort;
+          requestFxPlan(
+            {
+              title: track.title,
+              songMap: usableMap,
+              voiceMap: state.trackVoiceMaps[track.id] ?? null,
+              durationSec: track.durationSec,
+              fromSec: nowSec,
+              frequency: state.ambienceFrequency,
+              spooky,
+              pool,
+              recentFxIds: memo.recent,
+              prior: memo.played.map((p) => ({ startSec: p.startSec, endSec: p.endSec })),
+            },
+            abort.signal
+          )
+            .then((result) => {
+              if (smartFxRef.current.key !== planKey) return; // the song, the playlist or the setting moved on meanwhile
+              smartFxRef.current.plan = result.planned;
+              smartFxRef.current.status = "ready";
+            })
+            .catch(() => {
+              // A plan that could not be built: this song gets no effects, but never a stuck "planning" state.
+              if (smartFxRef.current.key === planKey) smartFxRef.current.status = "ready";
+            });
+        }
+        return;
+      }
+      if (memo.status !== "ready" || memo.plan.length === 0) return;
+      if (fxLayerRef.current || fxLoadRef.current.loading) return; // one FX at a time
+
+      const decision = nextFxToSchedule(memo.plan, nowSec, memo.done, el.playbackRate);
+      if (decision.prefetch) {
+        const fx = decision.prefetch.fx;
+        decodeSpookyFx(ctx, fx.sourceUrl).catch(() => markSpookyFxFailed(fx));
+      }
+      if (!decision.schedule) return;
+      const { item, delaySec } = decision.schedule;
+      const atCtx = ctx.currentTime + delaySec;
+      memo.done.add(item.id); // so it isn't scheduled twice while it decodes; un-marked below if it never starts
+      memo.pendingId = item.id;
+      memo.pendingAtCtx = atCtx;
+      void startFxSound(item.fx, { atCtx, rate: item.rate * (el.playbackRate || 1) }).then((result) => {
+        if (result === "played") {
+          if (memo.pendingId !== item.id) {
+            // Cancelled (a pause, a skip) while the file decoded: don't let it sound after all.
+            stopFxLayer(0);
+            return;
+          }
+          spookyFxRef.current.lastFxId = item.fx.id;
+          memo.recent = [...memo.recent, item.fx.id].slice(-6);
+          memo.played.push({ id: item.id, startSec: item.startSec, endSec: item.endSec });
+          memo.activeUntilCtx = atCtx + (item.endSec - item.startSec) / (el.playbackRate || 1);
+          return;
+        }
+        if (memo.pendingId === item.id) {
+          memo.pendingId = null;
+          memo.pendingAtCtx = null;
+        }
+        if (result === "failed") markSpookyFxFailed(item.fx); // stays marked: its file won't load
+        else memo.done.delete(item.id); // never started: may be tried again if it is still in time
+      });
+    }
+
     /** In Spooky Music, the DJ dropping a random effect into the mix on its own — mainly in a track's build-up and at its drop (a small chance elsewhere), gated by the same on/off + frequency setting as the other mid-track FX, never during a transition or other special move. */
     function trySpookyFxMoment() {
       if (!TRANSITION_FX_ENABLED) return; // Song Sync Mode: only the music
@@ -4089,32 +4142,18 @@ export function DualDeckStage() {
         const pair = `${track.id}>${nextTrack.id}`;
         if (songSyncTriedRef.current !== pair) {
           const nextAnalysisForSync = getAnalysis(nextTrack.id);
-          // A transition sound may carry this change (A -> sound -> B): it is prepared once the playing track is near its
-          // end, and the morph below is planned onto it when it is ready. A sound that is still loading holds the exit
-          // (bounded by its load timeouts, and only while there is time to spare); a pair with no usable sound goes the
-          // ordinary way, A straight onto B.
-          const remainingSec = duration - currentTime;
-          const wantsSound = state.transitionSoundsOn && !isTransitionTrack(track) && !isTransitionTrack(nextTrack);
-          const soundDue = wantsSound && remainingSec <= TRANSITION_SOUND_PREPARE_WITHIN_SEC;
-          const carrierState = soundDue ? transitionSoundFor(pair, currentAnalysis, nextAnalysisForSync) : null;
-          if (carrierState?.status === "preparing" && remainingSec > TRANSITION_SOUND_HOLD_MIN_REMAINING_SEC) return;
-          const carrier = carrierState?.status === "ready" ? carrierState : null;
-          const syncTarget = carrier ? carrier.track : nextTrack;
-          const syncTargetAnalysis = carrier ? carrier.analysis : nextAnalysisForSync;
-          const cacheKey = `${pair}:${syncTarget.id}:${currentAnalysis.bpm}:${syncTargetAnalysis.bpm}:${currentAnalysis.camelotKey}:${syncTargetAnalysis.camelotKey}`;
+          const cacheKey = `${pair}:${currentAnalysis.bpm}:${nextAnalysisForSync.bpm}:${currentAnalysis.camelotKey}:${nextAnalysisForSync.camelotKey}`;
           if (songSyncPlanCacheRef.current?.key !== cacheKey) {
             const report = buildSyncReport({
               current: { track, analysis: currentAnalysis },
-              next: { track: syncTarget, analysis: syncTargetAnalysis },
+              next: { track: nextTrack, analysis: nextAnalysisForSync },
             });
             const planned = planSongSync(report);
             songSyncPlanCacheRef.current = { key: cacheKey, plan: planned.ok ? planned.plan : null };
           }
           const syncPlan = songSyncPlanCacheRef.current.plan;
           if (!syncPlan) {
-            // Nothing to morph onto the next song. While a sound is not yet due it may still bridge the gap, so the pair
-            // is not given up on (the ordinary triggers below carry on meanwhile).
-            if (!(wantsSound && !soundDue)) songSyncTriedRef.current = pair; // nothing to morph for this pair: the ordinary transition below
+            songSyncTriedRef.current = pair; // nothing to morph for this pair: the ordinary transition below
           } else {
             const decision = songSyncTrigger({
               beatsUntilMixOut: beatsUntilMixOut(currentTime, duration, currentAnalysis.bpm),
@@ -4123,8 +4162,7 @@ export function DualDeckStage() {
             });
             if (decision === "wait") return;
             songSyncTriedRef.current = pair;
-            if (carrier) startCarriedSongSync(carrier, nextTrack);
-            else void startSongSync(nextTrack);
+            void startSongSync(nextTrack);
             return;
           }
         }
@@ -4448,6 +4486,7 @@ export function DualDeckStage() {
       tryAutoTransition();
       tryAmbience();
       trySpookyFxMoment();
+      trySmartFx();
       tryAutoFx();
       tryHalloweenAmbientLayer();
     }, 500);
@@ -4580,7 +4619,6 @@ export function DualDeckStage() {
     elA?.addEventListener("ended", onEndedA);
     elB?.addEventListener("ended", onEndedB);
     const ambientSlots = ambientSlotsRef.current;
-    const transitionUrls = transitionUrlsRef.current;
     const ambientPauseTimeouts = ambientPauseTimeoutsRef.current;
 
     return () => {
@@ -4590,11 +4628,6 @@ export function DualDeckStage() {
       window.removeEventListener("focus", onWake);
       window.removeEventListener("pointerdown", onWake, true);
       unsubscribe();
-      transitionSoundRef.current = null;
-      for (const [id, url] of Object.entries(transitionUrls)) {
-        URL.revokeObjectURL(url);
-        delete transitionUrls[id];
-      }
       if (transitionRef.current?.tickIntervalId != null) {
         clearInterval(transitionRef.current.tickIntervalId);
       }
