@@ -14,17 +14,19 @@ export interface FxPlanResult {
   usedFallback: boolean;
 }
 
-export async function requestFxPlan(args: BuildFxPlanArgs): Promise<FxPlanResult> {
+/** `signal` lets the caller abandon a request whose song or setting has moved on, so a stale plan doesn't keep a Claude call running. */
+export async function requestFxPlan(args: BuildFxPlanArgs, signal?: AbortSignal): Promise<FxPlanResult> {
   const built = buildFxPlan(args);
   if (!built) return { planned: [], summary: "", usedFallback: true };
 
   let review: FxPlanReview = fxPlanLocally(built.input);
+  const timeout = AbortSignal.timeout(FX_PLAN_TIMEOUT_MS);
   try {
     const res = await fetch("/api/dj/fx-plan", {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify(built.input),
-      signal: AbortSignal.timeout(FX_PLAN_TIMEOUT_MS),
+      signal: signal && typeof AbortSignal.any === "function" ? AbortSignal.any([timeout, signal]) : timeout,
     });
     if (res.ok) {
       const data = (await res.json()) as { usedFallback?: boolean } & Record<string, unknown>;

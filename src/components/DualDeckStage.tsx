@@ -296,6 +296,8 @@ type LiveFx = {
 };
 /** How long the FX layer's sound takes to fade out when the FX button is pressed again, or another effect replaces it. */
 const FX_STOP_FADE_SEC = 0.2;
+/** A planned FX that could not start within this long of its time on the audio clock (its file was still decoding) is dropped rather than played late: a riser or impact off its bar line is worse than none. */
+const FX_LATE_TOLERANCE_SEC = 0.04;
 /** How long Halloween sounds (the loop, a playing effect) take to fade out when the active playlist stops being Spooky Music. */
 const HALLOWEEN_STOP_FADE_SEC = 1;
 /** Short fade at the <audio>-element/buffer-voice swap boundary (both directions) — belt-and-suspenders against a click even though both sides play identical content from the same position. */
@@ -513,10 +515,32 @@ export function DualDeckStage() {
     key: string;
     status: "idle" | "planning" | "ready";
     plan: PlannedFx[];
+    /** Ids scheduled and not given up on: not scheduled again. Un-marked when a schedule is cancelled or never started, so it can still be retried in time. */
     done: Set<string>;
+    /** What really got scheduled this song, in song time: a re-plan counts these against its cap and spacing. */
+    played: { id: string; startSec: number; endSec: number }[];
+    /** The effect scheduled but not yet sounding, and when it will (audio clock). */
+    pendingId: string | null;
     pendingAtCtx: number | null;
+    /** When our effect that is sounding now ends (audio clock), so a transition can fade it. */
+    activeUntilCtx: number | null;
+    lastTimeSec: number | null;
+    planAbort: AbortController | null;
     recent: string[];
-  }>({ trackId: null, key: "", status: "idle", plan: [], done: new Set(), pendingAtCtx: null, recent: [] });
+  }>({
+    trackId: null,
+    key: "",
+    status: "idle",
+    plan: [],
+    done: new Set(),
+    played: [],
+    pendingId: null,
+    pendingAtCtx: null,
+    activeUntilCtx: null,
+    lastTimeSec: null,
+    planAbort: null,
+    recent: [],
+  });
   // Decoded random effects (in-flight promises included), bounded — see decodeSpookyFx.
   const spookyBuffersRef = useRef(new BoundedCache<Promise<AudioBuffer>>(SPOOKY_FX_CACHE_MAX));
   const fxLiveRef = useRef<Set<LiveFx>>(new Set());
@@ -1607,6 +1631,11 @@ export function DualDeckStage() {
       if (audioCtxRef.current !== ctx) {
         useStore.getState().setFxLayerActive(false);
         return "no-audio"; // torn down while decoding
+      }
+      // A planned effect whose file took too long to decode would now start off its bar line: drop it instead.
+      if (opts.atCtx != null && ctx.currentTime > opts.atCtx + FX_LATE_TOLERANCE_SEC) {
+        if (!fxLayerRef.current) useStore.getState().setFxLayerActive(false);
+        return "cancelled";
       }
       // Only one FX at a time: fade the current one out first, then start this one as that fade ends.
       const replacing = finished.outcome === "replace";
@@ -3568,36 +3597,55 @@ export function DualDeckStage() {
       const track = state.currentTrack;
       const el = deckEl(activeDeckRef.current);
       const playing = !!track && track.source === "local" && !!el && !el.paused && state.isPlaying;
+      const morphing = !!(transitionRef.current || songSyncRef.current || songSyncStartingRef.current);
 
-      // An effect scheduled but not yet sounding must not start over a pause or a different song.
-      if (memo.pendingAtCtx != null) {
-        if (ctx.currentTime > memo.pendingAtCtx + 0.1) memo.pendingAtCtx = null;
-        else if (!playing || memo.trackId !== track?.id) {
-          memo.pendingAtCtx = null;
-          stopFxLayer(0);
+      /** Gives up the effect that was scheduled but has not sounded: it may be scheduled again if it is still in time. */
+      const cancelPending = () => {
+        if (memo.pendingId != null) {
+          const id = memo.pendingId;
+          memo.done.delete(id);
+          memo.played = memo.played.filter((p) => p.id !== id);
         }
+        memo.pendingId = null;
+        memo.pendingAtCtx = null;
+        memo.activeUntilCtx = null;
+      };
+
+      if (memo.pendingAtCtx != null && ctx.currentTime > memo.pendingAtCtx + 0.1) memo.pendingAtCtx = null; // it has begun sounding
+      if (memo.activeUntilCtx != null && ctx.currentTime >= memo.activeUntilCtx) memo.activeUntilCtx = null; // and has finished
+      if (memo.pendingAtCtx != null && (!playing || memo.trackId !== track?.id || morphing)) {
+        // Scheduled but not sounding yet, and the moment is gone: a pause, a different song or a transition starting.
+        cancelPending();
+        stopFxLayer(0);
+      } else if (memo.activeUntilCtx != null && morphing) {
+        // Sounding as a transition begins: the bar grid it was placed on no longer holds, so let it go.
+        memo.activeUntilCtx = null;
+        stopFxLayer(0.5);
       }
       if (!track || !el || !playing) return;
       if (!state.ambienceEnabled || state.ambienceFrequency === "off") return;
       if (!state.fxLibraryLoaded) return;
-      if (
-        transitionRef.current ||
-        mashupRef.current ||
-        loopRef.current ||
-        backspinRef.current ||
-        tempoRampRef.current ||
-        songSyncRef.current ||
-        songSyncStartingRef.current
-      )
-        return;
+      if (morphing || mashupRef.current || loopRef.current || backspinRef.current || tempoRampRef.current) return;
 
       if (memo.trackId !== track.id) {
+        memo.planAbort?.abort();
         memo.trackId = track.id;
         memo.key = "";
         memo.status = "idle";
         memo.plan = [];
         memo.done = new Set();
+        memo.played = [];
+        memo.lastTimeSec = null;
       }
+      const nowSec = el.currentTime;
+      if (memo.lastTimeSec != null && nowSec < memo.lastTimeSec - 2) {
+        // The playhead went back (a seek, or the song restarted): effects ahead of it may sound again.
+        const ahead = memo.played.filter((p) => p.startSec > nowSec);
+        for (const p of ahead) memo.done.delete(p.id);
+        memo.played = memo.played.filter((p) => p.startSec <= nowSec);
+      }
+      memo.lastTimeSec = nowSec;
+
       const analysis = getAnalysis(track.id);
       const map = analysis.songMap;
       const pool = effectsPoolNow();
@@ -3606,50 +3654,74 @@ export function DualDeckStage() {
       const key = `${track.id}|${spooky}|${state.ambienceFrequency}|${pool.length}|${usableMap ? Math.round(usableMap.bpm * 10) : "none"}`;
 
       if (memo.key !== key) {
+        memo.planAbort?.abort(); // a plan for the old key is no longer wanted: stop its Claude call too
         memo.key = key;
         memo.plan = [];
         memo.status = usableMap && pool.length > 0 ? "planning" : "ready"; // nothing to plan without a trustworthy grid or a sound
         if (usableMap && pool.length > 0) {
           const planKey = key;
-          void requestFxPlan({
-            title: track.title,
-            songMap: usableMap,
-            voiceMap: state.trackVoiceMaps[track.id] ?? null,
-            durationSec: track.durationSec,
-            fromSec: el.currentTime,
-            frequency: state.ambienceFrequency,
-            spooky,
-            pool,
-            recentFxIds: memo.recent,
-          }).then((result) => {
-            if (smartFxRef.current.key !== planKey) return; // the song, the playlist or the setting moved on meanwhile
-            smartFxRef.current.plan = result.planned;
-            smartFxRef.current.status = "ready";
-          });
+          const abort = new AbortController();
+          memo.planAbort = abort;
+          requestFxPlan(
+            {
+              title: track.title,
+              songMap: usableMap,
+              voiceMap: state.trackVoiceMaps[track.id] ?? null,
+              durationSec: track.durationSec,
+              fromSec: nowSec,
+              frequency: state.ambienceFrequency,
+              spooky,
+              pool,
+              recentFxIds: memo.recent,
+              prior: memo.played.map((p) => ({ startSec: p.startSec, endSec: p.endSec })),
+            },
+            abort.signal
+          )
+            .then((result) => {
+              if (smartFxRef.current.key !== planKey) return; // the song, the playlist or the setting moved on meanwhile
+              smartFxRef.current.plan = result.planned;
+              smartFxRef.current.status = "ready";
+            })
+            .catch(() => {
+              // A plan that could not be built: this song gets no effects, but never a stuck "planning" state.
+              if (smartFxRef.current.key === planKey) smartFxRef.current.status = "ready";
+            });
         }
         return;
       }
       if (memo.status !== "ready" || memo.plan.length === 0) return;
       if (fxLayerRef.current || fxLoadRef.current.loading) return; // one FX at a time
 
-      const decision = nextFxToSchedule(memo.plan, el.currentTime, memo.done, el.playbackRate);
+      const decision = nextFxToSchedule(memo.plan, nowSec, memo.done, el.playbackRate);
       if (decision.prefetch) {
         const fx = decision.prefetch.fx;
         decodeSpookyFx(ctx, fx.sourceUrl).catch(() => markSpookyFxFailed(fx));
       }
       if (!decision.schedule) return;
       const { item, delaySec } = decision.schedule;
-      memo.done.add(item.id);
       const atCtx = ctx.currentTime + delaySec;
+      memo.done.add(item.id); // so it isn't scheduled twice while it decodes; un-marked below if it never starts
+      memo.pendingId = item.id;
       memo.pendingAtCtx = atCtx;
       void startFxSound(item.fx, { atCtx, rate: item.rate * (el.playbackRate || 1) }).then((result) => {
         if (result === "played") {
+          if (memo.pendingId !== item.id) {
+            // Cancelled (a pause, a skip) while the file decoded: don't let it sound after all.
+            stopFxLayer(0);
+            return;
+          }
           spookyFxRef.current.lastFxId = item.fx.id;
           memo.recent = [...memo.recent, item.fx.id].slice(-6);
-        } else {
-          if (memo.pendingAtCtx === atCtx) memo.pendingAtCtx = null;
-          if (result === "failed") markSpookyFxFailed(item.fx);
+          memo.played.push({ id: item.id, startSec: item.startSec, endSec: item.endSec });
+          memo.activeUntilCtx = atCtx + (item.endSec - item.startSec) / (el.playbackRate || 1);
+          return;
         }
+        if (memo.pendingId === item.id) {
+          memo.pendingId = null;
+          memo.pendingAtCtx = null;
+        }
+        if (result === "failed") markSpookyFxFailed(item.fx); // stays marked: its file won't load
+        else memo.done.delete(item.id); // never started: may be tried again if it is still in time
       });
     }
 

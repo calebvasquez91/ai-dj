@@ -1,9 +1,11 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   applyFxPicks,
+  clashesWithSpans,
   fxPlanLocally,
   parseFxPlanReview,
   planFxWithAI,
+  remainingFxPicks,
   sanitizeFxPlanInput,
   type FxPlanCandidate,
   type FxPlanInput,
@@ -260,6 +262,69 @@ describe("planFxWithAI", () => {
       const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
       expect((await planFxWithAI(input(spread))).usedFallback).toBe(true);
       warn.mockRestore();
+    }
+  });
+});
+
+describe("effects already played in the song (a re-plan)", () => {
+  const spans = [{ startSec: 10, endSec: 13 }, { startSec: 200, endSec: 203 }];
+
+  it("sanitizes the prior spans: finite, ordered, capped", () => {
+    const body = {
+      title: "Song", bpm: 120, durationSec: 300, frequency: "frequent", candidates: [],
+      prior: [{ startSec: 1, endSec: 2 }, { startSec: 5, endSec: 5 }, { startSec: "x", endSec: 9 }, null, ...Array.from({ length: 20 }, (_, i) => ({ startSec: 100 + i, endSec: 101 + i }))],
+    };
+    const result = sanitizeFxPlanInput(body)!;
+    expect(result.prior!.length).toBe(8);
+    expect(result.prior![0]).toEqual({ startSec: 1, endSec: 2 });
+    expect(sanitizeFxPlanInput({ ...body, prior: undefined })!.prior).toEqual([]);
+  });
+
+  it("counts them against the cap", () => {
+    expect(remainingFxPicks({ frequency: "occasional", prior: [] })).toBe(3);
+    expect(remainingFxPicks({ frequency: "occasional", prior: spans })).toBe(1);
+    expect(remainingFxPicks({ frequency: "occasional", prior: [...spans, ...spans] })).toBe(0);
+    expect(remainingFxPicks({ frequency: "frequent" })).toBe(6);
+  });
+
+  it("keeps a pick away from them: no overlap, and the spacing applies", () => {
+    expect(clashesWithSpans(spans, { startSec: 40, endSec: 43 }, "frequent")).toBe(false);
+    expect(clashesWithSpans(spans, { startSec: 35, endSec: 38 }, "frequent")).toBe(true); // 25 s after the one at 10
+    expect(clashesWithSpans(spans, { startSec: 35, endSec: 38 }, "occasional")).toBe(true);
+    expect(clashesWithSpans(spans, { startSec: 12, endSec: 15 }, "frequent")).toBe(true); // overlaps
+    expect(clashesWithSpans([], { startSec: 12, endSec: 15 }, "occasional")).toBe(false);
+  });
+
+  it("applyFxPicks honours them", () => {
+    const cands = [
+      candidate({ id: "near", startSec: 30, endSec: 33 }),
+      candidate({ id: "far", startSec: 90, endSec: 93 }),
+      candidate({ id: "far2", startSec: 150, endSec: 153 }),
+    ];
+    const kept = applyFxPicks(input(cands, { frequency: "occasional", prior: spans }), ["near", "far", "far2"]);
+    // One slot left on Occasional (3 - 2), and "near" is within 60 s of the one at 10.
+    expect(kept.map((c) => c.id)).toEqual(["far"]);
+  });
+
+  it("does not ask Claude when the song has had all it may, and tells it what already played", async () => {
+    const realKey = process.env.ANTHROPIC_API_KEY;
+    process.env.ANTHROPIC_API_KEY = "test-key";
+    try {
+      const fetchMock = vi.fn(async () => new Response(JSON.stringify({ content: [{ type: "text", text: '{"picks": [], "summary": ""}' }] }), { status: 200 }));
+      vi.stubGlobal("fetch", fetchMock);
+      const full = await planFxWithAI(input(spread, { frequency: "occasional", prior: [...spans, { startSec: 100, endSec: 103 }] }));
+      expect(full.usedFallback).toBe(true);
+      expect(fetchMock).not.toHaveBeenCalled();
+
+      await planFxWithAI(input(spread, { frequency: "occasional", prior: spans }));
+      const [, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
+      const user = JSON.parse(JSON.parse(String(init.body)).messages[0].content);
+      expect(user.maxPicks).toBe(1);
+      expect(user.alreadyPlayed).toEqual([{ startSec: 10, endSec: 13 }, { startSec: 200, endSec: 203 }]);
+    } finally {
+      vi.unstubAllGlobals();
+      if (realKey === undefined) delete process.env.ANTHROPIC_API_KEY;
+      else process.env.ANTHROPIC_API_KEY = realKey;
     }
   });
 });

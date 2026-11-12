@@ -101,13 +101,6 @@ describe("findFxCues", () => {
     expect(late.every((c) => c.atSec <= 128 - FX_END_GUARD_SEC)).toBe(true);
   });
 
-  it("adds a transition cue at the bar line where the next song takes over, even in the last stretch", () => {
-    const cues = find({ transitionLandSec: 119.4 });
-    const transition = cues.find((c) => c.kind === "transition");
-    expect(transition?.atSec).toBe(120);
-    expect(transition?.reason).toMatch(/next song/);
-  });
-
   it("proposes nothing when the beat grid can't be trusted", () => {
     expect(find({ songMap: null })).toEqual([]);
     expect(find({ songMap: songMap({ downbeatConfidence: 0.1 }) })).toEqual([]);
@@ -292,7 +285,7 @@ describe("fitFxToCue", () => {
 
 describe("proposeFx", () => {
   const map = songMap();
-  const cues = find({ transitionLandSec: 120 });
+  const cues = find();
   const pool = [
     fx({ name: "Riser A", durationSec: 8 }),
     fx({ name: "Riser B", durationSec: 16 }),
@@ -309,7 +302,7 @@ describe("proposeFx", () => {
     const starts = proposals.map((p) => p.placement.startSec);
     expect([...starts].sort((a, b) => a - b)).toEqual(starts);
     for (const p of proposals) {
-      if (p.kind === "build" || p.kind === "transition") expect(["riser", "sweep"]).toContain(p.role);
+      if (p.kind === "build") expect(["riser", "sweep"]).toContain(p.role);
       if (p.kind === "drop") expect(["impact", "hit"]).toContain(p.role);
       if (p.kind === "breakdown") expect(["downlifter", "sweep", "texture", "hit"]).toContain(p.role);
     }
@@ -366,13 +359,5 @@ describe("proposeFx", () => {
     const lopsided = [fx({ name: "Riser A", durationSec: 16 }), fx({ name: "Riser B", durationSec: 2 })];
     const strong = (value: number) => proposeFx({ cues: riserCues, pool: lopsided, songMap: map, frequency: "frequent", random: () => value })[0].fxId;
     expect(strong(0)).toBe("Riser A");
-  });
-
-  it("can put a riser into the transition", () => {
-    const transitionOnly = cues.filter((c) => c.kind === "transition");
-    const proposals = proposeFx({ cues: transitionOnly, pool, songMap: map, frequency: "frequent", random: () => 0 });
-    expect(proposals).toHaveLength(1);
-    expect(proposals[0].role).toBe("riser");
-    expect(proposals[0].placement.endSec).toBeCloseTo(120, 6);
   });
 });

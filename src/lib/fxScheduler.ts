@@ -15,7 +15,16 @@ import {
   type FxProposal,
   type FxRole,
 } from "@/lib/fxCues";
-import { applyFxPicks, type FxPlanCandidate, type FxPlanFrequency, type FxPlanInput, type FxPlanReview } from "@/lib/ai-fx-plan";
+import {
+  applyFxPicks,
+  clashesWithSpans,
+  remainingFxPicks,
+  type FxPlanCandidate,
+  type FxPlanFrequency,
+  type FxPlanInput,
+  type FxPlanReview,
+  type FxPlanSpan,
+} from "@/lib/ai-fx-plan";
 import type { SongMap } from "@/lib/song-map";
 import type { VoiceMap } from "@/lib/voiceMap";
 import type { FxSound } from "@/types/music";
@@ -61,6 +70,8 @@ export interface BuildFxPlanArgs {
   /** The sounds that may be used here (Effects, already through getEligibleFX). */
   pool: FxSound[];
   recentFxIds?: string[];
+  /** Effects already played in this song, when this is a re-plan: they count against the cap and the spacing, so a new plan can't crowd or exceed them. */
+  prior?: FxPlanSpan[];
 }
 
 function candidateFor(proposal: FxProposal, cue: FxCue | undefined, fx: FxSound): FxPlanCandidate {
@@ -87,6 +98,8 @@ export function buildFxPlan(args: BuildFxPlanArgs): BuiltFxPlan | null {
     fromSec: args.fromSec + FX_PLAN_LEAD_SEC,
   });
   if (cues.length === 0 || !args.songMap) return null;
+  const prior = args.prior ?? [];
+  if (remainingFxPicks({ frequency: args.frequency, prior }) === 0) return null; // this song has had all it may
   // Ask for the roomiest plan; the DJ (and applyFxPicks) trim it to the frequency the listener set.
   const proposals = proposeFx({
     cues,
@@ -105,6 +118,7 @@ export function buildFxPlan(args: BuildFxPlanArgs): BuiltFxPlan | null {
   for (const proposal of proposals) {
     const fx = fxById.get(proposal.fxId);
     if (!fx) continue;
+    if (clashesWithSpans(prior, proposal.placement, args.frequency)) continue; // too close to one already played
     const candidate = candidateFor(proposal, cueById.get(proposal.cueId), fx);
     candidates.push(candidate);
     byId.set(candidate.id, {
@@ -127,6 +141,7 @@ export function buildFxPlan(args: BuildFxPlanArgs): BuiltFxPlan | null {
       frequency: args.frequency,
       spooky: args.spooky,
       candidates,
+      prior,
     },
     byId,
   };

@@ -139,3 +139,29 @@ describe("nextFxToSchedule", () => {
     expect(nextFxToSchedule([], 10, new Set())).toEqual({ schedule: null, prefetch: null });
   });
 });
+
+describe("buildFxPlan for a re-plan", () => {
+  it("leaves out proposals too close to an effect already played", () => {
+    const fresh = buildFxPlan(args)!;
+    const first = fresh.input.candidates[0];
+    const replanned = buildFxPlan({ ...args, prior: [{ startSec: first.startSec, endSec: first.endSec }] });
+    const ids = replanned ? replanned.input.candidates.map((c) => c.id) : [];
+    expect(ids).not.toContain(first.id);
+    for (const c of replanned?.input.candidates ?? []) expect(Math.abs(c.startSec - first.startSec)).toBeGreaterThanOrEqual(30);
+    expect(replanned?.input.prior).toEqual([{ startSec: first.startSec, endSec: first.endSec }]);
+  });
+
+  it("returns null when the song has already had all the effects it may", () => {
+    const six = Array.from({ length: 6 }, (_, i) => ({ startSec: 1000 + i * 100, endSec: 1003 + i * 100 }));
+    expect(buildFxPlan({ ...args, prior: six })).toBeNull();
+    // Occasional allows 3, so three already played also stops it.
+    expect(buildFxPlan({ ...args, frequency: "occasional", prior: six.slice(0, 3) })).toBeNull();
+    expect(buildFxPlan({ ...args, frequency: "occasional", prior: six.slice(0, 2) })).not.toBeNull();
+  });
+
+  it("applies a pick to the cap left after the prior effects", () => {
+    const built = buildFxPlan({ ...args, frequency: "occasional", prior: [{ startSec: 1000, endSec: 1003 }, { startSec: 1100, endSec: 1103 }] })!;
+    const ids = built.input.candidates.map((c) => c.id);
+    expect(planFromReview(built, { picks: ids.map((id) => ({ id, note: "" })) }).length).toBeLessThanOrEqual(1);
+  });
+});

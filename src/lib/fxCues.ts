@@ -9,8 +9,10 @@
  *  - the song map (lib/song-map.ts): the beat grid, the bar lines, the 8/16-bar phrases and the sections
  *    (intro / build / drop / breakdown / body / outro). Without a trustworthy grid there is no way to land on the beat,
  *    so there are no cues at all (never a guess);
- *  - the voice map (lib/voiceMap.ts): where someone is singing, so a sweep isn't laid over a vocal line;
- *  - where the next song takes over, when a transition is planned: a riser into it is the classic move.
+ *  - the voice map (lib/voiceMap.ts): where someone is singing, so a sweep isn't laid over a vocal line.
+ *
+ * Not covered: the moment one song hands over to the next. During a Song Sync morph the song plays through a stretching
+ * voice whose tempo moves bar by bar and the crossfade start is only an estimate, so there is no steady grid to land on.
  *
  * Cues are moments ("a drop lands on this bar line"); sounds are matched to them by role (a riser leads INTO a moment,
  * an impact lands ON it, a downlifter falls AWAY from it). A sound with a BPM in the FX Library is sped up or slowed
@@ -29,7 +31,7 @@ import { bestTempoRatio } from "@/lib/tempoRatio";
 import type { VoiceMap } from "@/lib/voiceMap";
 import type { FxSound } from "@/types/music";
 
-export type FxCueKind = "build" | "drop" | "breakdown" | "phrase" | "transition";
+export type FxCueKind = "build" | "drop" | "breakdown" | "phrase";
 export type FxRole = "riser" | "downlifter" | "impact" | "hit" | "sweep" | "texture";
 
 /** A moment in a song that an effect could mark. */
@@ -55,18 +57,16 @@ export interface FxCueInput {
   durationSec: number;
   /** Nothing is proposed before this (the playhead plus the time it takes to decode and schedule a sound). */
   fromSec: number;
-  /** The moment the next song takes over, in this song's time, when a transition is planned. */
-  transitionLandSec?: number | null;
 }
 
-/** No effect in a song's last stretch except one that belongs to the transition. */
+/** No effect in a song's last stretch: it belongs to the transition into the next song. */
 export const FX_END_GUARD_SEC = 15;
 /** The longest run-up or ring a cue offers, in bars. */
 const MAX_ROOM_BARS = 16;
 /** A section edge more than this many bars from a bar line isn't one the grid really agrees with: no cue. */
 const SECTION_SNAP_BARS = 1;
 // A build-up into a drop is where an effect is most at home (a riser filling the build), so it rates level with the drop itself; the planner then lets a riser that fills its build beat the impact on the same bar line.
-const KIND_WEIGHT: Record<FxCueKind, number> = { drop: 1, build: 1, transition: 0.85, breakdown: 0.7, phrase: 0.4 };
+const KIND_WEIGHT: Record<FxCueKind, number> = { drop: 1, build: 1, breakdown: 0.7, phrase: 0.4 };
 /** Below this a sound isn't a fit for a moment. */
 export const MIN_FIT_SCORE = 0.3;
 /** How far a no-BPM sound may be stretched to fill whole bars. */
@@ -117,7 +117,7 @@ export function findFxCues(input: FxCueInput): FxCue[] {
     const atSec = nearestDownbeat(map, rawSec);
     if (Math.abs(atSec - rawSec) > SECTION_SNAP_BARS * bar) return;
     if (atSec < input.fromSec) return;
-    if (kind !== "transition" && atSec > endGuard) return;
+    if (atSec > endGuard) return;
     if (drafts.some((d) => Math.abs(d.atSec - atSec) < 1e-6 && d.kind === kind)) return;
     drafts.push({ kind, atSec, leadFromSec: leadFromRaw == null ? null : nearestDownbeat(map, leadFromRaw), sectionConfidence, reason });
   };
@@ -141,7 +141,6 @@ export function findFxCues(input: FxCueInput): FxCue[] {
       }
     }
   });
-  if (input.transitionLandSec != null) add("transition", input.transitionLandSec, null, 1, "the next song takes over here");
 
   drafts.sort((a, b) => a.atSec - b.atSec);
   return drafts.map((draft, i) => {
@@ -194,13 +193,12 @@ const AFFINITY: Record<FxCueKind, Partial<Record<FxRole, number>>> = {
   drop: { impact: 1, hit: 0.8, sweep: 0.3 },
   breakdown: { downlifter: 1, sweep: 0.6, texture: 0.6, hit: 0.2 },
   phrase: { hit: 0.7, sweep: 0.6, downlifter: 0.5, impact: 0.4, texture: 0.35 },
-  transition: { riser: 1, sweep: 0.75, impact: 0.5, hit: 0.35 },
 };
 
 /** True when the sound runs UP to the cue's moment (it ends on the bar line); false when it starts on the bar line. */
 function endsAtCue(role: FxRole, kind: FxCueKind): boolean {
   if (role === "riser") return true;
-  if (role === "sweep") return kind === "build" || kind === "drop" || kind === "transition";
+  if (role === "sweep") return kind === "build" || kind === "drop";
   return false;
 }
 
