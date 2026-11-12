@@ -562,7 +562,7 @@ export function DeckView({ embedded = false }: { embedded?: boolean } = {}) {
             </label>
             <label
               className="flex items-center gap-1.5 text-xs text-muted cursor-pointer"
-              title="Occasional mid-track FX (a filter/riser build, an echo throw on a breakdown) — separate from transition FX, which always play"
+              title="FX sounds the AI DJ drops into a song at fitting moments (a riser into a drop, an impact on it), timed to land on the beat. Switch off to stop them. Also gates the mid-track ambience effects."
             >
               <input
                 type="checkbox"
@@ -576,7 +576,7 @@ export function DeckView({ embedded = false }: { embedded?: boolean } = {}) {
               <select
                 value={ambienceFrequency}
                 onChange={(e) => setAmbienceFrequency(e.target.value as AmbienceFrequency)}
-                title="How often mid-track ambience FX can fire"
+                title="How often FX sounds can fire in a song"
                 className="bg-surface shadow-elevate-sm rounded-full text-xs text-muted px-2 py-1 outline-none"
               >
                 {AMBIENCE_FREQUENCIES.map((f) => (
