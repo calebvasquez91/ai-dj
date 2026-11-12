@@ -86,6 +86,9 @@ import { effectiveAutoFxChoice } from "@/lib/autoFxSettings";
 import { FX_LOAD_IDLE, beginFxRequest, finishFxRequest, pressFx, resetFxLoad, type FxLoadState } from "@/lib/fxLayer";
 import { energyProfileFromPeaks } from "@/lib/energyProfile";
 import { getEligibleFX, isHalloweenFx } from "@/lib/fxAffinity";
+import { requestFxPlan } from "@/lib/fxPlanClient";
+import { nextFxToSchedule, type PlannedFx } from "@/lib/fxScheduler";
+import { songMapMatchesBpm } from "@/lib/phrase-align";
 import { requestLoopPick } from "@/lib/loopApi";
 import {
   SPOOKY_FX_BASE_GAIN,
@@ -502,6 +505,18 @@ export function DualDeckStage() {
     poolMemo: null,
   });
   const spookyFxSourcesRef = useRef<Set<AudioBufferSourceNode>>(new Set());
+  // Beat-matched FX (lib/fxCues.ts, lib/ai-fx-plan.ts, lib/fxScheduler.ts): the plan the audio engineer and the AI DJ made
+  // for the playing song, which effects in it were already scheduled (`done`, kept for the song so a seek back doesn't
+  // lose track), and the clock time a scheduled effect has yet to start at (`pendingAtCtx`), so a pause or a skip can cancel it.
+  const smartFxRef = useRef<{
+    trackId: string | null;
+    key: string;
+    status: "idle" | "planning" | "ready";
+    plan: PlannedFx[];
+    done: Set<string>;
+    pendingAtCtx: number | null;
+    recent: string[];
+  }>({ trackId: null, key: "", status: "idle", plan: [], done: new Set(), pendingAtCtx: null, recent: [] });
   // Decoded random effects (in-flight promises included), bounded — see decodeSpookyFx.
   const spookyBuffersRef = useRef(new BoundedCache<Promise<AudioBuffer>>(SPOOKY_FX_CACHE_MAX));
   const fxLiveRef = useRef<Set<LiveFx>>(new Set());
@@ -1562,7 +1577,10 @@ export function DualDeckStage() {
     }
 
     /** The one FX layer: decodes `fx`, fades out whatever the layer is playing (0.2 s) and then starts it, through the master graph scaled by the FX slider. "cancelled" = the button was pressed again while it was still decoding. */
-    async function startFxSound(fx: FxSound): Promise<"played" | "no-audio" | "failed" | "cancelled"> {
+    async function startFxSound(
+      fx: FxSound,
+      opts: { atCtx?: number; rate?: number } = {}
+    ): Promise<"played" | "no-audio" | "failed" | "cancelled"> {
       const ctx = audioCtxRef.current;
       const masterGain = masterGainRef.current;
       if (!ctx || !masterGain) return "no-audio";
@@ -1593,9 +1611,12 @@ export function DualDeckStage() {
       // Only one FX at a time: fade the current one out first, then start this one as that fade ends.
       const replacing = finished.outcome === "replace";
       if (replacing) stopFxLayer(FX_STOP_FADE_SEC);
-      const delaySec = replacing ? FX_STOP_FADE_SEC : 0;
+      // A planned effect brings its own start time on the audio clock (so it lands on a beat) and its own speed (its tempo matched to the song's).
+      const startAt = opts.atCtx != null ? Math.max(ctx.currentTime, opts.atCtx) : ctx.currentTime + (replacing ? FX_STOP_FADE_SEC : 0);
+      const delaySec = Math.max(0, startAt - ctx.currentTime);
       const source = ctx.createBufferSource();
       source.buffer = buffer;
+      if (opts.rate != null && opts.rate > 0 && Math.abs(opts.rate - 1) > 1e-4) source.playbackRate.value = opts.rate;
       const gain = ctx.createGain();
       source.connect(gain);
       gain.connect(masterGain);
@@ -1618,7 +1639,7 @@ export function DualDeckStage() {
           // already disconnected — harmless
         }
       });
-      source.start(ctx.currentTime + delaySec);
+      source.start(startAt);
       return "played";
     }
 
@@ -3528,6 +3549,110 @@ export function DualDeckStage() {
       }
     }
 
+    /**
+     * Beat-matched FX, in every playlist. The audio engineer finds the moments in the playing song that suit an effect
+     * (a build-up, a drop, a breakdown) and which sound fits each, landing on the beat (lib/fxCues.ts); the AI DJ picks
+     * which of those to play, with the engineer's own pick as the fallback (lib/ai-fx-plan.ts). This runs every tick:
+     * it makes the plan once the song's beat grid is known, decodes the next effect ahead of time, and schedules it on
+     * the audio clock a moment before it is due, from the deck's own position, so it starts on the beat chosen.
+     * Gated by the Ambience switch and its frequency; which sounds may be used is getEligibleFX (Halloween ones only in
+     * Spooky Music, and only they there). Never during a transition, mashup, loop or other special move, and never
+     * over another FX. Not part of Song Sync: during a morph the song plays through a stretching voice whose tempo
+     * moves bar by bar, so there is no steady grid to land on.
+     */
+    function trySmartFx() {
+      const ctx = audioCtxRef.current;
+      if (!ctx) return;
+      const state = useStore.getState();
+      const memo = smartFxRef.current;
+      const track = state.currentTrack;
+      const el = deckEl(activeDeckRef.current);
+      const playing = !!track && track.source === "local" && !!el && !el.paused && state.isPlaying;
+
+      // An effect scheduled but not yet sounding must not start over a pause or a different song.
+      if (memo.pendingAtCtx != null) {
+        if (ctx.currentTime > memo.pendingAtCtx + 0.1) memo.pendingAtCtx = null;
+        else if (!playing || memo.trackId !== track?.id) {
+          memo.pendingAtCtx = null;
+          stopFxLayer(0);
+        }
+      }
+      if (!track || !el || !playing) return;
+      if (!state.ambienceEnabled || state.ambienceFrequency === "off") return;
+      if (!state.fxLibraryLoaded) return;
+      if (
+        transitionRef.current ||
+        mashupRef.current ||
+        loopRef.current ||
+        backspinRef.current ||
+        tempoRampRef.current ||
+        songSyncRef.current ||
+        songSyncStartingRef.current
+      )
+        return;
+
+      if (memo.trackId !== track.id) {
+        memo.trackId = track.id;
+        memo.key = "";
+        memo.status = "idle";
+        memo.plan = [];
+        memo.done = new Set();
+      }
+      const analysis = getAnalysis(track.id);
+      const map = analysis.songMap;
+      const pool = effectsPoolNow();
+      const spooky = state.activePlaylistTheme === "spooky";
+      const usableMap = !analysis.fallback && map && songMapMatchesBpm(map, analysis.bpm) ? map : null;
+      const key = `${track.id}|${spooky}|${state.ambienceFrequency}|${pool.length}|${usableMap ? Math.round(usableMap.bpm * 10) : "none"}`;
+
+      if (memo.key !== key) {
+        memo.key = key;
+        memo.plan = [];
+        memo.status = usableMap && pool.length > 0 ? "planning" : "ready"; // nothing to plan without a trustworthy grid or a sound
+        if (usableMap && pool.length > 0) {
+          const planKey = key;
+          void requestFxPlan({
+            title: track.title,
+            songMap: usableMap,
+            voiceMap: state.trackVoiceMaps[track.id] ?? null,
+            durationSec: track.durationSec,
+            fromSec: el.currentTime,
+            frequency: state.ambienceFrequency,
+            spooky,
+            pool,
+            recentFxIds: memo.recent,
+          }).then((result) => {
+            if (smartFxRef.current.key !== planKey) return; // the song, the playlist or the setting moved on meanwhile
+            smartFxRef.current.plan = result.planned;
+            smartFxRef.current.status = "ready";
+          });
+        }
+        return;
+      }
+      if (memo.status !== "ready" || memo.plan.length === 0) return;
+      if (fxLayerRef.current || fxLoadRef.current.loading) return; // one FX at a time
+
+      const decision = nextFxToSchedule(memo.plan, el.currentTime, memo.done, el.playbackRate);
+      if (decision.prefetch) {
+        const fx = decision.prefetch.fx;
+        decodeSpookyFx(ctx, fx.sourceUrl).catch(() => markSpookyFxFailed(fx));
+      }
+      if (!decision.schedule) return;
+      const { item, delaySec } = decision.schedule;
+      memo.done.add(item.id);
+      const atCtx = ctx.currentTime + delaySec;
+      memo.pendingAtCtx = atCtx;
+      void startFxSound(item.fx, { atCtx, rate: item.rate * (el.playbackRate || 1) }).then((result) => {
+        if (result === "played") {
+          spookyFxRef.current.lastFxId = item.fx.id;
+          memo.recent = [...memo.recent, item.fx.id].slice(-6);
+        } else {
+          if (memo.pendingAtCtx === atCtx) memo.pendingAtCtx = null;
+          if (result === "failed") markSpookyFxFailed(item.fx);
+        }
+      });
+    }
+
     /** In Spooky Music, the DJ dropping a random effect into the mix on its own — mainly in a track's build-up and at its drop (a small chance elsewhere), gated by the same on/off + frequency setting as the other mid-track FX, never during a transition or other special move. */
     function trySpookyFxMoment() {
       if (!TRANSITION_FX_ENABLED) return; // Song Sync Mode: only the music
@@ -4289,6 +4414,7 @@ export function DualDeckStage() {
       tryAutoTransition();
       tryAmbience();
       trySpookyFxMoment();
+      trySmartFx();
       tryAutoFx();
       tryHalloweenAmbientLayer();
     }, 500);
