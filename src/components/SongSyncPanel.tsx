@@ -45,8 +45,6 @@ export function SongSyncPanel() {
   const status = useStore((s) => s.songSync);
   const auto = useStore((s) => s.songSyncAuto);
   const setAuto = useStore((s) => s.setSongSyncAuto);
-  const transitionSounds = useStore((s) => s.transitionSoundsOn);
-  const setTransitionSounds = useStore((s) => s.setTransitionSoundsOn);
   const requestSongSync = useStore((s) => s.requestSongSync);
   const hasNext = useStore((s) => s.queue.length > 0);
   const hasTrack = useStore((s) => s.currentTrack != null);
@@ -100,21 +98,6 @@ export function SongSyncPanel() {
             className="accent-accent-purple"
           />
           Auto
-        </label>
-        <label
-          className={`flex items-center gap-1.5 text-xs text-muted cursor-pointer ${auto ? "" : "opacity-50"}`}
-          title="On: an automatic change carries a sound from your FX library (a transition, loop or vocal) between the two songs. The first song morphs onto the sound, it plays for about 30 seconds (repeated if it is short), then it morphs onto the next song. Halloween sounds are used only in Spooky Music."
-        >
-          <input
-            type="checkbox"
-            role="switch"
-            checked={transitionSounds}
-            disabled={!auto}
-            onChange={(e) => setTransitionSounds(e.target.checked)}
-            data-testid="transition-sounds-toggle"
-            className="accent-accent-purple"
-          />
-          Sound between songs
         </label>
         {status == null && (
           <span className="text-[11px] text-muted">

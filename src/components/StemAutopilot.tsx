@@ -3,7 +3,6 @@
 import { useEffect, useRef, useState } from "react";
 import { useStore, type StemPick } from "@/lib/store";
 import { reachableTracks } from "@/lib/lookahead";
-import { isTransitionTrack } from "@/lib/transitionSound";
 import { judgeStemCandidate } from "@/lib/stemPlanner";
 import { planStemAutopilot, stemStateFromJob, type StemJobState } from "@/lib/stemAutopilot";
 import { isVocalMashupPair, vocalMashupBeatsTheCap } from "@/lib/vocalMashup";
@@ -150,8 +149,6 @@ export function StemAutopilot({ scope = "window" }: { scope?: "window" | "mashup
       const mashable =
         currentTrack != null &&
         next != null &&
-        !isTransitionTrack(currentTrack) &&
-        !isTransitionTrack(next) &&
         currentTrack.source === "local" &&
         next.source === "local" &&
         currentAnalysis != null &&

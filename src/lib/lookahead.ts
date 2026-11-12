@@ -7,24 +7,13 @@
  * enters the window and gets its turn then.
  */
 
-import { isTransitionTrack } from "@/lib/transitionSound";
-
 /** Heavy work (decode + analyse a whole audio file): the playing track and the next few, one at a time. */
 export const ANALYSIS_LOOKAHEAD = 3;
 /** Light lookups (a small request each): the playing track and a few more, enough for sequencing to see ahead. */
 export const LOOKUP_LOOKAHEAD = 8;
 
-/** A transition sound's stand-in track (lib/transitionSound.ts) is made in the browser and has no row on the server, so no lookup, analysis or stem job is ever done for it. */
-function isStandIn(track: unknown): boolean {
-  return typeof track === "object" && track !== null && typeof (track as { id?: unknown }).id === "string" && isTransitionTrack(track as { id: string });
-}
-
-/**
- * The playing track (if any) followed by the next `ahead` queued tracks. With nothing playing, the first `ahead + 1` of
- * the queue. A transition sound's stand-in track is left out wherever it is: the playing one counts as "nothing playing".
- */
+/** The playing track (if any) followed by the next `ahead` queued tracks. With nothing playing, the first `ahead + 1` of the queue. */
 export function reachableTracks<T>(currentTrack: T | null | undefined, queue: T[], ahead: number): T[] {
   const n = Math.max(0, Math.floor(ahead));
-  const songs = queue.some(isStandIn) ? queue.filter((t) => !isStandIn(t)) : queue;
-  return currentTrack && !isStandIn(currentTrack) ? [currentTrack, ...songs.slice(0, n)] : songs.slice(0, n + 1);
+  return currentTrack ? [currentTrack, ...queue.slice(0, n)] : queue.slice(0, n + 1);
 }
