@@ -16,9 +16,12 @@ function sourceFiles(dir = "src"): [string, string][] {
 }
 
 const QUE_DIR = `src${sep}features${sep}que${sep}`;
-const outside = () => sourceFiles().filter(([path]) => !path.startsWith(QUE_DIR));
+// The tree is read once for the whole file: each test below used to read every source file again, and on a slow disk
+// (a OneDrive folder, a busy machine) four full scans ran past the 5 s test timeout.
+let scanned: [string, string][] | undefined;
+const outside = () => (scanned ??= sourceFiles()).filter(([path]) => !path.startsWith(QUE_DIR));
 
-describe("Que is switched off and kept in his own folder", () => {
+describe("Que is switched off and kept in his own folder", { timeout: 30_000 }, () => {
   it("is disabled", () => {
     expect(QUE_ENABLED).toBe(false);
   });
