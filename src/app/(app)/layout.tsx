@@ -19,6 +19,7 @@ import { DeckView } from "@/components/DeckView";
 import { Mixer } from "@/components/Mixer";
 import { KeyboardShortcuts } from "@/components/KeyboardShortcuts";
 import { BackgroundAudio } from "@/components/BackgroundAudio";
+import { FeedbackPrompt } from "@/components/FeedbackPrompt";
 
 export default async function AppLayout({ children }: { children: React.ReactNode }) {
   const session = await auth();
@@ -54,6 +55,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
       <NowPlayingView />
       <DeckView />
       <Mixer />
+      <FeedbackPrompt />
     </AuthSessionProvider>
   );
 }
