@@ -16,5 +16,8 @@ export default defineConfig({
     // specific to that checkout, e.g. missing env/mocked state) even
     // though the real suite already passed.
     exclude: [...configDefaults.exclude, "**/.claude/**"],
+    // A few tests read every file under src (the "only through the entry point" guards). On a slow disk, such as a
+    // OneDrive folder, with the whole suite running in parallel, one scan can pass vitest's 5 s default.
+    testTimeout: 30_000,
   },
 });
