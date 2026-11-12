@@ -256,11 +256,15 @@ const AMBIENT_RESUME_SETTLE_MS = 1500;
  */
 /** A transition sound being got ready for one A -> B change, or ready: its stand-in track (a ~30 s file of the sound tiled on its own bar grid, held as a blob URL) and the analysis written for it. */
 type PreparedTransitionSound =
-  | { pair: string; status: "preparing" | "none" }
-  | { pair: string; status: "ready"; track: LocalTrack; analysis: TrackAnalysis; choice: TransitionSoundChoice };
+  | { pair: string; key: string; status: "preparing" | "none" }
+  | { pair: string; key: string; status: "ready"; track: LocalTrack; analysis: TrackAnalysis; choice: TransitionSoundChoice };
 
-/** Time allowed to fetch and to decode a transition sound's file before the change goes ahead without one. */
+/** Time allowed to fetch (the whole file) and to decode a transition sound before the change goes ahead without one. */
 const TRANSITION_SOUND_LOAD_TIMEOUT_MS = 6000;
+/** A sound is prepared only once the playing track has this little left (the longest morph and crossfade fit well inside it), so a song that is skipped or stopped early never pays for one. */
+const TRANSITION_SOUND_PREPARE_WITHIN_SEC = 120;
+/** A sound still loading holds the exit only while this much of the track is left; with less, the change goes ahead without it rather than be late. */
+const TRANSITION_SOUND_HOLD_MIN_REMAINING_SEC = 30;
 
 interface ActiveSongSync {
   fromDeckId: DeckId;
@@ -2622,9 +2626,12 @@ export function DualDeckStage() {
       aAnalysis: TrackAnalysis,
       bAnalysis: TrackAnalysis
     ): PreparedTransitionSound {
+      // The choice is made against the tempo and key of both songs, so it is made again when one of them is measured
+      // after all (a next song still being analysed has no tempo to choose against). A sound that is ready is kept.
+      const key = [pair, aAnalysis.bpm, aAnalysis.bpmConfidence, aAnalysis.camelotKey, bAnalysis.bpm, bAnalysis.bpmConfidence, bAnalysis.camelotKey].join("|");
       const held = transitionSoundRef.current;
-      if (held?.pair === pair) return held;
-      const entry: PreparedTransitionSound = { pair, status: "preparing" };
+      if (held?.pair === pair && (held.status === "ready" || held.key === key)) return held;
+      const entry: PreparedTransitionSound = { pair, key, status: "preparing" };
       transitionSoundRef.current = entry;
       sweepTransitionSounds();
       void prepareTransitionSound(entry, aAnalysis, bAnalysis);
@@ -2635,23 +2642,29 @@ export function DualDeckStage() {
       const settle = (next: PreparedTransitionSound) => {
         if (transitionSoundRef.current === entry) transitionSoundRef.current = next;
       };
+      const yieldToMain = () => new Promise<void>((resolve) => setTimeout(resolve, 0));
       try {
         const ctx = audioCtxRef.current;
         const state = useStore.getState();
         const sounds = eligibleTransitionSounds(state.fxLibrary, state.activePlaylistTheme === "spooky");
         const choice = chooseTransitionSound({ sounds, a: aAnalysis, b: bAnalysis, recentFxIds: recentTransitionFxRef.current });
         if (!ctx || !choice) {
-          settle({ pair: entry.pair, status: "none" });
+          settle({ pair: entry.pair, key: entry.key, status: "none" });
           return;
         }
-        const res = await withTimeout(fetch(choice.sound.sourceUrl), TRANSITION_SOUND_LOAD_TIMEOUT_MS, "Transition sound file");
-        if (!res.ok) throw new Error(`Transition sound ${res.status}`);
-        const decoded = await withTimeout(
-          ctx.decodeAudioData(await res.arrayBuffer()),
+        // The whole file (not just its headers) must arrive in time, or the change goes ahead without a sound.
+        const bytes = await withTimeout(
+          fetch(choice.sound.sourceUrl).then((res) => {
+            if (!res.ok) throw new Error(`Transition sound ${res.status}`);
+            return res.arrayBuffer();
+          }),
           TRANSITION_SOUND_LOAD_TIMEOUT_MS,
-          "Transition sound decode"
+          "Transition sound file"
         );
+        const decoded = await withTimeout(ctx.decodeAudioData(bytes), TRANSITION_SOUND_LOAD_TIMEOUT_MS, "Transition sound decode");
         if (transitionSoundRef.current !== entry) return; // the pair moved on while it loaded
+        await yieldToMain(); // the tiling and encoding below are a burst of work on the page's thread: let a frame through first
+        if (transitionSoundRef.current !== entry) return;
         const layout = planTransitionLoop({
           bpm: choice.bpm,
           soundDurationSec: decoded.duration,
@@ -2659,6 +2672,8 @@ export function DualDeckStage() {
         });
         const source = Array.from({ length: Math.min(2, decoded.numberOfChannels) }, (_, i) => decoded.getChannelData(i));
         const rendered = renderTransitionLoop(source, decoded.sampleRate, layout);
+        await yieldToMain();
+        if (transitionSoundRef.current !== entry) return;
         const url = URL.createObjectURL(new Blob([encodeWav16(rendered, decoded.sampleRate)], { type: "audio/wav" }));
         // The engine decodes a track through this cache; seed it with the audio already in hand.
         const buffer = ctx.createBuffer(2, rendered[0].length, decoded.sampleRate);
@@ -2668,10 +2683,10 @@ export function DualDeckStage() {
         transitionNonceRef.current += 1;
         const track = makeTransitionTrack({ sound: choice.sound, url, layout, nonce: String(transitionNonceRef.current) });
         transitionUrlsRef.current[track.id] = url;
-        settle({ pair: entry.pair, status: "ready", track, analysis: transitionAnalysis(layout, choice.camelotKey), choice });
+        settle({ pair: entry.pair, key: entry.key, status: "ready", track, analysis: transitionAnalysis(layout, choice.camelotKey), choice });
       } catch {
         // Fetch/decode/timeout failure: this change goes ahead without a sound.
-        settle({ pair: entry.pair, status: "none" });
+        settle({ pair: entry.pair, key: entry.key, status: "none" });
       }
     }
 
@@ -2682,9 +2697,12 @@ export function DualDeckStage() {
      */
     function startCarriedSongSync(carrier: Extract<PreparedTransitionSound, { status: "ready" }>, nextTrack: LocalTrack) {
       useStore.getState().queueTransitionSound(carrier.track, carrier.analysis);
-      recentTransitionFxRef.current = [...recentTransitionFxRef.current, carrier.choice.sound.id].slice(-6);
       void startSongSync(carrier.track).then((started) => {
-        if (started) return;
+        if (started) {
+          // Only a sound that has really carried a change counts as used lately.
+          recentTransitionFxRef.current = [...recentTransitionFxRef.current, carrier.choice.sound.id].slice(-6);
+          return;
+        }
         const store = useStore.getState();
         store.dropQueuedTransitionSound(carrier.track.id);
         if (useStore.getState().queue[0]?.id === nextTrack.id) void startSongSync(nextTrack);
@@ -4071,13 +4089,15 @@ export function DualDeckStage() {
         const pair = `${track.id}>${nextTrack.id}`;
         if (songSyncTriedRef.current !== pair) {
           const nextAnalysisForSync = getAnalysis(nextTrack.id);
-          // A transition sound may carry this change (A -> sound -> B): it is prepared from the first tick of the pair, and
-          // the morph below is planned onto it once it is ready. A sound that is still loading holds the exit for a moment
-          // (bounded by its load timeouts); a pair with no usable sound goes the ordinary way, A straight onto B.
-          const carrierState =
-            state.transitionSoundsOn && !isTransitionTrack(track) && !isTransitionTrack(nextTrack)
-              ? transitionSoundFor(pair, currentAnalysis, nextAnalysisForSync)
-              : null;
+          // A transition sound may carry this change (A -> sound -> B): it is prepared once the playing track is near its
+          // end, and the morph below is planned onto it when it is ready. A sound that is still loading holds the exit
+          // (bounded by its load timeouts, and only while there is time to spare); a pair with no usable sound goes the
+          // ordinary way, A straight onto B.
+          const remainingSec = duration - currentTime;
+          const wantsSound = state.transitionSoundsOn && !isTransitionTrack(track) && !isTransitionTrack(nextTrack);
+          const soundDue = wantsSound && remainingSec <= TRANSITION_SOUND_PREPARE_WITHIN_SEC;
+          const carrierState = soundDue ? transitionSoundFor(pair, currentAnalysis, nextAnalysisForSync) : null;
+          if (carrierState?.status === "preparing" && remainingSec > TRANSITION_SOUND_HOLD_MIN_REMAINING_SEC) return;
           const carrier = carrierState?.status === "ready" ? carrierState : null;
           const syncTarget = carrier ? carrier.track : nextTrack;
           const syncTargetAnalysis = carrier ? carrier.analysis : nextAnalysisForSync;
@@ -4092,9 +4112,9 @@ export function DualDeckStage() {
           }
           const syncPlan = songSyncPlanCacheRef.current.plan;
           if (!syncPlan) {
-            // Nothing to morph onto the next song yet. A sound still loading may bridge the gap, so wait for it first.
-            if (carrierState?.status === "preparing") return;
-            songSyncTriedRef.current = pair; // nothing to morph for this pair: the ordinary transition below
+            // Nothing to morph onto the next song. While a sound is not yet due it may still bridge the gap, so the pair
+            // is not given up on (the ordinary triggers below carry on meanwhile).
+            if (!(wantsSound && !soundDue)) songSyncTriedRef.current = pair; // nothing to morph for this pair: the ordinary transition below
           } else {
             const decision = songSyncTrigger({
               beatsUntilMixOut: beatsUntilMixOut(currentTime, duration, currentAnalysis.bpm),

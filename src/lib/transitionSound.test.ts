@@ -7,7 +7,6 @@ import {
   chooseTransitionSound,
   eligibleTransitionSounds,
   encodeWav16,
-  fxIdOfTransitionTrack,
   isTransitionTrack,
   leadingSilenceSamples,
   makeTransitionTrack,
@@ -253,12 +252,10 @@ describe("the sound as a track", () => {
   it("is marked so nothing mistakes it for a library song", () => {
     const track = makeTransitionTrack({ sound: fx({ id: "riser" }), url: "blob:x", layout, nonce: "1" });
     expect(isTransitionTrack(track)).toBe(true);
-    expect(fxIdOfTransitionTrack(track)).toBe("riser");
     expect(track.sourceUrl).toBe("blob:x");
     expect(track.durationSec).toBeCloseTo(layout.totalSec, 9);
     expect(isTransitionTrack({ id: "cuid123" })).toBe(false);
     expect(isTransitionTrack(null)).toBe(false);
-    expect(fxIdOfTransitionTrack({ id: "cuid123" })).toBeNull();
   });
 
   it("two uses of one sound are two tracks", () => {

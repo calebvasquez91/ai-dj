@@ -36,7 +36,7 @@ export const TRANSITION_SOUND_EXIT_SLACK_BARS = 2;
 export const TRANSITION_SOUND_MIN_SEC = 0.25;
 
 /** The longest unit the tiling repeats, in bars. A sound longer than that is cut to it. */
-export const TRANSITION_SOUND_MAX_UNIT_BARS = 64;
+const TRANSITION_SOUND_MAX_UNIT_BARS = 64;
 
 const UNIT_BARS = [1, 2, 4, 8, 16, 32, 64] as const;
 
@@ -300,12 +300,15 @@ export function encodeWav16(channels: readonly Float32Array[], sampleRate: numbe
   view.setUint16(34, 16, true);
   text(36, "data");
   view.setUint32(40, dataBytes, true);
-  let offset = 44;
-  for (let i = 0; i < frames; i++) {
-    for (let c = 0; c < numChannels; c++) {
-      const s = Math.max(-1, Math.min(1, channels[c][i]));
-      view.setInt16(offset, s < 0 ? s * 0x8000 : s * 0x7fff, true);
-      offset += 2;
+  // Written through an Int16Array over the data bytes (the byte order of every browser the app runs in is little-endian,
+  // which is what WAV wants): about thirty times quicker than a DataView call per sample, and this runs on the page's
+  // main thread while a song is playing.
+  const samples = new Int16Array(buffer, 44, frames * numChannels);
+  for (let c = 0; c < numChannels; c++) {
+    const channel = channels[c];
+    for (let i = 0, o = c; i < frames; i++, o += numChannels) {
+      const s = Math.max(-1, Math.min(1, channel[i]));
+      samples[o] = s < 0 ? s * 0x8000 : s * 0x7fff;
     }
   }
   return buffer;
@@ -369,10 +372,4 @@ export function makeTransitionTrack(input: { sound: FxSound; url: string; layout
     bpm: input.layout.bpm,
     tags: [],
   };
-}
-
-/** The FX id a transition track was made from, or null if it isn't one. */
-export function fxIdOfTransitionTrack(track: { id: string }): string | null {
-  if (!isTransitionTrack(track)) return null;
-  return track.id.slice(TRANSITION_TRACK_PREFIX.length).split(":")[0] || null;
 }

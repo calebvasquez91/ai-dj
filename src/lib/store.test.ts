@@ -1,6 +1,8 @@
 import { describe, expect, it, beforeEach, vi, afterEach } from "vitest";
 import { useStore } from "./store";
-import type { Playlist, Track } from "@/types/music";
+import type { LocalTrack, Playlist, Track } from "@/types/music";
+import { fallbackAnalysis } from "@/lib/audio-analysis-core";
+import { TRANSITION_TRACK_PREFIX } from "@/lib/transitionSound";
 
 function makeTrack(id: string, playPreference?: Track["playPreference"]): Track {
   return {
@@ -273,5 +275,127 @@ describe("addTrackToPlaylist while that playlist is playing", () => {
     useStore.getState().addTrackToPlaylist("p1", b);
     await vi.waitFor(() => expect(useStore.getState().syncError).not.toBeNull());
     expect(useStore.getState().queue.filter((t) => t.id === "b")).toHaveLength(1);
+  });
+});
+
+describe("transition sounds in the queue", () => {
+  const sound = (n = 1): LocalTrack => ({
+    ...makeTrack(`${TRANSITION_TRACK_PREFIX}riser:${n}`),
+    source: "local",
+  }) as LocalTrack;
+  const song = (id: string) => makeTrack(id) as LocalTrack;
+  const ids = () => useStore.getState().queue.map((t) => t.id);
+
+  function playing() {
+    useStore.setState({ currentTrack: song("a"), queue: [song("b"), song("c")], history: [] });
+  }
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("queueTransitionSound puts the sound first, with its analysis, and replaces an earlier one", () => {
+    playing();
+    useStore.getState().queueTransitionSound(sound(1), fallbackAnalysis());
+    useStore.getState().queueTransitionSound(sound(2), fallbackAnalysis());
+    expect(ids()).toEqual([`${TRANSITION_TRACK_PREFIX}riser:2`, "b", "c"]);
+    expect(useStore.getState().trackAnalysis[`${TRANSITION_TRACK_PREFIX}riser:2`]).toBeDefined();
+  });
+
+  it("dropQueuedTransitionSound takes the sound and its analysis out, but only while it is first in line", () => {
+    playing();
+    useStore.getState().queueTransitionSound(sound(1), fallbackAnalysis());
+    useStore.getState().dropQueuedTransitionSound("not-the-sound");
+    expect(ids()).toHaveLength(3);
+    useStore.getState().dropQueuedTransitionSound(`${TRANSITION_TRACK_PREFIX}riser:1`);
+    expect(ids()).toEqual(["b", "c"]);
+    expect(useStore.getState().trackAnalysis[`${TRANSITION_TRACK_PREFIX}riser:1`]).toBeUndefined();
+    // gone already, or not first: nothing more happens
+    useStore.getState().dropQueuedTransitionSound(`${TRANSITION_TRACK_PREFIX}riser:1`);
+    expect(ids()).toEqual(["b", "c"]);
+  });
+
+  it("advanceQueue hands over to the queued sound (the engine's hand-over)", () => {
+    playing();
+    useStore.getState().queueTransitionSound(sound(), fallbackAnalysis());
+    useStore.getState().advanceQueue();
+    const state = useStore.getState();
+    expect(state.currentTrack?.id).toBe(`${TRANSITION_TRACK_PREFIX}riser:1`);
+    expect(ids()).toEqual(["b", "c"]);
+    expect(state.history.map((t) => t.id)).toEqual(["a"]);
+  });
+
+  it("next (the user's skip) passes over a queued sound to the next song", () => {
+    playing();
+    useStore.getState().queueTransitionSound(sound(), fallbackAnalysis());
+    useStore.getState().next();
+    const state = useStore.getState();
+    expect(state.currentTrack?.id).toBe("b");
+    expect(ids()).toEqual(["c"]);
+  });
+
+  it("a sound that has played never enters the history, and Previous goes back to the song before it", () => {
+    playing();
+    useStore.getState().queueTransitionSound(sound(), fallbackAnalysis());
+    useStore.getState().advanceQueue(); // a -> sound
+    useStore.getState().advanceQueue(); // sound -> b
+    const state = useStore.getState();
+    expect(state.currentTrack?.id).toBe("b");
+    expect(state.history.map((t) => t.id)).toEqual(["a"]);
+    useStore.getState().previous();
+    expect(useStore.getState().currentTrack?.id).toBe("a");
+    expect(useStore.getState().queue.map((t) => t.id)).toEqual(["b", "c"]);
+  });
+
+  it("Previous while the sound plays goes back to the song before it and does not put the sound back in the queue", () => {
+    playing();
+    useStore.getState().queueTransitionSound(sound(), fallbackAnalysis());
+    useStore.getState().advanceQueue(); // a -> sound
+    useStore.getState().previous();
+    const state = useStore.getState();
+    expect(state.currentTrack?.id).toBe("a");
+    expect(state.queue.some((t) => t.id.startsWith(TRANSITION_TRACK_PREFIX))).toBe(false);
+    expect(state.queue.map((t) => t.id)).toEqual(["b", "c"]);
+  });
+
+  it("Previous drops a sound that is waiting first in line", () => {
+    useStore.setState({ currentTrack: song("b"), queue: [song("c")], history: [song("a")] });
+    useStore.getState().queueTransitionSound(sound(), fallbackAnalysis());
+    useStore.getState().previous();
+    expect(useStore.getState().queue.map((t) => t.id)).toEqual(["b", "c"]);
+  });
+
+  it("playing a new list while the sound plays leaves it out of the history", () => {
+    playing();
+    useStore.getState().queueTransitionSound(sound(), fallbackAnalysis());
+    useStore.getState().advanceQueue();
+    useStore.getState().playTrackList([song("x"), song("y")], 0);
+    expect(useStore.getState().history.map((t) => t.id)).toEqual(["a"]);
+  });
+
+  it("setTrackAnalysis keeps the sound's analysis in memory but never saves it to the server", () => {
+    const fetchSpy = vi.fn(async () => new Response(null, { status: 200 }));
+    vi.stubGlobal("fetch", fetchSpy);
+    useStore.getState().setTrackAnalysis(`${TRANSITION_TRACK_PREFIX}riser:1`, fallbackAnalysis());
+    expect(useStore.getState().trackAnalysis[`${TRANSITION_TRACK_PREFIX}riser:1`]).toBeDefined();
+    expect(fetchSpy).not.toHaveBeenCalled();
+    useStore.getState().setTrackAnalysis("real-song", fallbackAnalysis());
+    expect(fetchSpy).toHaveBeenCalled();
+  });
+
+  it("no AI pick is made for a sound, or over a change that is running through one", async () => {
+    const fetchSpy = vi.fn(async () => new Response(null, { status: 500 }));
+    vi.stubGlobal("fetch", fetchSpy);
+    useStore.getState().startShuffle(Array.from({ length: 15 }, (_, i) => makeTrack(`t${i}`)));
+    const base = useStore.getState();
+    // the sound is playing
+    useStore.setState({ currentTrack: sound(), queue: base.queue });
+    await useStore.getState().requestAiNextPick();
+    await useStore.getState().requestAiFxPick();
+    // the sound is waiting first in line
+    useStore.setState({ currentTrack: base.currentTrack, queue: [sound(), ...base.queue] });
+    await useStore.getState().requestAiNextPick();
+    await useStore.getState().requestAiFxPick();
+    expect(fetchSpy).not.toHaveBeenCalled();
   });
 });

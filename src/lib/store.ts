@@ -542,9 +542,8 @@ export const useStore = create<PlayerState>()(
 
       playTrackList: (tracks, startIndex, sourcePlaylistTheme = null, sourcePlaylistId = null) => {
         const { currentTrack, history } = get();
-        const nextHistory = currentTrack
-          ? [...history, currentTrack].slice(-MAX_HISTORY)
-          : history;
+        const nextHistory =
+          currentTrack && !isTransitionTrack(currentTrack) ? [...history, currentTrack].slice(-MAX_HISTORY) : history;
         set({
           currentTrack: tracks[startIndex] ?? null,
           queue: tracks.slice(startIndex + 1),
@@ -606,7 +605,9 @@ export const useStore = create<PlayerState>()(
           mashupEnabled,
           djVarietyBias,
         } = get();
-        if (!currentTrack || !shuffleSession || queue.length === 0) return;
+        // A transition sound playing (or waiting first in line) is only the bridge between two songs: there is no pick to
+        // make for it, and a pick must not reorder the songs it is carrying the change between.
+        if (!currentTrack || !shuffleSession || queue.length === 0 || isTransitionTrack(currentTrack) || isTransitionTrack(queue[0])) return;
 
         const toCandidate = (t: Track): AiNextTrackCandidate => {
           const analysis = trackAnalysis[t.id];
@@ -651,7 +652,7 @@ export const useStore = create<PlayerState>()(
           .map((id) => poolById.get(id))
           .filter((t): t is Track => t != null)
           .slice(0, Math.max(0, AI_CANDIDATE_CAP - queue.length));
-        const candidateTracks = [...queue, ...extraUnplayed];
+        const candidateTracks = [...queue.filter((t) => !isTransitionTrack(t)), ...extraUnplayed];
 
         const trackIdAtStart = currentTrack.id;
         set({ aiNextPickLoading: true });
@@ -688,7 +689,7 @@ export const useStore = create<PlayerState>()(
         // computed for. Same "trackIdAtStart" guard DualDeckStage.tsx uses
         // for its own async continuations.
         const state = get();
-        if (state.currentTrack?.id !== trackIdAtStart || !state.shuffleSession) {
+        if (state.currentTrack?.id !== trackIdAtStart || !state.shuffleSession || isTransitionTrack(state.queue[0])) {
           set({ aiNextPickLoading: false });
           return;
         }
@@ -737,6 +738,8 @@ export const useStore = create<PlayerState>()(
           get();
         const nextTrack = queue[0];
         if (!currentTrack || !nextTrack) return;
+        // A change into or out of a transition sound is already a Song Sync morph: no FX is picked for it.
+        if (isTransitionTrack(currentTrack) || isTransitionTrack(nextTrack)) return;
 
         const toProfile = (t: Track): AiFxTrackProfile => {
           const analysis = trackAnalysis[t.id];
