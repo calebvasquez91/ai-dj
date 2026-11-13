@@ -25,6 +25,7 @@ model User {
   tracks       Track[]
   playlists    Playlist[]
   fxSounds     FxSound[]
+  feedback     Feedback[]
 }
 
 model Track {
@@ -211,4 +212,27 @@ model FxSound {
 
   @@index([userId])
   @@index([category])
+}
+
+/// What a person told us about the app: a 1-5 rating and an optional comment, sent from the feedback pop-up. Kept so nothing
+/// is lost if the notification email fails; `emailedAt` is set once the owner has been told.
+model Feedback {
+  id     String @id @default(cuid())
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  /// 1-5, enforced in app code (src/lib/feedback.ts), not a DB check.
+  rating  Int
+  comment String @default("")
+
+  /// Where the person was in the app (a path like "/library"), the app version and the browser's user agent: context for reading the comment.
+  page       String?
+  appVersion String?
+  userAgent  String?
+
+  emailedAt DateTime?
+  createdAt DateTime  @default(now())
+
+  @@index([userId])
+  @@index([createdAt])
 }

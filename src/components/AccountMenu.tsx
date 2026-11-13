@@ -5,7 +5,8 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useSession, signOut } from "next-auth/react";
 import { ThemeToggle } from "@/components/ThemeToggle";
-import { SlidersIcon, SparklesIcon } from "@/components/Icons";
+import { SlidersIcon, SparklesIcon, StarIcon } from "@/components/Icons";
+import { useFeedbackUi } from "@/lib/feedbackUi";
 
 /**
  * The phone's home for what the side panel used to hold besides navigation: the dark-mode switch, who is signed in, Log
@@ -91,6 +92,17 @@ export function AccountMenu({ placement = "below" }: { placement?: "below" | "ab
             <SparklesIcon size={18} />
             DJ Inspiration
           </Link>
+          <button
+            type="button"
+            onClick={() => {
+              setOpen(false);
+              useFeedbackUi.getState().openFeedback("menu");
+            }}
+            className="flex items-center gap-2 rounded-lg px-1 py-2 text-left text-sm font-medium text-muted hover:text-foreground"
+          >
+            <StarIcon size={18} />
+            Send feedback
+          </button>
           <button type="button" onClick={() => signOut({ callbackUrl: "/login" })} className="btn-outline w-full">
             Log out
           </button>
