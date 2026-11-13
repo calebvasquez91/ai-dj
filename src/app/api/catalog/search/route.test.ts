@@ -74,12 +74,14 @@ describe("GET /api/catalog/search", () => {
     const body = await res.json();
     expect(body.tracks.map((t: { id: string }) => t.id)).toEqual(["jamendo:1", "jamendo:3"]);
     expect(body.skipped).toEqual({ invalid: 0, license: 1 });
-    expect(body.nextOffset).toBe(3);
-    expect(body.tracks[0].attribution.text).toBe("“Track 1” by Kite Runner, via Jamendo. CC BY 4.0.");
+    expect(body.nextOffset).toBeNull(); // Jamendo sent fewer than the 9 it was asked for: that was all of them
+    expect(body.tracks[0].attribution.text).toBe("“Track 1” by Kite Runner, via Jamendo. CC BY 4.0. Tempo and pitch adjusted for mixing.");
     expect(JSON.stringify(body)).not.toContain("secret-key");
+    expect(fetchMock).toHaveBeenCalledTimes(1);
     const called = String((fetchMock.mock.calls[0] as unknown[])[0]);
     expect(called).toContain("client_id=secret-key");
     expect(called).toContain("tags=house");
+    expect(called).toContain("limit=9"); // asks for a bigger page than the 3 wanted, as most tracks are filtered out
   });
 
   it("answers an identical search from the cache", async () => {

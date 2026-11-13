@@ -12,9 +12,11 @@ const cachedSearch = createCachedSearch();
 /**
  * GET /api/catalog/search?q=&tags=&speed=&vocal=&minDuration=&maxDuration=&limit=&offset=&source=
  *
- * Searches the free music catalog (Jamendo) from the server, so the client id never reaches the browser. Only tracks
- * whose license the app can use come back (CC0, public domain, CC BY; see lib/catalog/license.ts), each with its credit
- * line. Nothing is stored: a result is only a listing until the user adds it to their library.
+ * Searches the free music catalog (Jamendo) from the server, so the browser never calls Jamendo's API itself. (Jamendo's
+ * client id is a public app identifier, not a password, and the stream URLs it returns may carry it; see
+ * lib/catalog/jamendo.ts.) Only tracks whose license the app can use come back (CC0, public domain, CC BY; see
+ * lib/catalog/license.ts), each with its credit line. Nothing is stored: a result is only a listing until the user adds
+ * it to their library.
  */
 async function handleGET(request: Request) {
   const session = await auth();

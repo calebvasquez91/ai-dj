@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
   CATALOG_DEFAULT_LIMIT,
   CATALOG_MAX_LIMIT,
+  CATALOG_MAX_OFFSET,
   createCachedSearch,
   getCatalogAdapter,
   parseCatalogQuery,
@@ -61,10 +62,23 @@ describe("parseCatalogQuery", () => {
       "minDuration=100&maxDuration=100",
       "tags=a,b,c,d,e,f",
       `tags=${"t".repeat(40)}`,
-      "tags=rock%20%26%20roll",
       "tags=-leading",
+      "tags=%26leading",
+      "tags=%3Cscript%3E",
+      "tags=a%2Fb",
+      "tags=a%3Bb",
+      "tags=%00bad",
+      "tags=a%0Ab",
     ]) {
       expect(parse(bad).ok, bad).toBe(false);
+    }
+  });
+
+  it("accepts the tags real catalogs use: ampersands, apostrophes, accents, hyphens, dots", () => {
+    for (const tag of ["r&b", "drum'n'bass", "m"+String.fromCharCode(0xfa)+"sica latina", "lo-fi", "d.j. mix", "rock & roll", "k-pop", String.fromCharCode(0x30ed,0x30c3,0x30af), "90s", "c++"]) {
+      const result = parse(`tags=${encodeURIComponent(tag)}`);
+      expect(result.ok, tag).toBe(true);
+      expect(result.ok && result.value.query.tags).toEqual([tag.toLowerCase()]);
     }
   });
 
@@ -104,8 +118,24 @@ describe("serializeCatalogPage", () => {
       title: "Neon Tide",
       artist: "Kite Runner",
       license: { code: "by", label: "CC BY 4.0", requiresAttribution: true },
-      attribution: { text: "“Neon Tide” by Kite Runner, via Jamendo. CC BY 4.0.", required: true },
+      attribution: { text: "“Neon Tide” by Kite Runner, via Jamendo. CC BY 4.0. Tempo and pitch adjusted for mixing.", required: true },
     });
+  });
+
+  it("never offers a next page the route would refuse to serve", () => {
+    expect(serializeCatalogPage({ ...page(), nextOffset: CATALOG_MAX_OFFSET }).nextOffset).toBe(CATALOG_MAX_OFFSET);
+    expect(serializeCatalogPage({ ...page(), nextOffset: CATALOG_MAX_OFFSET + 1 }).nextOffset).toBeNull();
+    expect(serializeCatalogPage({ ...page(), nextOffset: 9_990 + 60 }).nextOffset).toBeNull();
+    expect(serializeCatalogPage({ ...page(), nextOffset: null }).nextOffset).toBeNull();
+    // ...and the offset it would have been given is one the query parser accepts, while one past it is not.
+    expect(parse(`offset=${CATALOG_MAX_OFFSET}`).ok).toBe(true);
+    expect(parse(`offset=${CATALOG_MAX_OFFSET + 1}`).ok).toBe(false);
+  });
+
+  it("carries the adaptation notice in the credit line", () => {
+    const out = serializeCatalogPage(page());
+    expect(out.tracks[0].attribution.adaptationNote).toBe("Tempo and pitch adjusted for mixing.");
+    expect(out.tracks[0].attribution.text).toContain("Tempo and pitch adjusted for mixing.");
   });
 
   it("is plain JSON (no class instances or functions)", () => {

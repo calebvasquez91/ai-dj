@@ -20,6 +20,12 @@ export const CATALOG_DEFAULT_LIMIT = 20;
 export const CATALOG_MAX_LIMIT = 50;
 export const CATALOG_MAX_OFFSET = 10_000;
 const MAX_DURATION_PARAM_SEC = 3600;
+/**
+ * A real tag: starts with a letter or digit (any language) and goes on with letters, digits, spaces and the few marks tags
+ * really use (r&b, drum'n'bass, lo-fi, d.j.). No control characters, angle brackets, slashes or other punctuation; the
+ * value is URL-encoded on its way to the source, so this is about sense, not about escaping.
+ */
+const TAG_SHAPE = /^[\p{L}\p{N}][\p{L}\p{N} &'+.-]*$/u;
 
 export interface ParsedCatalogRequest {
   source: string;
@@ -58,7 +64,7 @@ export function parseCatalogQuery(params: URLSearchParams): ParseResult {
 
   const tags = listParam(params, "tags");
   if (tags.length > CATALOG_MAX_TAGS) return { ok: false, error: `At most ${CATALOG_MAX_TAGS} tags.` };
-  if (tags.some((t) => t.length > MAX_TAG_CHARS || !/^[a-z0-9][a-z0-9 -]*$/.test(t))) {
+  if (tags.some((t) => t.length > MAX_TAG_CHARS || !TAG_SHAPE.test(t))) {
     return { ok: false, error: "A tag has characters that aren't allowed." };
   }
 
@@ -95,6 +101,7 @@ export interface CatalogTrackDto {
   artist: string;
   album?: string;
   durationSec: number;
+  /** The source's own stream URL, passed straight on. Whether the source's audio host sends CORS headers (Web Audio's decodeAudioData needs them) is still to be checked with a real client id (scripts/check-jamendo.mts); if it doesn't, this becomes a same-origin proxy route and the contract changes here. */
   streamUrl: string;
   downloadUrl?: string;
   imageUrl?: string;
@@ -140,7 +147,9 @@ export function toTrackDto(track: CatalogTrack): CatalogTrackDto {
 }
 
 export function serializeCatalogPage(page: CatalogPage): CatalogSearchResponse {
-  return { tracks: page.tracks.map(toTrackDto), offset: page.offset, nextOffset: page.nextOffset, skipped: page.skipped };
+  // A next page the route would refuse to serve (offsets stop at CATALOG_MAX_OFFSET) is no next page: the client sees "no more".
+  const nextOffset = page.nextOffset !== null && page.nextOffset > CATALOG_MAX_OFFSET ? null : page.nextOffset;
+  return { tracks: page.tracks.map(toTrackDto), offset: page.offset, nextOffset, skipped: page.skipped };
 }
 
 /** The adapter for a source, or null when this server has no credentials for it (the route answers 503). */

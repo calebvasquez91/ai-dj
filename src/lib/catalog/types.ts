@@ -10,7 +10,7 @@ export interface CatalogTrack {
   artist: string;
   album?: string;
   durationSec: number;
-  /** An https audio URL for playback. */
+  /** An https audio URL for playback, on the source's own host. Not yet confirmed to be readable cross-origin by Web Audio; see CatalogTrackDto.streamUrl. */
   streamUrl: string;
   /** Present only when the source says a copy may be downloaded. */
   downloadUrl?: string;
