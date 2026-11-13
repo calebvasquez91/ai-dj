@@ -4,8 +4,14 @@ import { useEffect, useId, useRef, useState } from "react";
 import { usePathname } from "next/navigation";
 import { StarIcon } from "@/components/Icons";
 import { FEEDBACK_MAX_COMMENT, FEEDBACK_MAX_RATING, RATING_LABELS } from "@/lib/feedback";
+import { cycleFocus } from "@/lib/focusTrap";
 
 type Status = "idle" | "sending" | "sent";
+
+/** How long to wait for the server before telling the person it is taking too long. */
+const SEND_TIMEOUT_MS = 15_000;
+/** What can take focus inside the pop-up: buttons that aren't disabled or skipped by the star group's roving tab stop, and the comment box. */
+const FOCUSABLE = 'button:not(:disabled):not([tabindex="-1"]), textarea:not(:disabled)';
 
 /**
  * The feedback pop-up: a 1-5 star rating and an optional comment ("is there anything you'd like us to fix?"), sent to
@@ -23,9 +29,25 @@ export function FeedbackDialog({ onDismiss, onSent, onClose }: { onDismiss: () =
   const starRefs = useRef<(HTMLButtonElement | null)[]>([]);
   const dialogRef = useRef<HTMLDivElement>(null);
 
+  // Focus moves into the pop-up when it opens and goes back to whatever had it when it closes.
   useEffect(() => {
+    const before = document.activeElement as HTMLElement | null;
     dialogRef.current?.focus();
+    return () => {
+      if (before && before !== document.body && document.contains(before)) before.focus();
+    };
   }, []);
+
+  // Tab and Shift+Tab stay inside the pop-up (it is modal: the page behind it is not reachable).
+  function onDialogKeyDown(e: React.KeyboardEvent) {
+    if (e.key !== "Tab" || !dialogRef.current) return;
+    const items = Array.from(dialogRef.current.querySelectorAll<HTMLElement>(FOCUSABLE));
+    const next = cycleFocus(items, document.activeElement, e.shiftKey);
+    if (next) {
+      e.preventDefault();
+      next.focus();
+    }
+  }
 
   // Escape closes it, as "maybe later" before it was sent and as a plain close after.
   useEffect(() => {
@@ -61,6 +83,7 @@ export function FeedbackDialog({ onDismiss, onSent, onClose }: { onDismiss: () =
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ rating, comment, page: pathname }),
+        signal: AbortSignal.timeout(SEND_TIMEOUT_MS),
       });
       if (!res.ok) {
         const data = (await res.json().catch(() => null)) as { error?: string } | null;
@@ -70,7 +93,11 @@ export function FeedbackDialog({ onDismiss, onSent, onClose }: { onDismiss: () =
       onSent();
     } catch (err) {
       setStatus("idle");
-      setError(err instanceof Error ? err.message : "Couldn't send your feedback. Please try again.");
+      if (err instanceof DOMException && (err.name === "TimeoutError" || err.name === "AbortError")) {
+        setError("That's taking longer than expected. Please try again in a moment.");
+      } else {
+        setError(err instanceof Error ? err.message : "Couldn't send your feedback. Please try again.");
+      }
     }
   }
 
@@ -85,6 +112,7 @@ export function FeedbackDialog({ onDismiss, onSent, onClose }: { onDismiss: () =
         aria-modal="true"
         aria-labelledby={titleId}
         tabIndex={-1}
+        onKeyDown={onDialogKeyDown}
         className="bg-surface shadow-elevate-lg rounded-2xl p-6 max-w-md w-full max-h-[calc(100dvh-2rem)] overflow-y-auto flex flex-col gap-4 outline-none"
         onClick={(e) => e.stopPropagation()}
       >

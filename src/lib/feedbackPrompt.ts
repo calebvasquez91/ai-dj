@@ -1,10 +1,12 @@
 /**
- * When the feedback pop-up appears by itself. Kept per device in localStorage (like the Auto FX and Song Sync settings):
- * it is a nudge, not account data. Pure, so the rules are tested; components/FeedbackPrompt.tsx runs them.
+ * When the feedback pop-up appears by itself. Kept per device in localStorage (like the Auto FX and Song Sync settings),
+ * with the account's last submission folded in from the server so answering on one device quiets the others. Pure where
+ * it can be, so the rules are tested; components/FeedbackPrompt.tsx runs them.
  *
  *   - Not until the person has really used the app: a few minutes with the page open and visible.
+ *   - Not while they are typing, or another dialog is open: it waits for a calmer moment.
  *   - Then once; if they close it without answering, again after two weeks, and never after the third time.
- *   - After they send feedback, not for three months.
+ *   - After they send feedback (on any device), not for three months.
  * The "Send feedback" entry in the menus works at any time and is not governed by any of this.
  */
 
@@ -44,7 +46,7 @@ export function parseFeedbackPromptState(raw: string | null): FeedbackPromptStat
   }
 }
 
-/** True when the pop-up should come up now. */
+/** True when the pop-up should come up now (not counting whether the person is busy; see isBusyElement). */
 export function shouldShowFeedbackPrompt(state: FeedbackPromptState, nowMs: number): boolean {
   if (state.submittedAt !== null && nowMs - state.submittedAt < FEEDBACK_QUIET_AFTER_SUBMIT_MS) return false;
   if (state.dismissals >= FEEDBACK_MAX_DISMISSALS) return false;
@@ -53,10 +55,45 @@ export function shouldShowFeedbackPrompt(state: FeedbackPromptState, nowMs: numb
   return true;
 }
 
+/** True when nothing will bring the pop-up up for a long while (feedback sent recently, or closed three times), so the timer need not run at all. */
+export function feedbackPromptIsDormant(state: FeedbackPromptState, nowMs: number): boolean {
+  if (state.dismissals >= FEEDBACK_MAX_DISMISSALS) return true;
+  return state.submittedAt !== null && nowMs - state.submittedAt < FEEDBACK_QUIET_AFTER_SUBMIT_MS;
+}
+
+/**
+ * Whether a tick has anything to do: counting usage toward the first ask, or deciding on a re-ask. Between two asks
+ * (the pop-up was shown lately, usage already counted) a tick would only rewrite the same state.
+ */
+export function shouldRunFeedbackTick(state: FeedbackPromptState, nowMs: number): boolean {
+  if (feedbackPromptIsDormant(state, nowMs)) return false;
+  if (state.usedMs < FEEDBACK_FIRST_AFTER_USE_MS) return true;
+  return state.lastShownAt === null || nowMs - state.lastShownAt >= FEEDBACK_RESHOW_AFTER_MS;
+}
+
 export const addFeedbackUsage = (state: FeedbackPromptState, ms: number): FeedbackPromptState => ({ ...state, usedMs: state.usedMs + Math.max(0, ms) });
 export const markFeedbackShown = (state: FeedbackPromptState, nowMs: number): FeedbackPromptState => ({ ...state, lastShownAt: nowMs });
 export const markFeedbackDismissed = (state: FeedbackPromptState): FeedbackPromptState => ({ ...state, dismissals: state.dismissals + 1 });
 export const markFeedbackSubmitted = (state: FeedbackPromptState, nowMs: number): FeedbackPromptState => ({ ...state, submittedAt: nowMs });
+
+/**
+ * Folds in what the server knows: the time of this account's latest feedback (from GET /api/feedback). Feedback sent on
+ * another device counts here too, so the person isn't asked again on this one. Keeps the later of the two times.
+ */
+export function mergeServerSubmission(state: FeedbackPromptState, lastSentAtIso: unknown): FeedbackPromptState {
+  if (typeof lastSentAtIso !== "string") return state;
+  const at = Date.parse(lastSentAtIso);
+  if (!Number.isFinite(at)) return state;
+  if (state.submittedAt !== null && state.submittedAt >= at) return state;
+  return { ...state, submittedAt: at };
+}
+
+/** An element the person is typing into (or about to): the pop-up must not take focus from it. */
+export function isBusyElement(el: { tagName?: string; isContentEditable?: boolean } | null | undefined): boolean {
+  if (!el) return false;
+  const tag = (el.tagName ?? "").toUpperCase();
+  return tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT" || el.isContentEditable === true;
+}
 
 /** Browser-only; localStorage can be missing or throw (private windows, blocked storage), so both directions fail soft. */
 export function loadFeedbackPromptState(): FeedbackPromptState {
@@ -73,4 +110,14 @@ export function saveFeedbackPromptState(state: FeedbackPromptState): void {
   } catch {
     // not persisted this time; the pop-up logic still works for this page load
   }
+}
+
+/**
+ * Reads the saved state fresh, applies one change and saves it. Every change goes through here rather than through a
+ * copy kept in memory, so two tabs of the app never overwrite each other's saved answer with a stale one.
+ */
+export function updateFeedbackPromptState(change: (state: FeedbackPromptState) => FeedbackPromptState): FeedbackPromptState {
+  const next = change(loadFeedbackPromptState());
+  saveFeedbackPromptState(next);
+  return next;
 }

@@ -1,11 +1,14 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { getMailConfig, sendFeedbackMail, type MailTransport } from "@/lib/mailer";
+import { MAIL_TOTAL_TIMEOUT_MS, getMailConfig, sendFeedbackMail, type MailTransport } from "@/lib/mailer";
 import type { FeedbackEmail } from "@/lib/feedback";
 
 const email: FeedbackEmail = { subject: "AI DJ feedback: 4/5", text: "text", html: "<p>html</p>", replyTo: "sam@example.com" };
 const config = { user: "me@gmail.com", pass: "abcdefghijklmnop", to: "me@gmail.com" };
 
-afterEach(() => vi.restoreAllMocks());
+afterEach(() => {
+  vi.restoreAllMocks();
+  vi.useRealTimers();
+});
 
 describe("getMailConfig", () => {
   it("needs both the Gmail address and its App Password", () => {
@@ -52,15 +55,37 @@ describe("sendFeedbackMail", () => {
     expect(sendMail).not.toHaveBeenCalled();
   });
 
-  it("reports a failed send as false, never throwing, and never logging the App Password", async () => {
+  it("reports a failed send as false, never throwing, logging only the error codes and never the message or the App Password", async () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const failure = Object.assign(new Error(`Invalid login: 535 5.7.8 AUTH ${Buffer.from("\0me@gmail.com\0abcdefghijklmnop").toString("base64")} abcdefghijklmnop abcdefghijklmnop`), {
+      code: "EAUTH",
+      responseCode: 535,
+    });
     const transport: MailTransport = {
       sendMail: async () => {
-        throw new Error(`Invalid login: 535 for abcdefghijklmnop`);
+        throw failure;
       },
     };
     expect(await sendFeedbackMail(email, { config, transport })).toBe(false);
-    expect(JSON.stringify(warn.mock.calls)).not.toContain("abcdefghijklmnop");
-    expect(warn).toHaveBeenCalled();
+    const logged = JSON.stringify(warn.mock.calls);
+    expect(logged).toContain("EAUTH");
+    expect(logged).toContain("535");
+    expect(logged).not.toContain("abcdefghijklmnop");
+    expect(logged).not.toContain(Buffer.from("\0me@gmail.com\0abcdefghijklmnop").toString("base64"));
+    expect(logged).not.toContain("Invalid login");
+  });
+
+  it("copes with an error that has no code at all", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    expect(await sendFeedbackMail(email, { config, transport: { sendMail: async () => Promise.reject("nope") } })).toBe(false);
+    expect(JSON.stringify(warn.mock.calls)).toContain("unknown error");
+  });
+
+  it("gives up on a send that never finishes", async () => {
+    vi.useFakeTimers();
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    const pending = sendFeedbackMail(email, { config, transport: { sendMail: () => new Promise(() => {}) } });
+    await vi.advanceTimersByTimeAsync(MAIL_TOTAL_TIMEOUT_MS + 1);
+    expect(await pending).toBe(false);
   });
 });
