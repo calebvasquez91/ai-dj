@@ -13,7 +13,7 @@ export default function PrivacyPage() {
         <div className="flex flex-col gap-2">
           <span className="text-2xl wordmark">AI DJ</span>
           <h1 className="text-2xl heading">Privacy Policy</h1>
-          <p className="text-xs text-muted">Last updated September 9, 2026</p>
+          <p className="text-xs text-muted">Last updated November 12, 2026</p>
         </div>
 
         <section className="flex flex-col gap-2">
@@ -31,6 +31,17 @@ export default function PrivacyPage() {
             When you sign up, we store your name (if provided), email address, and a securely
             hashed password. We never store your password in plain text. This information is
             used only to authenticate you and is never sold or shared with third parties.
+          </p>
+        </section>
+
+        <section className="flex flex-col gap-2">
+          <h2 className="text-lg font-semibold text-accent-purple">Feedback you send</h2>
+          <p className="text-sm">
+            If you rate the app or send a comment from the feedback pop-up, we store the star
+            rating, your comment, the page you were on, the app version, your browser&apos;s
+            description of itself (its user agent), and your account, so we can read it and reply.
+            We email it to the developer. It is only used to improve AI DJ and is never sold or
+            shared with anyone else. Deleting your account deletes the feedback saved with it.
           </p>
         </section>
 

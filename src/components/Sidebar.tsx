@@ -4,6 +4,7 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useSession, signOut } from "next-auth/react";
 import { useStore } from "@/lib/store";
+import { useFeedbackUi } from "@/lib/feedbackUi";
 import { ThemeToggle } from "@/components/ThemeToggle";
 import { HomeIcon, LibraryIcon, SearchIcon, SlidersIcon, SparklesIcon } from "@/components/Icons";
 import type { ComponentType } from "react";
@@ -109,6 +110,13 @@ export function Sidebar() {
             <span className="text-xs text-muted">Dark mode</span>
             <ThemeToggle />
           </div>
+          <button
+            type="button"
+            onClick={() => useFeedbackUi.getState().openFeedback("menu")}
+            className="px-2 text-left text-xs text-muted hover:text-foreground"
+          >
+            Send feedback
+          </button>
           <div className="flex items-center justify-between gap-2 px-2">
             <span className="text-xs text-muted truncate" title={session?.user?.email ?? undefined}>
               {session?.user?.name || session?.user?.email}
