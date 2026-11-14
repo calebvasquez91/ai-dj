@@ -5,6 +5,7 @@ import {
   escapeHtml,
   formatFeedbackEmail,
   parseFeedbackBody,
+  replyMailto,
   singleLine,
   starString,
 } from "@/lib/feedback";
@@ -149,5 +150,35 @@ describe("formatFeedbackEmail", () => {
     expect(mail.html).not.toContain("<img");
     expect(mail.html).not.toContain("<b>UA</b>");
     expect(mail.html).toContain("&lt;script&gt;alert(1)&lt;/script&gt;");
+  });
+});
+
+describe("replyMailto", () => {
+  it("builds a mailto link with the subject encoded", () => {
+    expect(replyMailto("ann@example.com", "Re: your feedback & more")).toBe("mailto:ann@example.com?subject=Re%3A%20your%20feedback%20%26%20more");
+    expect(replyMailto("first.last+tag@sub.example.co.uk", "Hi")).toBe("mailto:first.last+tag@sub.example.co.uk?subject=Hi");
+  });
+  it("gives no link for an address that could add mail fields or break out of the link", () => {
+    for (const email of [
+      "a@b.co?bcc=evil@x.com",
+      "a@b.co&cc=evil@x.com",
+      "a@b.co#frag",
+      "a%0Abcc:x@y.com@b.co",
+      "a@b.co,evil@x.com",
+      "a@b.co;evil@x.com",
+      "a b@c.com",
+      "a@b.co\nBcc: x@y.com",
+      "\"a\"@b.co",
+      "<a@b.co>",
+      "a/b@c.com",
+      "a\\b@c.com",
+      "no-at-sign",
+      "a@nodot",
+      "",
+    ]) {
+      expect(replyMailto(email, "Re"), email).toBeNull();
+    }
+    expect(replyMailto(null, "Re")).toBeNull();
+    expect(replyMailto(undefined, "Re")).toBeNull();
   });
 });

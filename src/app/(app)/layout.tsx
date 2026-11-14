@@ -29,7 +29,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
 
   return (
     <AuthSessionProvider>
-      <FeedbackOwnerProvider isOwner={isFeedbackAdmin(session.user?.email)}>
+      <FeedbackOwnerProvider isOwner={isFeedbackAdmin(session.user?.id)}>
       <AppDataLoader />
       {STEM_FEATURES_ENABLED && <StemAutopilot />}
       {!STEM_FEATURES_ENABLED && VOCAL_MASHUP_ENABLED && <StemAutopilot scope="mashup-next" />}

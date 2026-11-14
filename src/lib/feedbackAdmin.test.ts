@@ -1,46 +1,47 @@
 import { describe, expect, it } from "vitest";
-import { isFeedbackAdmin, parseAdminEmails } from "@/lib/feedbackAdmin";
+import { isFeedbackAdmin, parseAdminIds } from "@/lib/feedbackAdmin";
 
-describe("parseAdminEmails", () => {
-  it("splits on commas, trims, lower-cases and drops empty entries", () => {
-    expect(parseAdminEmails(" Owner@Example.com ,second@example.com,, ")).toEqual(["owner@example.com", "second@example.com"]);
+describe("parseAdminIds", () => {
+  it("splits on commas, trims and drops empty entries, leaving case alone (ids are case-sensitive)", () => {
+    expect(parseAdminIds(" cmABC123 ,cmxyz789,, ")).toEqual(["cmABC123", "cmxyz789"]);
   });
   it("is empty for nothing", () => {
-    expect(parseAdminEmails(undefined)).toEqual([]);
-    expect(parseAdminEmails(null)).toEqual([]);
-    expect(parseAdminEmails("")).toEqual([]);
-    expect(parseAdminEmails(" , ,")).toEqual([]);
+    expect(parseAdminIds(undefined)).toEqual([]);
+    expect(parseAdminIds(null)).toEqual([]);
+    expect(parseAdminIds("")).toEqual([]);
+    expect(parseAdminIds(" , ,")).toEqual([]);
   });
 });
 
 describe("isFeedbackAdmin", () => {
-  const env = { FEEDBACK_ADMIN_EMAILS: "Owner@Example.com, second@example.com" };
+  const env = { FEEDBACK_ADMIN_USER_IDS: "cmowner0001, cmsecond0002" };
 
-  it("is true for a listed address, whatever its case or surrounding space", () => {
-    expect(isFeedbackAdmin("owner@example.com", env)).toBe(true);
-    expect(isFeedbackAdmin("  OWNER@EXAMPLE.COM ", env)).toBe(true);
-    expect(isFeedbackAdmin("second@example.com", env)).toBe(true);
+  it("is true for a listed id, whatever surrounds it in the setting", () => {
+    expect(isFeedbackAdmin("cmowner0001", env)).toBe(true);
+    expect(isFeedbackAdmin("cmsecond0002", env)).toBe(true);
   });
 
-  it("is false for anyone else, and never by substring or look-alike", () => {
-    for (const email of ["other@example.com", "owner@example.com.evil.net", "xowner@example.com", "owner@example.co", "owner", "example.com"]) {
-      expect(isFeedbackAdmin(email, env), email).toBe(false);
+  it("is false for anyone else, and never by substring, prefix or different case", () => {
+    for (const id of ["cmother0003", "cmowner00", "cmowner00011", "CMOWNER0001", "xcmowner0001", "cmowner0001 ", "owner"]) {
+      expect(isFeedbackAdmin(id, env), id).toBe(false);
     }
   });
 
-  it("is false for a missing address", () => {
+  it("is false for a missing id", () => {
     expect(isFeedbackAdmin(null, env)).toBe(false);
     expect(isFeedbackAdmin(undefined, env)).toBe(false);
     expect(isFeedbackAdmin("", env)).toBe(false);
   });
 
   it("is false for everyone when no admin is configured", () => {
-    expect(isFeedbackAdmin("owner@example.com", {})).toBe(false);
-    expect(isFeedbackAdmin("owner@example.com", { FEEDBACK_ADMIN_EMAILS: "" })).toBe(false);
-    expect(isFeedbackAdmin("", { FEEDBACK_ADMIN_EMAILS: "," })).toBe(false);
+    expect(isFeedbackAdmin("cmowner0001", {})).toBe(false);
+    expect(isFeedbackAdmin("cmowner0001", { FEEDBACK_ADMIN_USER_IDS: "" })).toBe(false);
+    expect(isFeedbackAdmin("", { FEEDBACK_ADMIN_USER_IDS: "," })).toBe(false);
   });
 
-  it("is not granted by the notification settings", () => {
+  it("is not granted by an email, by the old email setting, or by the notification settings", () => {
+    expect(isFeedbackAdmin("me@gmail.com", { FEEDBACK_ADMIN_USER_IDS: "me@gmail.com" })).toBe(true); // only because it was listed as an id: ids are opaque strings
+    expect(isFeedbackAdmin("me@gmail.com", { FEEDBACK_ADMIN_EMAILS: "me@gmail.com" })).toBe(false);
     expect(isFeedbackAdmin("me@gmail.com", { GMAIL_USER: "me@gmail.com", FEEDBACK_TO_EMAIL: "me@gmail.com" })).toBe(false);
   });
 });

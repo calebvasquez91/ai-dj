@@ -75,6 +75,18 @@ export interface FeedbackEmail {
   replyTo: string | null;
 }
 
+/**
+ * A Reply link for an address from the database. Registration only asks for an "@", so an address can contain "?", "&",
+ * "#", "%", quotes or spaces, any of which would add fields (bcc, cc, body) to a mailto: link. Only an address with none
+ * of them gets a link; for any other the caller shows the address as plain text.
+ */
+const MAILTO_SAFE = /^[^\s@<>",;?&#%/\\]+@[^\s@<>",;?&#%/\\]+\.[^\s@<>",;?&#%/\\]+$/;
+
+export function replyMailto(email: string | null | undefined, subject: string): string | null {
+  if (!email || !MAILTO_SAFE.test(email)) return null;
+  return `mailto:${email}?subject=${encodeURIComponent(subject)}`;
+}
+
 const EMAIL_SHAPE = /^[^\s@<>",;]+@[^\s@<>",;]+\.[^\s@<>",;]+$/;
 
 /** The notification the owner receives. Everything from the user is escaped (HTML) or flattened (subject), never trusted. */

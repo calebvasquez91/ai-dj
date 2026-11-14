@@ -1,19 +1,21 @@
 import { notFound } from "next/navigation";
-import { auth } from "@/auth";
 import { FeedbackInboxView } from "@/components/FeedbackInboxView";
-import { isFeedbackAdmin } from "@/lib/feedbackAdmin";
+import { feedbackOwnerSession } from "@/lib/feedbackOwner";
 import { loadFeedbackInbox, parseInboxQuery } from "@/lib/feedbackInbox";
 
 export const metadata = { title: "Feedback — AI DJ" };
 
 /**
  * The owner's feedback inbox: what people sent from the feedback pop-up, newest first, with the average rating and how
- * the ratings split. Only the addresses in FEEDBACK_ADMIN_EMAILS may open it; for anyone else the page does not exist (a
- * plain 404, so it doesn't even confirm there is an inbox).
+ * the ratings split. Only the accounts in FEEDBACK_ADMIN_USER_IDS may open it; for anyone else the page does not exist
+ * (a plain 404, so it doesn't even confirm there is an inbox). The check comes first, before anything is read.
  */
-export default async function FeedbackInboxPage({ searchParams }: { searchParams: Promise<{ page?: string | string[]; rating?: string | string[] }> }) {
-  const session = await auth();
-  if (!isFeedbackAdmin(session?.user?.email)) notFound();
+export default async function FeedbackInboxPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ page?: string | string[]; rating?: string | string[]; asof?: string | string[] }>;
+}) {
+  if (!(await feedbackOwnerSession())) notFound();
 
   const query = parseInboxQuery(await searchParams);
   const result = await loadFeedbackInbox(query);
