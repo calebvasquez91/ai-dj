@@ -36,6 +36,7 @@ function userIsBusy(): boolean {
 export function FeedbackPrompt() {
   const open = useFeedbackUi((s) => s.open);
   const source = useFeedbackUi((s) => s.source);
+  const returnFocusTo = useFeedbackUi((s) => s.returnFocusTo);
   const openFeedback = useFeedbackUi((s) => s.openFeedback);
   const closeFeedback = useFeedbackUi((s) => s.closeFeedback);
   const openRef = useRef(open);
@@ -101,6 +102,7 @@ export function FeedbackPrompt() {
       }}
       onSent={() => updateFeedbackPromptState((s) => markFeedbackSubmitted(s, Date.now()))}
       onClose={closeFeedback}
+      returnFocusTo={returnFocusTo}
     />
   );
 }
