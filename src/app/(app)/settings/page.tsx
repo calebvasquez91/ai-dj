@@ -1,5 +1,6 @@
 "use client";
 
+import { useSession } from "next-auth/react";
 import { THEME_PREFERENCES, useTheme, type ThemePreference } from "@/lib/theme";
 
 const LABEL: Record<ThemePreference, string> = { system: "System", dark: "Dark", light: "Light" };
@@ -12,6 +13,8 @@ const HINT: Record<ThemePreference, string> = {
 export default function SettingsPage() {
   const preference = useTheme((s) => s.preference);
   const setPreference = useTheme((s) => s.setPreference);
+  const { data: session } = useSession();
+  const accountId = session?.user?.id;
 
   return (
     <div className="p-4 sm:p-6 flex flex-col gap-6 max-w-2xl">
@@ -44,6 +47,18 @@ export default function SettingsPage() {
         </div>
         <p className="text-sm text-muted">{HINT[preference]}</p>
       </section>
+
+      {accountId && (
+        <section className="flex flex-col gap-2" aria-labelledby="account-heading">
+          <h2 id="account-heading" className="text-sm font-semibold text-muted">
+            Account
+          </h2>
+          <p className="text-sm text-muted">
+            Your account ID. Only the app&apos;s owner needs it, to give themselves access to the feedback inbox.
+          </p>
+          <code className="block w-fit max-w-full select-all break-all rounded-lg bg-surface-hover px-3 py-2 text-xs">{accountId}</code>
+        </section>
+      )}
     </div>
   );
 }
