@@ -6,7 +6,8 @@ import { useSession, signOut } from "next-auth/react";
 import { useStore } from "@/lib/store";
 import { useFeedbackUi } from "@/lib/feedbackUi";
 import { ThemeToggle } from "@/components/ThemeToggle";
-import { HomeIcon, LibraryIcon, SearchIcon, SlidersIcon, SparklesIcon } from "@/components/Icons";
+import { HomeIcon, LibraryIcon, QueueIcon, SearchIcon, SlidersIcon, SparklesIcon } from "@/components/Icons";
+import { useIsFeedbackOwner } from "@/components/FeedbackOwnerProvider";
 import type { ComponentType } from "react";
 
 function NavLink({
@@ -41,6 +42,7 @@ function NavLink({
 export function Sidebar() {
   const router = useRouter();
   const { data: session } = useSession();
+  const isFeedbackOwner = useIsFeedbackOwner();
   const playlists = useStore((s) => s.playlists);
   const createPlaylist = useStore((s) => s.createPlaylist);
   const sidebarOpen = useStore((s) => s.sidebarOpen);
@@ -72,6 +74,7 @@ export function Sidebar() {
           <NavLink href="/search" icon={SearchIcon} label="Search" />
           <NavLink href="/inspiration" icon={SparklesIcon} label="DJ Inspiration" />
           <NavLink href="/settings" icon={SlidersIcon} label="Settings" />
+          {isFeedbackOwner && <NavLink href="/admin/feedback" icon={QueueIcon} label="Feedback inbox" />}
         </nav>
 
         <div className="flex items-center justify-between px-2 pt-2">

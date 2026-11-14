@@ -20,6 +20,8 @@ import { Mixer } from "@/components/Mixer";
 import { KeyboardShortcuts } from "@/components/KeyboardShortcuts";
 import { BackgroundAudio } from "@/components/BackgroundAudio";
 import { FeedbackPrompt } from "@/components/FeedbackPrompt";
+import { FeedbackOwnerProvider } from "@/components/FeedbackOwnerProvider";
+import { isFeedbackAdmin } from "@/lib/feedbackAdmin";
 
 export default async function AppLayout({ children }: { children: React.ReactNode }) {
   const session = await auth();
@@ -27,6 +29,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
 
   return (
     <AuthSessionProvider>
+      <FeedbackOwnerProvider isOwner={isFeedbackAdmin(session.user?.email)}>
       <AppDataLoader />
       {STEM_FEATURES_ENABLED && <StemAutopilot />}
       {!STEM_FEATURES_ENABLED && VOCAL_MASHUP_ENABLED && <StemAutopilot scope="mashup-next" />}
@@ -56,6 +59,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
       <DeckView />
       <Mixer />
       <FeedbackPrompt />
+      </FeedbackOwnerProvider>
     </AuthSessionProvider>
   );
 }
