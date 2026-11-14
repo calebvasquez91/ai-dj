@@ -17,7 +17,18 @@ const FOCUSABLE = 'button:not(:disabled):not([tabindex="-1"]), textarea:not(:dis
  * The feedback pop-up: a 1-5 star rating and an optional comment ("is there anything you'd like us to fix?"), sent to
  * POST /api/feedback, which emails the developer. `onDismiss` = closed without sending; `onSent` = it went through.
  */
-export function FeedbackDialog({ onDismiss, onSent, onClose }: { onDismiss: () => void; onSent: () => void; onClose: () => void }) {
+export function FeedbackDialog({
+  onDismiss,
+  onSent,
+  onClose,
+  returnFocusTo = null,
+}: {
+  onDismiss: () => void;
+  onSent: () => void;
+  onClose: () => void;
+  /** Where focus goes on close when the control that opened the pop-up won't still be on screen (the phone's account menu). */
+  returnFocusTo?: HTMLElement | null;
+}) {
   const pathname = usePathname();
   const titleId = useId();
   const commentId = useId();
@@ -29,12 +40,16 @@ export function FeedbackDialog({ onDismiss, onSent, onClose }: { onDismiss: () =
   const starRefs = useRef<(HTMLButtonElement | null)[]>([]);
   const dialogRef = useRef<HTMLDivElement>(null);
 
-  // Focus moves into the pop-up when it opens and goes back to whatever had it when it closes.
+  // Focus moves into the pop-up when it opens and goes back when it closes: to the control it was told about, or else to
+  // whatever had focus when the pop-up opened (when that is still on screen). The target is read once, as it opens.
+  const returnFocusRef = useRef(returnFocusTo);
   useEffect(() => {
     const before = document.activeElement as HTMLElement | null;
+    const target = returnFocusRef.current;
     dialogRef.current?.focus();
     return () => {
-      if (before && before !== document.body && document.contains(before)) before.focus();
+      if (target && document.contains(target)) target.focus();
+      else if (before && before !== document.body && document.contains(before)) before.focus();
     };
   }, []);
 

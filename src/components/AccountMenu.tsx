@@ -96,7 +96,9 @@ export function AccountMenu({ placement = "below" }: { placement?: "below" | "ab
             type="button"
             onClick={() => {
               setOpen(false);
-              useFeedbackUi.getState().openFeedback("menu");
+              // This menu closes as the pop-up opens and its "Send feedback" item goes with it, so the pop-up is told to
+              // hand focus back to the avatar button when it closes.
+              useFeedbackUi.getState().openFeedback("menu", buttonRef.current);
             }}
             className="flex items-center gap-2 rounded-lg px-1 py-2 text-left text-sm font-medium text-muted hover:text-foreground"
           >
