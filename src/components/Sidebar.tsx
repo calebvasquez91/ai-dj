@@ -64,7 +64,7 @@ export function Sidebar() {
         className={`w-60 shrink-0 surface-glass border-r border-border/10 shadow-elevate-right flex flex-col gap-4 py-3 pl-[max(0.75rem,env(safe-area-inset-left))] pr-3 overflow-y-auto overscroll-contain ${visibility}`}
       >
         <div className="px-2 py-2 flex flex-col gap-2">
-          <span className="text-xl wordmark">AI DJ</span>
+          <span className="text-xl wordmark">Que DJ</span>
           <div className="retro-stripe" />
         </div>
 

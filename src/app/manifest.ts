@@ -2,9 +2,9 @@ import type { MetadataRoute } from "next";
 
 export default function manifest(): MetadataRoute.Manifest {
   return {
-    name: "AI DJ",
-    short_name: "AI DJ",
-    description: "An AI DJ that mixes your music into one continuous set.",
+    name: "Que DJ",
+    short_name: "Que DJ",
+    description: "A music app where an AI DJ mixes your songs into one continuous set.",
     start_url: "/",
     scope: "/",
     display: "standalone",

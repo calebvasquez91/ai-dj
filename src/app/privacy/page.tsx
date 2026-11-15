@@ -1,7 +1,7 @@
 import Link from "next/link";
 
 export const metadata = {
-  title: "Privacy Policy — AI DJ",
+  title: "Privacy Policy — Que DJ",
 };
 
 export default function PrivacyPage() {
@@ -11,7 +11,7 @@ export default function PrivacyPage() {
       <div className="min-h-full flex justify-center pt-[max(1.5rem,env(safe-area-inset-top))] pb-[max(1.5rem,env(safe-area-inset-bottom))] pl-[max(1.5rem,env(safe-area-inset-left))] pr-[max(1.5rem,env(safe-area-inset-right))]">
       <div className="card w-full max-w-2xl p-8 max-sm:p-5 flex flex-col gap-6 my-8">
         <div className="flex flex-col gap-2">
-          <span className="text-2xl wordmark">AI DJ</span>
+          <span className="text-2xl wordmark">Que DJ</span>
           <h1 className="text-2xl heading">Privacy Policy</h1>
           <p className="text-xs text-muted">Last updated November 12, 2026</p>
         </div>
@@ -19,7 +19,7 @@ export default function PrivacyPage() {
         <section className="flex flex-col gap-2">
           <h2 className="text-lg font-semibold text-accent-purple">What this app is</h2>
           <p className="text-sm">
-            AI DJ is a personal music-mixing tool. You upload your own audio files and/or import
+            Que DJ is a personal music-mixing tool. You upload your own audio files and/or import
             playlists from a connected YouTube account, and the app plays them back as one
             continuous, automatically-mixed set.
           </p>
@@ -40,7 +40,7 @@ export default function PrivacyPage() {
             If you rate the app or send a comment from the feedback pop-up, we store the star
             rating, your comment, the page you were on, the app version, your browser&apos;s
             description of itself (its user agent), and your account, so we can read it and reply.
-            We email it to the developer. It is only used to improve AI DJ and is never sold or
+            We email it to the developer. It is only used to improve Que DJ and is never sold or
             shared with anyone else. Deleting your account deletes the feedback saved with it.
           </p>
         </section>
@@ -57,7 +57,7 @@ export default function PrivacyPage() {
         <section className="flex flex-col gap-2">
           <h2 className="text-lg font-semibold text-accent-purple">Connecting your YouTube account</h2>
           <p className="text-sm">
-            If you choose to connect a YouTube account, AI DJ requests a single, read-only Google
+            If you choose to connect a YouTube account, Que DJ requests a single, read-only Google
             OAuth scope — <code className="text-xs bg-surface-hover px-1 py-0.5 rounded">
             https://www.googleapis.com/auth/youtube.readonly</code> — solely to list the names of
             your own playlists and read the title, channel name, duration, and thumbnail of the
@@ -66,14 +66,14 @@ export default function PrivacyPage() {
           <p className="text-sm">
             This scope cannot modify, delete, or post anything to your YouTube account, and
             cannot access private data beyond your own playlists and their videos&apos; public
-            metadata. AI DJ never requests access to your Google password, and never sees or
+            metadata. Que DJ never requests access to your Google password, and never sees or
             stores it.
           </p>
           <p className="text-sm">
             Your Google access token is used only in your own browser to call YouTube&apos;s Data
-            API directly — it is never sent to or stored on AI DJ&apos;s servers. When you import a
+            API directly — it is never sent to or stored on Que DJ&apos;s servers. When you import a
             playlist, only the resulting track metadata (title, channel/artist name, duration, and
-            thumbnail URL) is saved to your AI DJ account, exactly like a locally-uploaded file&apos;s
+            thumbnail URL) is saved to your Que DJ account, exactly like a locally-uploaded file&apos;s
             metadata, so the tracks can appear in your library. No video or audio content itself
             is copied, downloaded, or stored — playback of imported tracks streams directly from
             YouTube&apos;s own player.

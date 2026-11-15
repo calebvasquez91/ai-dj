@@ -3,7 +3,7 @@ import { FeedbackInboxView } from "@/components/FeedbackInboxView";
 import { feedbackOwnerSession } from "@/lib/feedbackOwner";
 import { loadFeedbackInbox, parseInboxQuery } from "@/lib/feedbackInbox";
 
-export const metadata = { title: "Feedback — AI DJ" };
+export const metadata = { title: "Feedback — Que DJ" };
 
 /**
  * The owner's feedback inbox: what people sent from the feedback pop-up, newest first, with the average rating and how

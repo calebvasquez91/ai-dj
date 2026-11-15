@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { MAIL_TOTAL_TIMEOUT_MS, getMailConfig, sendFeedbackMail, type MailTransport } from "@/lib/mailer";
 import type { FeedbackEmail } from "@/lib/feedback";
 
-const email: FeedbackEmail = { subject: "AI DJ feedback: 4/5", text: "text", html: "<p>html</p>", replyTo: "sam@example.com" };
+const email: FeedbackEmail = { subject: "Que DJ feedback: 4/5", text: "text", html: "<p>html</p>", replyTo: "sam@example.com" };
 const config = { user: "me@gmail.com", pass: "abcdefghijklmnop", to: "me@gmail.com" };
 
 afterEach(() => {
@@ -34,10 +34,10 @@ describe("sendFeedbackMail", () => {
     const transport: MailTransport = { sendMail };
     expect(await sendFeedbackMail(email, { config, transport })).toBe(true);
     expect(sendMail).toHaveBeenCalledWith({
-      from: '"AI DJ feedback" <me@gmail.com>',
+      from: '"Que DJ feedback" <me@gmail.com>',
       to: "me@gmail.com",
       replyTo: "sam@example.com",
-      subject: "AI DJ feedback: 4/5",
+      subject: "Que DJ feedback: 4/5",
       text: "text",
       html: "<p>html</p>",
     });

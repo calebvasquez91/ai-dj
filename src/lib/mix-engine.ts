@@ -683,6 +683,15 @@ export const FX_SOUND_TRANSITION_IDS: readonly string[] = Object.entries(TRANSIT
   .map(([id]) => id);
 
 /**
+ * Transition ids whose effect REPEATS a piece of the outgoing song (a beat-repeat stutter, or a held loop of its last bars)
+ * while the next song comes in. A listener hears that as a glitch right before the mix, so the automatic planner never picks
+ * them; a transition pinned by hand still can (forceTransitionId bypasses the exclusions).
+ */
+export const LOOP_REPEAT_TRANSITION_IDS: readonly string[] = Object.entries(TRANSITION_EFFECT_BY_ID)
+  .filter(([, effect]) => effect === "loop-roll" || effect === "loop-hold")
+  .map(([id]) => id);
+
+/**
  * planTransition's arguments for A -> B under `state`. `ignoreOverrides` drops a pinned or re-rolled pick, giving
  * "what auto-scoring alone would choose" (used to learn from the user's overrides); the stem rules still apply.
  */
@@ -709,6 +718,7 @@ export function planArgsFromState(
       ...rerolled,
       ...(stemReady ? [] : ["vocal-layering"]),
       ...(TRANSITION_FX_ENABLED ? [] : FX_SOUND_TRANSITION_IDS),
+      ...LOOP_REPEAT_TRANSITION_IDS,
     ],
     vocalStemReady: stemReady,
     varietyBias: state.djVarietyBias,

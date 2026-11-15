@@ -23,9 +23,9 @@ describe("Que is switched off and kept in his own folder", () => {
     expect(QUE_ENABLED).toBe(false);
   });
 
-  it("is named nowhere outside features/que, in the UI text, the AI prompts, the styles or the code", () => {
+  it("is named nowhere outside features/que, in the UI text, the AI prompts, the styles or the code (the app's own name, \"Que DJ\", is not him)", () => {
     const found = outside()
-      .filter(([, text]) => /\bQue\b/.test(text))
+      .filter(([, text]) => /\bQue\b(?!\s+DJ\b)/.test(text))
       .map(([path]) => path);
     expect(found).toEqual([]);
   });

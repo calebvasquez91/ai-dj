@@ -27,6 +27,9 @@ import {
   songSyncStateAt,
   songSyncTrigger,
   type SongSyncPlan,
+  estimateElementClockOffset,
+  ELEMENT_CLOCK_SAMPLES_KEPT,
+  ELEMENT_CLOCK_SAMPLES_MIN,
 } from "./songSync";
 import { MAX_ACTIVE_PLAY_SEC } from "./mix-engine";
 import { TRANSITION_FX_ENABLED, buildSyncReport, semitonesToMatchCamelotNumber, shiftCamelot, planKey } from "./syncEngine";
@@ -419,5 +422,24 @@ describe("phase readings", () => {
     expect(mean).toBeCloseTo(-0.01100, 4);
     // each reading is off by up to 3 ms from the centre, the mean by far less
     expect(Math.max(...jitter.map((j) => Math.abs(j - mean)))).toBeGreaterThan(0.002);
+  });
+});
+
+describe("estimateElementClockOffset", () => {
+  it("is the mean of the readings, which averages the element clock's jitter away", () => {
+    // a clock sitting 26.05 s ahead of the audio clock, read with +-6 ms of jitter
+    const jitter = [0.006, -0.004, 0.002, -0.006, 0.005, -0.001, -0.003, 0.001, 0.004, -0.004];
+    const samples = Array.from({ length: 40 }, (_, i) => 26.05 + jitter[i % jitter.length]);
+    expect(estimateElementClockOffset(samples)!).toBeCloseTo(26.05, 3);
+  });
+  it("uses only the latest readings, so an old stretch of the song does not drag it", () => {
+    const samples = [...Array.from({ length: 100 }, () => 5), ...Array.from({ length: ELEMENT_CLOCK_SAMPLES_KEPT }, () => 7)];
+    expect(estimateElementClockOffset(samples)).toBeCloseTo(7, 9);
+  });
+  it("returns null with too few readings, or none that are numbers", () => {
+    expect(estimateElementClockOffset([])).toBeNull();
+    expect(estimateElementClockOffset(Array.from({ length: ELEMENT_CLOCK_SAMPLES_MIN - 1 }, () => 1))).toBeNull();
+    expect(estimateElementClockOffset(Array.from({ length: 30 }, () => Number.NaN))).toBeNull();
+    expect(estimateElementClockOffset(Array.from({ length: ELEMENT_CLOCK_SAMPLES_MIN }, () => 1))).toBe(1);
   });
 });

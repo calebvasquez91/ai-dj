@@ -38,7 +38,7 @@ function LoginForm() {
       <div className="min-h-full flex pt-[max(1.5rem,env(safe-area-inset-top))] pb-[max(1.5rem,env(safe-area-inset-bottom))] pl-[max(1.5rem,env(safe-area-inset-left))] pr-[max(1.5rem,env(safe-area-inset-right))]">
       <form onSubmit={handleSubmit} className="card w-full max-w-sm p-6 flex flex-col gap-4 m-auto">
         <div className="flex flex-col gap-2">
-          <span className="text-2xl wordmark">AI DJ</span>
+          <span className="text-2xl wordmark">Que DJ</span>
           <div className="retro-stripe w-24" />
         </div>
         <h1 className="text-lg font-semibold">Log in</h1>

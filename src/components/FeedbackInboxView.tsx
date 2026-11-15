@@ -31,7 +31,7 @@ function Stars({ rating, size = 18 }: { rating: number; size?: number }) {
 function FeedbackCard({ item }: { item: InboxItem }) {
   const who = item.user.name ? `${item.user.name} (${item.user.email})` : item.user.email;
   // An address with characters that could add fields to a mailto: link gets no Reply link: it is shown as plain text only.
-  const reply = replyMailto(item.user.email, "Re: your feedback on AI DJ");
+  const reply = replyMailto(item.user.email, "Re: your feedback on Que DJ");
   return (
     <li className="card p-4 flex flex-col gap-2">
       <div className="flex items-center justify-between gap-3">

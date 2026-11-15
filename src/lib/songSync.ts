@@ -373,3 +373,21 @@ export function initialSongSyncStatus(plan: SongSyncPlan, nextTitle: string, pha
     listenerNote: null,
   };
 }
+
+/** How many of the latest element-clock samples estimateElementClockOffset averages, and the fewest it will trust. */
+export const ELEMENT_CLOCK_SAMPLES_KEPT = 60;
+export const ELEMENT_CLOCK_SAMPLES_MIN = 8;
+
+/**
+ * Where the playing track's <audio> clock sits against the audio clock: the mean of (element.currentTime - ctx.currentTime)
+ * over the latest samples, or null when there are too few to trust. A single reading of the element's clock is off by a few
+ * milliseconds either way (it updates in 5-22 ms steps, and the audio clock in 2.7 ms ones; measured 2.6 ms rms and up to 6 ms
+ * off a straight line), and a hand-over timed from one reading inherits that error as a skip or a repeat of the song. The
+ * mean of a few dozen readings taken while the song plays is steady to well under a millisecond. Only meaningful for an
+ * element playing at its normal speed, so the two clocks advance together.
+ */
+export function estimateElementClockOffset(samples: readonly number[]): number | null {
+  const recent = samples.slice(-ELEMENT_CLOCK_SAMPLES_KEPT).filter((v) => Number.isFinite(v));
+  if (recent.length < ELEMENT_CLOCK_SAMPLES_MIN) return null;
+  return recent.reduce((sum, v) => sum + v, 0) / recent.length;
+}

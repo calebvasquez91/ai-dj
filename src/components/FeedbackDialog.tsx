@@ -148,7 +148,7 @@ export function FeedbackDialog({
             <div className="flex items-start justify-between gap-3">
               <div className="flex flex-col gap-1">
                 <h2 id={titleId} className="text-lg heading">
-                  How are you liking AI DJ?
+                  How are you liking Que DJ?
                 </h2>
                 <p className="text-sm text-muted">Tap a star to rate it.</p>
               </div>
