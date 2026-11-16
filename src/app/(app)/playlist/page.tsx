@@ -124,11 +124,12 @@ function PlaylistContent() {
             )}
             {/* On every playlist, Spooky Music and Same Beat included: the files go to the library and onto the end of this playlist. */}
             <UploadSongsButton
+              key={playlist.id}
               title="Upload audio files from your computer: they are saved to the music library and added to this playlist"
               onUploaded={async (tracks) => {
                 addLocalTracks(tracks);
-                // One at a time: saved together the server may store them in any order, and they should keep the order picked.
-                for (const track of tracks) await addTrackToPlaylist(playlist.id, track);
+                // They all appear at once; the store saves them to the server one after another, in the order picked.
+                await Promise.all(tracks.map((track) => addTrackToPlaylist(playlist.id, track)));
               }}
             />
             {!playlist.theme && (

@@ -424,6 +424,12 @@ interface PlayerState {
   removeFxSound: (fxId: string) => Promise<void>;
 }
 
+/**
+ * Saves to the server for addTrackToPlaylist, one playlist at a time: adds to the same playlist wait for the one before, so
+ * the server numbers them in the order they were made. Fired together they race for their position (two uploads came back
+ * in reverse), and every caller that adds several tracks at once (an upload, a bulk select) would need its own workaround.
+ */
+const playlistAddQueues = new Map<string, Promise<unknown>>();
 export const useStore = create<PlayerState>()(
   (set, get) => ({
       queue: [],
@@ -1223,7 +1229,9 @@ export const useStore = create<PlayerState>()(
           // Analysed in the background from now, not only once it reaches the front of a queue.
           get().requestTrackAnalysis(track);
         }
-        return syncRequest(`/api/playlists/${playlistId}/tracks`, jsonInit("POST", { trackId: track.id })).then((r) => {
+        const save = () => syncRequest(`/api/playlists/${playlistId}/tracks`, jsonInit("POST", { trackId: track.id }));
+        const waiting = playlistAddQueues.get(playlistId);
+        const saved = (waiting ? waiting.then(save) : save()).then((r) => {
           if (r.ok) return;
           if (!wasPresent) {
             set((s) => ({
@@ -1242,6 +1250,11 @@ export const useStore = create<PlayerState>()(
           }
           get().reportSyncError(`Couldn't add the track to the playlist: ${r.error}`);
         });
+        playlistAddQueues.set(playlistId, saved);
+        void saved.then(() => {
+          if (playlistAddQueues.get(playlistId) === saved) playlistAddQueues.delete(playlistId);
+        });
+        return saved;
       },
 
       removeTrackFromPlaylist: (playlistId, trackId) => {

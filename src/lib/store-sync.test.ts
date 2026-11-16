@@ -202,3 +202,71 @@ describe("removeLocalTrack", () => {
     expect(useStore.getState().localLibrary).toHaveLength(0);
   });
 });
+
+describe("addTrackToPlaylist saves to the server in the order the tracks were added", () => {
+  /** A fetch whose responses are held until the test releases them, recording which track each request was for. */
+  function heldFetch() {
+    const requested: string[] = [];
+    const release: ((status: number) => void)[] = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn((_url: string, init: RequestInit) => {
+        requested.push(JSON.parse(String(init.body)).trackId);
+        return new Promise<Response>((resolve) => release.push((status) => resolve(new Response(status === 201 ? "{}" : JSON.stringify({ error: "nope" }), { status }))));
+      })
+    );
+    return { requested, release };
+  }
+  const tick = () => new Promise((r) => setTimeout(r, 0));
+
+  it("sends the next save only once the one before it has been answered", async () => {
+    const { requested, release } = heldFetch();
+    seedPlaylist([]);
+    const adds = ["a", "b", "c"].map((id) => useStore.getState().addTrackToPlaylist("pl1", makeTrack(id)));
+    expect(ids()).toEqual(["a", "b", "c"]); // all three show at once
+    await tick();
+    expect(requested).toEqual(["a"]);
+    release[0](201);
+    await tick();
+    expect(requested).toEqual(["a", "b"]);
+    release[1](201);
+    await tick();
+    expect(requested).toEqual(["a", "b", "c"]);
+    release[2](201);
+    await Promise.all(adds);
+    expect(ids()).toEqual(["a", "b", "c"]);
+  });
+
+  it("does not let a failed save hold up the ones behind it", async () => {
+    const { requested, release } = heldFetch();
+    seedPlaylist([]);
+    const adds = ["a", "b"].map((id) => useStore.getState().addTrackToPlaylist("pl1", makeTrack(id)));
+    await tick();
+    release[0](500);
+    await tick();
+    expect(requested).toEqual(["a", "b"]);
+    release[1](201);
+    await Promise.all(adds);
+    expect(ids()).toEqual(["b"]); // a was refused and rolled back; b was saved
+    expect(useStore.getState().syncError).toMatch(/nope/);
+  });
+
+  it("keeps playlists independent: a slow save for one does not wait on another", async () => {
+    const { requested, release } = heldFetch();
+    useStore.setState({ playlists: [{ id: "pl1", name: "One", createdAt: 0, tracks: [] }, { id: "pl2", name: "Two", createdAt: 0, tracks: [] }] });
+    const adds = [useStore.getState().addTrackToPlaylist("pl1", makeTrack("a")), useStore.getState().addTrackToPlaylist("pl2", makeTrack("b"))];
+    await tick();
+    expect(requested.sort()).toEqual(["a", "b"]); // both went out without either waiting for the other
+    release.forEach((answer) => answer(201));
+    await Promise.all(adds);
+  });
+
+  it("sends a lone add at once, with nothing queued behind another", async () => {
+    const { requested, release } = heldFetch();
+    seedPlaylist([]);
+    const add = useStore.getState().addTrackToPlaylist("pl1", makeTrack("a"));
+    expect(requested).toEqual(["a"]); // synchronously, as before the queue
+    release[0](201);
+    await add;
+  });
+});

@@ -1,7 +1,7 @@
 "use client";
 
 import { useRef, useState } from "react";
-import { uploadFiles } from "@/lib/localAudio";
+import { describeUploadFailures, uploadFiles } from "@/lib/localAudio";
 import { PlusIcon } from "@/components/Icons";
 import type { Track } from "@/types/music";
 
@@ -25,13 +25,7 @@ export function UploadSongsButton({ onUploaded, title }: { onUploaded: (tracks: 
     try {
       const { tracks, failed } = await uploadFiles(files);
       if (tracks.length > 0) await onUploaded(tracks);
-      if (failed.length > 0) {
-        setError(
-          failed.length === files.length && files.length === 1
-            ? `Couldn't upload ${failed[0].name}: ${failed[0].message}`
-            : `${failed.length} of ${files.length} files couldn't be uploaded (${failed.map((f) => f.name).join(", ")}): ${failed[0].message}`
-        );
-      }
+      setError(describeUploadFailures(failed, files.length));
     } finally {
       setUploading(false);
     }
