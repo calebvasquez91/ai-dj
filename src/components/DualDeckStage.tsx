@@ -52,6 +52,7 @@ import { isStuckMuted, looksMuted, rmsLevel, shouldResumeContext, wakeVerdict } 
 import { TRANSITION_FX_ENABLED, buildSyncReport } from "@/lib/syncEngine";
 import {
   SONG_SYNC_CROSSFADE_BARS,
+  addElementClockSample,
   addPhaseReading,
   averagedPhaseError,
   estimateElementClockOffset,
@@ -2660,9 +2661,16 @@ export function DualDeckStage() {
       const fromTrackId = track.id;
       // While the sync is set up (the buffer decodes, the AI DJ confirms), keep reading where the playing track's <audio>
       // clock sits against the audio clock: the hand-over below is timed from their steady mean, not from one jittery reading.
-      const clockSamples: number[] = [];
+      // A reading is only valid while the element plays straight on at normal speed: a seek, a pause or another playbackRate
+      // makes the two clocks stop advancing together, so the readings so far are dropped. In a hidden tab the timer runs about
+      // once a second, so a last reading is taken when the offset is used (below) as well.
+      let clockSamples: number[] = [];
       const sampleClock = () => {
-        if (!fromEl.paused) clockSamples.push(fromEl.currentTime - ctx.currentTime);
+        if (fromEl.paused || fromEl.seeking || fromEl.playbackRate !== 1) {
+          clockSamples = [];
+          return;
+        }
+        clockSamples = addElementClockSample(clockSamples, fromEl.currentTime - ctx.currentTime);
       };
       sampleClock();
       const clockTimer = setInterval(sampleClock, SONG_SYNC_CLOCK_SAMPLE_MS);
@@ -2733,6 +2741,7 @@ export function DualDeckStage() {
         // The bar line on the audio clock: where it will be by the element's steady clock offset, or (with too few readings,
         // a decode that finished at once) by one reading of the element's clock.
         clearInterval(clockTimer);
+        sampleClock();
         const clockOffset = estimateElementClockOffset(clockSamples);
         const tBarCtx =
           (clockOffset == null ? ctx.currentTime + Math.max(0, startAt - fromEl.currentTime) : Math.max(ctx.currentTime, startAt - clockOffset)) +

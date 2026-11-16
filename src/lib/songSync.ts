@@ -376,7 +376,26 @@ export function initialSongSyncStatus(plan: SongSyncPlan, nextTitle: string, pha
 
 /** How many of the latest element-clock samples estimateElementClockOffset averages, and the fewest it will trust. */
 export const ELEMENT_CLOCK_SAMPLES_KEPT = 60;
-export const ELEMENT_CLOCK_SAMPLES_MIN = 8;
+/** A hidden tab or a locked phone runs timers about once a second, so a few seconds of decoding may give only a handful of readings: a few still average the jitter down (four cut it roughly in half). */
+export const ELEMENT_CLOCK_SAMPLES_MIN = 4;
+/** A new reading this far (seconds) from the mean of the last few means the clocks stopped advancing together (a seek, a stall): the older readings describe a relationship that no longer holds. Ordinary jitter is under 7 ms. */
+export const ELEMENT_CLOCK_JUMP_SEC = 0.04;
+const ELEMENT_CLOCK_JUMP_REFERENCE = 4;
+
+/**
+ * The readings so far plus a new one (element.currentTime - ctx.currentTime), kept to the latest ELEMENT_CLOCK_SAMPLES_KEPT.
+ * A reading that jumps away from the recent ones (ELEMENT_CLOCK_JUMP_SEC) starts the list over: averaging across a seek or a
+ * stall would give an offset that is right for neither side of it. A reading that is not a number is ignored.
+ */
+export function addElementClockSample(samples: readonly number[], value: number): number[] {
+  if (!Number.isFinite(value)) return samples.slice(-ELEMENT_CLOCK_SAMPLES_KEPT);
+  const recent = samples.slice(-ELEMENT_CLOCK_JUMP_REFERENCE);
+  if (recent.length > 0) {
+    const mean = recent.reduce((sum, v) => sum + v, 0) / recent.length;
+    if (Math.abs(value - mean) > ELEMENT_CLOCK_JUMP_SEC) return [value];
+  }
+  return [...samples, value].slice(-ELEMENT_CLOCK_SAMPLES_KEPT);
+}
 
 /**
  * Where the playing track's <audio> clock sits against the audio clock: the mean of (element.currentTime - ctx.currentTime)
@@ -384,7 +403,8 @@ export const ELEMENT_CLOCK_SAMPLES_MIN = 8;
  * milliseconds either way (it updates in 5-22 ms steps, and the audio clock in 2.7 ms ones; measured 2.6 ms rms and up to 6 ms
  * off a straight line), and a hand-over timed from one reading inherits that error as a skip or a repeat of the song. The
  * mean of a few dozen readings taken while the song plays is steady to well under a millisecond. Only meaningful for an
- * element playing at its normal speed, so the two clocks advance together.
+ * element playing at its normal speed, so the two clocks advance together: the caller must not feed it readings taken while
+ * seeking or at another playbackRate (addElementClockSample restarts the list on a jump, but a steady drift it cannot see).
  */
 export function estimateElementClockOffset(samples: readonly number[]): number | null {
   const recent = samples.slice(-ELEMENT_CLOCK_SAMPLES_KEPT).filter((v) => Number.isFinite(v));

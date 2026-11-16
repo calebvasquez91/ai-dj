@@ -201,6 +201,26 @@ describe("the loop/repeat transitions", () => {
     }
   });
 
+  it("stay out even when everything else has been excluded and the planner falls back to unrestricted scoring", () => {
+    const repeatEffects = new Set(["loop-roll", "loop-hold"]);
+    const args = planArgsFromState(
+      { ...base, forcedTransitionId: null, rerolledTransitionIds: [] },
+      {},
+      { track: makeTrack("a"), analysis: analysis(128, "8A", 8) },
+      { track: makeTrack("b"), analysis: analysis(128, "8A", 12) }
+    );
+    // Exclude each pick in turn until the planner has nothing left to choose from; the pick after that is the fallback's.
+    const excluded = [...args.excludeTransitionIds!];
+    let fallbackPick: string | null = null;
+    for (let i = 0; i < 200 && fallbackPick == null; i++) {
+      const plan = planTransition({ ...args, excludeTransitionIds: excluded });
+      expect(repeatEffects.has(plan.effect), `${plan.transitionId} -> ${plan.effect}`).toBe(false);
+      if (excluded.includes(plan.transitionId)) fallbackPick = plan.transitionId;
+      else excluded.push(plan.transitionId);
+    }
+    expect(fallbackPick, "the planner never ran out of candidates").not.toBeNull();
+  });
+
   it("can still be pinned by hand", () => {
     for (const [id, effect] of [["beat-repeat-transition", "loop-roll"], ["loop-hold-transition", "loop-hold"]] as const) {
       const args = planArgsFromState(

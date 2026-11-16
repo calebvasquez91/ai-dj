@@ -13,7 +13,7 @@ export default function PrivacyPage() {
         <div className="flex flex-col gap-2">
           <span className="text-2xl wordmark">Que DJ</span>
           <h1 className="text-2xl heading">Privacy Policy</h1>
-          <p className="text-xs text-muted">Last updated November 12, 2026</p>
+          <p className="text-xs text-muted">Last updated November 16, 2026</p>
         </div>
 
         <section className="flex flex-col gap-2">

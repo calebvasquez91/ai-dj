@@ -1,4 +1,4 @@
-# AI DJ
+# Que DJ
 
 A web app that plays a queue of your own local audio files back-to-back like a continuous DJ set, auto-transitioning between songs with timed crossfades instead of hard cuts.
 

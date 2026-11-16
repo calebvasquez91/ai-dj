@@ -18,14 +18,37 @@ function sourceFiles(dir = "src"): [string, string][] {
 const QUE_DIR = `src${sep}features${sep}que${sep}`;
 const outside = () => sourceFiles().filter(([path]) => !path.startsWith(QUE_DIR));
 
+/** The files that write the app's own name, "Que DJ" (add a file here when the app's name first appears in it). */
+const APP_NAME_FILES = new Set([
+  "src/app/(app)/admin/feedback/page.tsx",
+  "src/app/globals.css",
+  "src/app/layout.tsx",
+  "src/app/login/page.tsx",
+  "src/app/manifest.ts",
+  "src/app/privacy/page.tsx",
+  "src/app/signup/page.tsx",
+  "src/components/BackgroundAudio.tsx",
+  "src/components/FeedbackDialog.tsx",
+  "src/components/FeedbackInboxView.tsx",
+  "src/components/NavRail.tsx",
+  "src/components/Sidebar.tsx",
+  "src/components/TopBar.tsx",
+  "src/lib/feedback.test.ts",
+  "src/lib/feedback.ts",
+  "src/lib/mailer.test.ts",
+  "src/lib/mailer.ts",
+]);
+
 describe("Que is switched off and kept in his own folder", () => {
   it("is disabled", () => {
     expect(QUE_ENABLED).toBe(false);
   });
 
-  it("is named nowhere outside features/que, in the UI text, the AI prompts, the styles or the code (the app's own name, \"Que DJ\", is not him)", () => {
+  it("is named nowhere outside features/que, in the UI text, the AI prompts, the styles or the code", () => {
+    // The app's own name, "Que DJ", is not him: it may be written only in the files where the app names itself (APP_NAME_FILES).
+    // Anywhere else "Que DJ" counts as naming him, so a line like "Que DJ says" in new copy or a prompt is caught.
     const found = outside()
-      .filter(([, text]) => /\bQue\b(?!\s+DJ\b)/.test(text))
+      .filter(([path, text]) => /\bQue\b/.test(APP_NAME_FILES.has(path.split(sep).join("/")) ? text.replace(/\bQue DJ\b/g, "") : text))
       .map(([path]) => path);
     expect(found).toEqual([]);
   });

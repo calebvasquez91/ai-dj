@@ -611,8 +611,12 @@ export function chooseTransitionWithBreakdown(
   const result = bestScoringTransition(ctx);
   // Excluding candidates (reroll) can in principle exhaust every viable
   // option — fall back to unrestricted scoring rather than ever returning
-  // an arbitrary/wrong pick.
+  // an arbitrary/wrong pick. The loop-repeat transitions stay excluded in
+  // that fallback (they glitch right before the mix); only when nothing
+  // else is viable at all can they be chosen.
   if (result.breakdown.total === -Infinity && ctx.excludeTransitionIds?.length) {
+    const withoutLoops = bestScoringTransition({ ...ctx, excludeTransitionIds: [...LOOP_REPEAT_TRANSITION_IDS] });
+    if (withoutLoops.breakdown.total !== -Infinity) return withoutLoops;
     return bestScoringTransition({ ...ctx, excludeTransitionIds: [] });
   }
   return result;
