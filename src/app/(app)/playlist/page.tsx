@@ -8,6 +8,7 @@ import { CoverMosaic, IconButton, Text } from "@/ui";
 import { PlayIcon } from "@/components/Icons";
 import { TrackThumbnail } from "@/components/TrackThumbnail";
 import { AddMusicBar } from "@/components/AddMusicBar";
+import { UploadSongsButton } from "@/components/UploadSongsButton";
 
 /**
  * The playlist name as a textarea that grows with its content, not an
@@ -68,6 +69,8 @@ function PlaylistContent() {
   const renamePlaylist = useStore((s) => s.renamePlaylist);
   const persistPlaylistName = useStore((s) => s.persistPlaylistName);
   const removePlaylist = useStore((s) => s.removePlaylist);
+  const addLocalTracks = useStore((s) => s.addLocalTracks);
+  const addTrackToPlaylist = useStore((s) => s.addTrackToPlaylist);
   const removeTrackFromPlaylist = useStore((s) => s.removeTrackFromPlaylist);
   const moveTrackInPlaylist = useStore((s) => s.moveTrackInPlaylist);
   const playPlaylist = useStore((s) => s.playPlaylist);
@@ -119,6 +122,15 @@ function PlaylistContent() {
                 </button>
               </>
             )}
+            {/* On every playlist, Spooky Music and Same Beat included: the files go to the library and onto the end of this playlist. */}
+            <UploadSongsButton
+              title="Upload audio files from your computer: they are saved to the music library and added to this playlist"
+              onUploaded={async (tracks) => {
+                addLocalTracks(tracks);
+                // One at a time: saved together the server may store them in any order, and they should keep the order picked.
+                for (const track of tracks) await addTrackToPlaylist(playlist.id, track);
+              }}
+            />
             {!playlist.theme && (
               <button
                 type="button"
@@ -137,7 +149,7 @@ function PlaylistContent() {
 
       {playlist.tracks.length === 0 ? (
         <p className="text-sm text-muted">
-          No tracks yet. Add local files and use the + button to add them here.
+          No tracks yet. Upload songs here, or use Add Music below to pick from your library.
         </p>
       ) : (
         <>

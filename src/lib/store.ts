@@ -403,7 +403,8 @@ interface PlayerState {
   renamePlaylist: (playlistId: string, name: string) => void;
   persistPlaylistName: (playlistId: string) => void;
   removePlaylist: (playlistId: string) => void;
-  addTrackToPlaylist: (playlistId: string, track: Track) => void;
+  /** Adds the track to the playlist at once in the UI; the returned promise settles when the server has saved (or refused) it, so a caller adding several can keep their order by waiting for each. */
+  addTrackToPlaylist: (playlistId: string, track: Track) => Promise<void>;
   removeTrackFromPlaylist: (playlistId: string, trackId: string) => void;
   moveTrackInPlaylist: (
     playlistId: string,
@@ -1222,7 +1223,7 @@ export const useStore = create<PlayerState>()(
           // Analysed in the background from now, not only once it reaches the front of a queue.
           get().requestTrackAnalysis(track);
         }
-        void syncRequest(`/api/playlists/${playlistId}/tracks`, jsonInit("POST", { trackId: track.id })).then((r) => {
+        return syncRequest(`/api/playlists/${playlistId}/tracks`, jsonInit("POST", { trackId: track.id })).then((r) => {
           if (r.ok) return;
           if (!wasPresent) {
             set((s) => ({
