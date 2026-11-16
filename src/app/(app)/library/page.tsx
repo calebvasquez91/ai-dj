@@ -3,7 +3,7 @@
 import { Suspense, startTransition, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { useStore } from "@/lib/store";
-import { filesToTracks } from "@/lib/localAudio";
+import { describeUploadFailures, uploadFiles } from "@/lib/localAudio";
 import { searchTracks } from "@/lib/search";
 import { useLiked } from "@/lib/liked";
 import { LIBRARY_VIEWS, artistsOf, likedTracks, parseLibraryView, type LibraryView } from "@/lib/library";
@@ -98,10 +98,10 @@ function LibraryContent() {
     setLoading(true);
     setUploadError(null);
     try {
-      const tracks = await filesToTracks(files);
-      addLocalTracks(tracks);
-    } catch (err) {
-      setUploadError(err instanceof Error ? err.message : "Failed to add files.");
+      // Each file on its own: the ones that uploaded are in the account already, so they join the library even if another failed.
+      const { tracks, failed } = await uploadFiles(files);
+      if (tracks.length > 0) addLocalTracks(tracks);
+      setUploadError(describeUploadFailures(failed, files.length));
     } finally {
       setLoading(false);
       e.target.value = "";
