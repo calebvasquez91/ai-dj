@@ -7,6 +7,7 @@ import { useNow } from "@/lib/useNow";
 import { AddToPlaylistButton } from "@/components/AddToPlaylistButton";
 import { LikeButton } from "@/components/LikeButton";
 import { SeparateStemsButton } from "@/components/SeparateStemsButton";
+import { GenreBadge } from "@/components/GenreBadge";
 import { TrackThumbnail } from "@/components/TrackThumbnail";
 import { CloseIcon, NoEntryIcon, PauseIcon, PlayIcon, StarIcon } from "@/components/Icons";
 import type { Track } from "@/types/music";
@@ -157,6 +158,7 @@ const TrackCard = memo(function TrackCard({
       <p className="text-xs text-muted truncate">
         {track.artist} · {formatRelativeTime(track.addedAt, now)}
       </p>
+      <div className="mt-0.5 min-h-4"><GenreBadge track={track} /></div>
 
       {!selectMode && (
         <div className="mt-1 flex items-center gap-0.5 opacity-100 md:opacity-0 md:group-hover:opacity-100 focus-within:opacity-100 transition-opacity">

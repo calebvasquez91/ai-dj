@@ -11,6 +11,8 @@ describe("parseLibraryView", () => {
     expect(parseLibraryView("artists")).toBe("artists");
     expect(parseLibraryView("liked")).toBe("liked");
     expect(parseLibraryView("fx")).toBe("fx");
+    expect(parseLibraryView("genres")).toBe("genres");
+    expect(parseLibraryView("review")).toBe("review");
     expect(parseLibraryView("songs")).toBe("songs");
   });
 

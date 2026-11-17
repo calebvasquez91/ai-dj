@@ -39,6 +39,10 @@ interface GenreClientState extends GenreStatusSnapshot {
   loaded: boolean;
   draining: boolean;
   error: string | null;
+  /** The track whose genre sheet is open (src/components/TrackGenreSheet.tsx), if any. */
+  sheetTrackId: string | null;
+  openSheet: (trackId: string) => void;
+  closeSheet: () => void;
   refresh: () => Promise<void>;
   /** Works the queue until nothing is waiting (or the server says it is not set up, or an error). */
   drain: () => Promise<void>;
@@ -91,6 +95,9 @@ export const useGenreClient = create<GenreClientState>()((set, get) => ({
   loaded: false,
   draining: false,
   error: null,
+  sheetTrackId: null,
+  openSheet: (trackId) => set({ sheetTrackId: trackId, error: null }),
+  closeSheet: () => set({ sheetTrackId: null }),
 
   refresh: async () => {
     try {

@@ -12,6 +12,10 @@ import { AddSelectedToPlaylistButton } from "@/components/AddSelectedToPlaylistB
 import { ConnectYouTubeButton } from "@/components/ConnectYouTubeButton";
 import { YouTubeImportModal } from "@/components/YouTubeImportModal";
 import { FxLibraryPanel } from "@/components/FxLibraryPanel";
+import { GenresView } from "@/components/GenresView";
+import { GenreReviewView } from "@/components/GenreReviewView";
+import { filterByGenre, type GenreFilter } from "@/lib/genreLibrary";
+import { useGenreClient } from "@/lib/genreClient";
 import { CloseIcon, PlusIcon, ShuffleIcon } from "@/components/Icons";
 import { Chip, ChipRow, CoverMosaic, MediaCard, Text } from "@/ui";
 
@@ -47,9 +51,15 @@ function LibraryContent() {
     });
   }, []);
   const [sourceFilter, setSourceFilter] = useState<SourceFilter>("all");
+  // A genre chosen in the Genres view narrows the Songs view to it.
+  const [genreFilter, setGenreFilter] = useState<GenreFilter | null>(null);
+  const needsReview = useGenreClient((s) => s.needsReview);
 
   // Liked is the library narrowed to the songs liked on this device; every other control works on whatever is shown.
-  const pool = useMemo(() => (view === "liked" ? likedTracks(localLibrary, likedIds) : localLibrary), [view, localLibrary, likedIds]);
+  const pool = useMemo(() => {
+    const base = view === "liked" ? likedTracks(localLibrary, likedIds) : localLibrary;
+    return genreFilter ? filterByGenre(base, genreFilter) : base;
+  }, [view, localLibrary, likedIds, genreFilter]);
   const searched = useMemo(
     () => (query.trim() ? searchTracks(pool, query).map((h) => h.item) : pool),
     [pool, query]
@@ -165,7 +175,7 @@ function LibraryContent() {
       <ChipRow label="Library sections">
         {LIBRARY_VIEWS.map((v) => (
           <Chip key={v.id} selected={view === v.id} onClick={() => setView(v.id)}>
-            {v.label}
+            {v.id === "review" && needsReview > 0 ? `${v.label} (${needsReview})` : v.label}
           </Chip>
         ))}
       </ChipRow>
@@ -178,6 +188,14 @@ function LibraryContent() {
           <span>Showing songs matching</span>
           <Chip selected onClick={() => useStore.getState().setSearchQuery("")} aria-label={`Clear filter ${query.trim()}`} title="Clear filter">
             &ldquo;{query.trim()}&rdquo; ✕
+          </Chip>
+        </div>
+      )}
+      {genreFilter && (
+        <div className="flex flex-wrap items-center gap-2 text-sm text-muted">
+          <span>Showing</span>
+          <Chip selected onClick={() => setGenreFilter(null)} aria-label={`Clear genre filter ${genreFilter.subgenre ?? genreFilter.genre}`} title="Clear genre filter">
+            {genreFilter.subgenre ? `${genreFilter.genre} · ${genreFilter.subgenre}` : genreFilter.genre} ✕
           </Chip>
         </div>
       )}
@@ -265,6 +283,19 @@ function LibraryContent() {
             ))}
           </ul>
         ))}
+
+      {view === "genres" && (
+        <GenresView
+          selected={genreFilter}
+          onPick={(filter) => {
+            setGenreFilter(filter);
+            setView("songs");
+          }}
+          onReview={() => setView("review")}
+        />
+      )}
+
+      {view === "review" && <GenreReviewView />}
 
       {view === "fx" && (
         <div className="flex max-w-2xl flex-col rounded-card border border-border-subtle bg-surface">
