@@ -6,6 +6,7 @@
 //   - ranking: exact/prefix > whole-word/word-start > substring, with the
 //     title weighted above artist above tags.
 import type { FxSound, Playlist, Track } from "@/types/music";
+import { genreHits, mergeHits } from "@/lib/genreSearch";
 
 /** Lowercases and strips diacritics. Output length can differ from the input's — see normalizeWithMap for position-preserving use. */
 export function normalizeText(text: string): string {
@@ -174,6 +175,19 @@ export const searchTracks = createSearcher<Track>((t) => [
   ...(t.tags ?? []).map((tag) => ({ text: tag, weight: TAG_WEIGHT })),
 ]);
 
+/**
+ * searchTracks plus the tracks the query's genre, mood or decade words pick out ("trap", "slow jams", "90s r&b": lib/genreSearch.ts),
+ * after the direct matches. A query that names none of those gives exactly searchTracks' answer.
+ */
+export function searchTracksWithGenres(tracks: readonly Track[], query: string): SearchHit<Track>[] {
+  const text = searchTracks(tracks, query);
+  // A query of several words that is an artist's name ("daft punk") is a search for that artist, not for the genre one of its words happens to name.
+  const tokens = tokenizeQuery(query);
+  const phrase = tokens.join(" ");
+  if (tokens.length > 1 && text.some((h) => normalizeText(h.item.artist).includes(phrase))) return text;
+  return mergeHits(text, genreHits(tracks, query));
+}
+
 export const searchPlaylists = createSearcher<Playlist>((p) => [{ text: p.name, weight: TITLE_WEIGHT }]);
 
 export const searchFx = createSearcher<FxSound>((fx) => [
@@ -210,7 +224,7 @@ export function searchAll(
   query: string,
   limits: Record<SearchGroupKind, number> = DEFAULT_GROUP_LIMITS
 ): SearchGroup[] {
-  const tracks = searchTracks(data.tracks, query);
+  const tracks = searchTracksWithGenres(data.tracks, query);
   const playlists = searchPlaylists(data.playlists, query);
   const fx = searchFx(data.fx, query);
   const groups: SearchGroup[] = [];

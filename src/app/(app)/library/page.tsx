@@ -4,7 +4,7 @@ import { Suspense, startTransition, useCallback, useEffect, useMemo, useRef, use
 import { useSearchParams } from "next/navigation";
 import { useStore } from "@/lib/store";
 import { describeUploadFailures, uploadFiles } from "@/lib/localAudio";
-import { searchTracks } from "@/lib/search";
+import { searchTracksWithGenres } from "@/lib/search";
 import { useLiked } from "@/lib/liked";
 import { LIBRARY_VIEWS, artistsOf, likedTracks, parseLibraryView, type LibraryView } from "@/lib/library";
 import { TrackGrid } from "@/components/TrackGrid";
@@ -14,7 +14,7 @@ import { YouTubeImportModal } from "@/components/YouTubeImportModal";
 import { FxLibraryPanel } from "@/components/FxLibraryPanel";
 import { GenresView } from "@/components/GenresView";
 import { GenreReviewView } from "@/components/GenreReviewView";
-import { filterByGenre, type GenreFilter } from "@/lib/genreLibrary";
+import { filterByGenre, genreOverview, type GenreFilter } from "@/lib/genreLibrary";
 import { useGenreClient } from "@/lib/genreClient";
 import { CloseIcon, PlusIcon, ShuffleIcon } from "@/components/Icons";
 import { Chip, ChipRow, CoverMosaic, MediaCard, Text } from "@/ui";
@@ -54,6 +54,7 @@ function LibraryContent() {
   // A genre chosen in the Genres view narrows the Songs view to it.
   const [genreFilter, setGenreFilter] = useState<GenreFilter | null>(null);
   const needsReview = useGenreClient((s) => s.needsReview);
+  const genreChips = useMemo(() => genreOverview(localLibrary).genres.slice(0, 12), [localLibrary]);
 
   // Liked is the library narrowed to the songs liked on this device; every other control works on whatever is shown.
   const pool = useMemo(() => {
@@ -61,7 +62,7 @@ function LibraryContent() {
     return genreFilter ? filterByGenre(base, genreFilter) : base;
   }, [view, localLibrary, likedIds, genreFilter]);
   const searched = useMemo(
-    () => (query.trim() ? searchTracks(pool, query).map((h) => h.item) : pool),
+    () => (query.trim() ? searchTracksWithGenres(pool, query).map((h) => h.item) : pool),
     [pool, query]
   );
   const artists = useMemo(() => artistsOf(localLibrary), [localLibrary]);
@@ -190,6 +191,24 @@ function LibraryContent() {
             &ldquo;{query.trim()}&rdquo; ✕
           </Chip>
         </div>
+      )}
+      {genreChips.length > 0 && (
+        <ChipRow label="Filter by genre">
+          {genreChips.map((g) => (
+            <Chip key={g.genre} selected={genreFilter?.genre === g.genre} onClick={() => setGenreFilter(genreFilter?.genre === g.genre && !genreFilter.subgenre ? null : { genre: g.genre })}>
+              {g.genre} <span className="ml-1 font-mono text-xs opacity-70">{g.count}</span>
+            </Chip>
+          ))}
+        </ChipRow>
+      )}
+      {genreFilter && (genreChips.find((g) => g.genre === genreFilter.genre)?.subgenres.length ?? 0) > 0 && (
+        <ChipRow label={`Subgenres of ${genreFilter.genre}`}>
+          {genreChips.find((g) => g.genre === genreFilter.genre)!.subgenres.map((s) => (
+            <Chip key={s.subgenre} selected={genreFilter.subgenre === s.subgenre} onClick={() => setGenreFilter(genreFilter.subgenre === s.subgenre ? { genre: genreFilter.genre } : { genre: genreFilter.genre, subgenre: s.subgenre })}>
+              {s.subgenre} <span className="ml-1 font-mono text-xs opacity-70">{s.count}</span>
+            </Chip>
+          ))}
+        </ChipRow>
       )}
       {genreFilter && (
         <div className="flex flex-wrap items-center gap-2 text-sm text-muted">

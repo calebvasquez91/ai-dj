@@ -5,6 +5,7 @@ import { useMemo } from "react";
 import { useStore } from "@/lib/store";
 import { coverGradient } from "@/lib/coverGradient";
 import { artistsOf, topTags } from "@/lib/library";
+import { genreOverview } from "@/lib/genreLibrary";
 import { SectionHeader, Text } from "@/ui";
 
 /** A colored tile that opens the library searched for `label`. */
@@ -31,12 +32,13 @@ function BrowseTile({ label, count }: { label: string; count: number }) {
  */
 export default function SearchPage() {
   const localLibrary = useStore((s) => s.localLibrary);
-  const genres = useMemo(() => topTags(localLibrary, 12), [localLibrary]);
+  const genres = useMemo(() => genreOverview(localLibrary).genres.slice(0, 12), [localLibrary]);
+  const tags = useMemo(() => topTags(localLibrary, 12), [localLibrary]);
   const artists = useMemo(() => artistsOf(localLibrary).filter((a) => a.name !== "Unknown artist").sort((a, b) => b.tracks.length - a.tracks.length).slice(0, 12), [localLibrary]);
 
   return (
     <div className="hidden flex-col gap-6 p-6 tablet:flex">
-      {genres.length === 0 && artists.length === 0 ? (
+      {genres.length === 0 && tags.length === 0 && artists.length === 0 ? (
         <Text variant="secondary">Use the search box at the top to find songs, playlists and FX.</Text>
       ) : (
         <>
@@ -46,6 +48,16 @@ export default function SearchPage() {
               <SectionHeader title="Genres" />
               <div className="grid grid-cols-3 gap-3 desktop:grid-cols-5">
                 {genres.map((g) => (
+                  <BrowseTile key={g.genre} label={g.genre} count={g.count} />
+                ))}
+              </div>
+            </section>
+          )}
+          {tags.length > 0 && (
+            <section className="flex flex-col gap-3">
+              <SectionHeader title="Tags" />
+              <div className="grid grid-cols-3 gap-3 desktop:grid-cols-5">
+                {tags.map((g) => (
                   <BrowseTile key={g.tag} label={g.tag} count={g.count} />
                 ))}
               </div>
