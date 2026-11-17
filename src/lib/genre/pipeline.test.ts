@@ -452,3 +452,20 @@ describe("the job runner", () => {
     expect((await jobs.stateOf(["a", "b"])).size).toBe(0);
   });
 });
+
+describe("year and content advisory", () => {
+  it("takes them from the file's tags, and MusicBrainz's year only when the file has none", async () => {
+    const a = await classifyTrack(input, deps({ fileTags: fake("file-tags", { meta: { year: 1994, explicit: "clean" } }), musicbrainz: fake("musicbrainz", { meta: { year: 1999 } }) }));
+    expect(a).toMatchObject({ year: 1994, explicit: "clean" });
+    const b = await classifyTrack(input, deps({ musicbrainz: fake("musicbrainz", { meta: { year: 1999 } }) }));
+    expect(b).toMatchObject({ year: 1999, explicit: null });
+  });
+  it("keeps them through a re-run that finds nothing new, and through a person's edit", () => {
+    const first = mergeRun(null, { tags: [tag("musicbrainz", "Rock", 0.7)], moods: [], year: 1994, explicit: "explicit" }, 1);
+    expect(first).toMatchObject({ year: 1994, explicit: "explicit" });
+    const second = mergeRun(first, { tags: [], moods: [], year: null, explicit: null }, 2);
+    expect(second).toMatchObject({ year: 1994, explicit: "explicit" });
+    expect(applyManualGenres(second, [{ genre: "Jazz" }], 3)).toMatchObject({ year: 1994, explicit: "explicit" });
+    expect(clearManualGenres(applyManualGenres(second, [{ genre: "Jazz" }], 3)!, 4)).toMatchObject({ year: 1994, explicit: "explicit" });
+  });
+});

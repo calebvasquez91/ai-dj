@@ -21,6 +21,7 @@ interface MbNamed {
 interface MbRecording {
   id: string;
   title?: string;
+  "first-release-date"?: string;
   score?: number;
   genres?: MbNamed[];
   tags?: MbNamed[];
@@ -41,6 +42,13 @@ export interface MusicBrainzOptions {
   /** e.g. "QueDJ/2.0 ( https://example.com )": MusicBrainz asks every client to say who it is and how to reach them. */
   userAgent: string;
   now?: () => number;
+}
+
+/** The year in a MusicBrainz date ("1971-11-05", "1971"), or null. */
+export function yearOfDate(date: string | undefined): number | null {
+  const m = /^(\d{4})/.exec(date ?? "");
+  const year = m ? Number(m[1]) : null;
+  return year != null && year >= 1900 && year <= 2100 ? year : null;
 }
 
 const luceneEscape = (s: string) => s.replace(/(["\\])/g, "\\$1");
@@ -91,6 +99,7 @@ export function createMusicBrainzProvider({ fetcher, cache, limiter, userAgent, 
         if (!mbid) return { ...EMPTY_RESULT, note: "no matching recording in MusicBrainz" };
         const recording = await get<MbRecording>(`recording/${mbid}?inc=artists+genres+tags&fmt=json`);
         if (!recording) return { ...EMPTY_RESULT, meta: { recordingMbid: mbid }, note: "the recording is not in MusicBrainz" };
+        const year = yearOfDate(recording["first-release-date"]);
 
         const found = new Map<string, { node: GenreNode; confidence: number }>();
         collect(found, recording.genres, recordingConfidence);
@@ -106,7 +115,7 @@ export function createMusicBrainzProvider({ fetcher, cache, limiter, userAgent, 
           .sort((a, b) => b.confidence - a.confidence)
           .slice(0, 6)
           .map(({ node, confidence }) => ({ genre: node.genre, ...(node.subgenre ? { subgenre: node.subgenre } : {}), source: "musicbrainz" as const, confidence, updatedAt: at }));
-        return { tags, moods: [], meta: { recordingMbid: mbid }, note: tags.length === 0 ? "MusicBrainz has no genre for this recording" : undefined };
+        return { tags, moods: [], meta: { recordingMbid: mbid, year }, note: tags.length === 0 ? "MusicBrainz has no genre for this recording" : undefined };
       } catch (err) {
         return { ...EMPTY_RESULT, note: err instanceof HttpError ? err.message : "MusicBrainz lookup failed" };
       }

@@ -18,6 +18,8 @@ export interface TrackGenreFields {
   genre?: string;
   subgenres: string[];
   moods: string[];
+  year?: number;
+  explicit?: "explicit" | "clean";
   /** A confirmed track whose sources now point somewhere else (a re-run flagged it). */
   genreDisagrees?: boolean;
 }
@@ -29,6 +31,8 @@ export function fieldsFromStored(stored: StoredGenre): TrackGenreFields {
     ...(stored.genre ? { genre: stored.genre } : {}),
     subgenres: stored.subgenres,
     moods: stored.moods,
+    ...(stored.year ? { year: stored.year } : {}),
+    ...(stored.explicit ? { explicit: stored.explicit } : {}),
     ...(disagreesWithManual(stored.tags) ? { genreDisagrees: true } : {}),
   };
 }

@@ -6,7 +6,7 @@
 import { parseFile, parseWebStream } from "music-metadata";
 import { getStorageBackend, localFilePath } from "@/lib/storage";
 import type { ProviderInput } from "@/lib/genre/types";
-import type { RawFileTags } from "@/lib/genre/fileTags";
+import { advisoryFromNative, type RawFileTags } from "@/lib/genre/fileTags";
 
 const READ_OPTIONS = { duration: false, skipCovers: true, skipPostHeaders: true } as const;
 
@@ -18,18 +18,19 @@ function yearOf(common: { year?: number; date?: string }): number | null {
 
 export async function readFileTags(input: ProviderInput): Promise<RawFileTags | null> {
   if (!input.storageKey) return null;
-  let common: Awaited<ReturnType<typeof parseFile>>["common"];
+  let parsed: Awaited<ReturnType<typeof parseFile>>;
   if (getStorageBackend() === "local") {
-    common = (await parseFile(localFilePath(input.storageKey), READ_OPTIONS)).common;
+    parsed = await parseFile(localFilePath(input.storageKey), READ_OPTIONS);
   } else {
     const res = await fetch(input.storageKey, { signal: AbortSignal.timeout(20_000) });
     if (!res.ok || !res.body) return null;
     try {
-      common = (await parseWebStream(res.body, { mimeType: input.mimeType, size: Number(res.headers.get("content-length")) || undefined }, READ_OPTIONS)).common;
+      parsed = await parseWebStream(res.body, { mimeType: input.mimeType, size: Number(res.headers.get("content-length")) || undefined }, READ_OPTIONS);
     } finally {
       // The reader has what it needs; do not keep downloading the rest.
       await res.body.cancel().catch(() => undefined);
     }
   }
-  return { genres: (common.genre ?? []).filter((g) => typeof g === "string"), album: common.album ?? null, year: yearOf(common) };
+  const { common, native } = parsed;
+  return { genres: (common.genre ?? []).filter((g) => typeof g === "string"), album: common.album ?? null, year: yearOf(common), explicit: advisoryFromNative(native) };
 }

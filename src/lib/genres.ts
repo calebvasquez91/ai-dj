@@ -50,7 +50,6 @@ export const GENRES: readonly GenreDef[] = [
       sub("Alternative R&B", "alt r and b", "alternative rnb", "alt rnb", "pbr and b"),
       sub("New Jack Swing", "njs", "new jack"),
       sub("Slow Jams", "slow jam", "quiet storm", "bedroom r and b", "love songs r and b"),
-      sub("90s R&B", "nineties r and b", "90s rnb", "classic r and b", "old school r and b"),
     ],
   },
   {

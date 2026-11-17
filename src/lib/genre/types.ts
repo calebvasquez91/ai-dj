@@ -35,7 +35,7 @@ export interface ProviderResult {
   tags: GenreTag[];
   moods: string[];
   /** Facts about the track the next providers can use: the album and year the file's tags give, a MusicBrainz recording id. */
-  meta?: { album?: string | null; year?: number | null; recordingMbid?: string | null };
+  meta?: { album?: string | null; year?: number | null; recordingMbid?: string | null; explicit?: "explicit" | "clean" | null };
   /** Why a provider that found nothing found nothing ("no tags in the file", "not configured"), for the log. */
   note?: string;
 }

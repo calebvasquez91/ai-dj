@@ -38,6 +38,10 @@ interface TrackBase {
   genre?: string;
   subgenres?: string[];
   moods?: string[];
+  /** The release year, when a source knew it (the file's tags, or MusicBrainz's first release date). */
+  year?: number;
+  /** Whether the track is marked explicit or clean (the file's advisory tag, or the person's own "explicit" / "clean" tag). Absent when unknown. */
+  explicit?: "explicit" | "clean";
 }
 
 /** A locally-uploaded file, played through the full Web Audio engine (real BPM/key/energy analysis, EQ, mashups, tempo ramps). */

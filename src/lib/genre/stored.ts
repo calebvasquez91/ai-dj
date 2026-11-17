@@ -16,6 +16,9 @@ export interface StoredGenre {
   genre?: string;
   subgenres: string[];
   moods: string[];
+  /** Facts the sources found about the track, kept next to its genres. */
+  year?: number;
+  explicit?: "explicit" | "clean";
   updatedAt: number;
 }
 
@@ -23,9 +26,24 @@ export const MAX_MOODS_KEPT = 5;
 export const AUTO_SOURCES: readonly Exclude<GenreTagSource, "manual">[] = ["file-tags", "musicbrainz", "lastfm", "audio-classifier", "llm"];
 
 /** Rebuilds the derived fields (status and summary) from the tags. `current` is the status before, so a confirmation survives. */
-export function finalizeStored(tags: GenreTag[], moods: string[], current: GenreStatus | undefined, at: number): StoredGenre {
+export function finalizeStored(
+  tags: GenreTag[],
+  moods: string[],
+  current: GenreStatus | undefined,
+  at: number,
+  facts: { year?: number | null; explicit?: "explicit" | "clean" | null } = {}
+): StoredGenre {
   const summary = summarizeGenreTags(tags);
-  return { tags, status: statusFor(tags, current), genre: summary.genre, subgenres: summary.subgenres, moods: moods.slice(0, MAX_MOODS_KEPT), updatedAt: at };
+  return {
+    tags,
+    status: statusFor(tags, current),
+    genre: summary.genre,
+    subgenres: summary.subgenres,
+    moods: moods.slice(0, MAX_MOODS_KEPT),
+    ...(facts.year ? { year: facts.year } : {}),
+    ...(facts.explicit ? { explicit: facts.explicit } : {}),
+    updatedAt: at,
+  };
 }
 
 /**
@@ -33,7 +51,7 @@ export function finalizeStored(tags: GenreTag[], moods: string[], current: Genre
  * answered this time replaces its old tags; one that gave nothing (down, rate limited, not configured) keeps what it said
  * before, so a bad day for an API never erases a good answer. Moods are the union, newest first.
  */
-export function mergeRun(existing: StoredGenre | null, run: { tags: GenreTag[]; moods: string[] }, at: number): StoredGenre {
+export function mergeRun(existing: StoredGenre | null, run: { tags: GenreTag[]; moods: string[]; year?: number | null; explicit?: "explicit" | "clean" | null }, at: number): StoredGenre {
   const manual = (existing?.tags ?? []).filter((t) => t.source === "manual");
   const kept: GenreTag[] = [];
   for (const source of AUTO_SOURCES) {
@@ -41,7 +59,7 @@ export function mergeRun(existing: StoredGenre | null, run: { tags: GenreTag[]; 
     kept.push(...(fresh.length > 0 ? fresh : (existing?.tags ?? []).filter((t) => t.source === source)));
   }
   const moods = [...new Set([...run.moods, ...(existing?.moods ?? [])])];
-  return finalizeStored([...manual, ...kept], moods, existing?.status, at);
+  return finalizeStored([...manual, ...kept], moods, existing?.status, at, { year: run.year ?? existing?.year, explicit: run.explicit ?? existing?.explicit });
 }
 
 export interface GenrePick {
@@ -71,12 +89,12 @@ export function applyManualGenres(existing: StoredGenre | null, picks: readonly 
   if (valid.length === 0) return null;
   const others = (existing?.tags ?? []).filter((t) => t.source !== "manual");
   const manual: GenreTag[] = valid.map((p) => ({ genre: p.genre, ...(p.subgenre ? { subgenre: p.subgenre } : {}), source: "manual", confidence: 1, updatedAt: at }));
-  return finalizeStored([...manual, ...others], existing?.moods ?? [], "confirmed", at);
+  return finalizeStored([...manual, ...others], existing?.moods ?? [], "confirmed", at, { year: existing?.year, explicit: existing?.explicit });
 }
 
 /** Takes back a person's genres: the track goes back to what its sources say, and to review if they are unsure. */
 export function clearManualGenres(existing: StoredGenre, at: number): StoredGenre {
-  return finalizeStored(existing.tags.filter((t) => t.source !== "manual"), existing.moods, "auto", at);
+  return finalizeStored(existing.tags.filter((t) => t.source !== "manual"), existing.moods, "auto", at, { year: existing.year, explicit: existing.explicit });
 }
 
 /** The tags worth showing a person as suggestions: the sources' own (not manual), best first, one per source and genre. */

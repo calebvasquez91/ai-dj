@@ -30,9 +30,9 @@ export async function genreTablesReady(): Promise<boolean> {
   }
 }
 
-export function storedFromRow(row: { tagsJson: string; status: string; genre: string | null; subgenresJson: string; moodsJson: string; updatedAt: Date }): StoredGenre {
+export function storedFromRow(row: { tagsJson: string; status: string; genre: string | null; subgenresJson: string; moodsJson: string; year?: number | null; explicit?: string | null; updatedAt: Date }): StoredGenre {
   const status: GenreStatus = row.status === "confirmed" || row.status === "needs-review" ? row.status : "auto";
-  return { tags: parseArray<GenreTag>(row.tagsJson), status, genre: row.genre ?? undefined, subgenres: parseArray<string>(row.subgenresJson), moods: parseArray<string>(row.moodsJson), updatedAt: row.updatedAt.getTime() };
+  return { tags: parseArray<GenreTag>(row.tagsJson), status, genre: row.genre ?? undefined, subgenres: parseArray<string>(row.subgenresJson), moods: parseArray<string>(row.moodsJson), ...(row.year ? { year: row.year } : {}), ...(row.explicit === "explicit" || row.explicit === "clean" ? { explicit: row.explicit } : {}), updatedAt: row.updatedAt.getTime() };
 }
 
 export const prismaGenreStore: GenreStore = {
@@ -47,6 +47,8 @@ export const prismaGenreStore: GenreStore = {
       genre: stored.genre ?? null,
       subgenresJson: JSON.stringify(stored.subgenres),
       moodsJson: JSON.stringify(stored.moods),
+      year: stored.year ?? null,
+      explicit: stored.explicit ?? null,
     };
     await prisma.trackGenre.upsert({ where: { trackId }, create: { trackId, ...data }, update: data });
   },

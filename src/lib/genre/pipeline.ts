@@ -41,6 +41,9 @@ export interface ClassifyOutcome {
   /** Raw tags from the sources that ran (no manual tags). */
   tags: GenreTag[];
   moods: string[];
+  /** The release year and content advisory the sources found, when they did. */
+  year: number | null;
+  explicit: "explicit" | "clean" | null;
   sources: SourceLog[];
   usedLlm: boolean;
   stoppedEarly: boolean;
@@ -61,11 +64,13 @@ export async function classifyTrack(input: ProviderInput, deps: PipelineDeps, op
   const sources: SourceLog[] = [];
   const evidence: SourceEvidence[] = [];
   let stoppedEarly = false;
+  let explicit: "explicit" | "clean" | null = null;
 
   const absorb = (r: ProviderResult) => {
     if (r.meta?.album && !ctx.album) ctx.album = r.meta.album;
     if (r.meta?.year && !ctx.year) ctx.year = r.meta.year;
     if (r.meta?.recordingMbid) ctx.recordingMbid = r.meta.recordingMbid;
+    if (r.meta?.explicit && !explicit) explicit = r.meta.explicit;
   };
   const step = async (provider: GenreProvider | null, label: string) => {
     if (!provider) {
@@ -130,5 +135,5 @@ export async function classifyTrack(input: ProviderInput, deps: PipelineDeps, op
   }
   if (!usedLlm) sources.push({ source: "llm", ran: false, tags: 0, ms: 0, note: options.confirmed ? "genres confirmed by a person" : "not needed" });
 
-  return { tags, moods: moods.slice(0, MOODS_KEPT), sources, usedLlm, stoppedEarly };
+  return { tags, moods: moods.slice(0, MOODS_KEPT), year: ctx.year ?? null, explicit, sources, usedLlm, stoppedEarly };
 }

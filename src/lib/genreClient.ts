@@ -19,6 +19,8 @@ export interface TrackGenreFields {
   genre?: string;
   subgenres: string[];
   moods: string[];
+  year?: number;
+  explicit?: "explicit" | "clean";
   genreDisagrees?: boolean;
 }
 

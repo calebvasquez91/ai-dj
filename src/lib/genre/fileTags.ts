@@ -16,9 +16,29 @@ export interface RawFileTags {
   genres: string[];
   album?: string | null;
   year?: number | null;
+  /** The file's content advisory (iTunes advisory tag): explicit, clean, or absent. */
+  explicit?: "explicit" | "clean" | null;
 }
 
 export const FILE_TAG_CLEAN_CONFIDENCE = 0.6;
+
+/**
+ * The content advisory in a file's native tags: the iTunes advisory (an MP4 `rtng` atom: 1 or 4 explicit, 2 clean; an ID3
+ * `TXXX:ITUNESADVISORY` frame or a Vorbis `ITUNESADVISORY` / `ADVISORY` field: "1" explicit, "2" clean, or the words).
+ * Anything else, including "0" (no advisory), is unknown: the file did not say.
+ */
+export function advisoryFromNative(native: Readonly<Record<string, readonly { id: string; value: unknown }[]>> | undefined): "explicit" | "clean" | null {
+  for (const tags of Object.values(native ?? {})) {
+    for (const t of tags) {
+      const id = t.id.toLowerCase();
+      if (id !== "rtng" && !id.endsWith("itunesadvisory") && id !== "advisory") continue;
+      const v = String(t.value).trim().toLowerCase();
+      if (v === "1" || v === "4" || v === "explicit") return "explicit";
+      if (v === "2" || v === "clean") return "clean";
+    }
+  }
+  return null;
+}
 
 export function genreTagsFromFileTags(rawGenres: readonly string[], at: number): GenreTag[] {
   const nodes: GenreNode[] = [];
@@ -63,7 +83,7 @@ export function createFileTagProvider({ readTags, now = Date.now }: FileTagProvi
         return { ...EMPTY_RESULT, note: `could not read the file's tags (${err instanceof Error ? err.message : "error"})` };
       }
       if (!raw) return { ...EMPTY_RESULT, note: "the file has no readable tags" };
-      const meta = { album: raw.album ?? null, year: raw.year ?? null };
+      const meta = { album: raw.album ?? null, year: raw.year ?? null, explicit: raw.explicit ?? null };
       const tags = genreTagsFromFileTags(raw.genres, now());
       return { tags, moods: [], meta, note: tags.length === 0 ? (raw.genres.length === 0 ? "no genre tag in the file" : "the genre tag names nothing on the taxonomy") : undefined };
     },

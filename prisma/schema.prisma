@@ -254,6 +254,9 @@ model TrackGenre {
   genre         String?
   subgenresJson String   @default("[]")
   moodsJson     String   @default("[]")
+  /// Facts the sources found about the track: its release year, and "explicit" | "clean" from the file's advisory tag.
+  year          Int?
+  explicit      String?
   updatedAt     DateTime @updatedAt
 
   @@index([status])

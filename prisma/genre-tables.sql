@@ -18,9 +18,14 @@ CREATE TABLE IF NOT EXISTS "TrackGenre" (
     "genre" TEXT,
     "subgenresJson" TEXT NOT NULL DEFAULT '[]',
     "moodsJson" TEXT NOT NULL DEFAULT '[]',
+    "year" INTEGER,
+    "explicit" TEXT,
     "updatedAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     CONSTRAINT "TrackGenre_pkey" PRIMARY KEY ("trackId")
 );
+-- For a database that already had an earlier version of this table.
+ALTER TABLE "TrackGenre" ADD COLUMN IF NOT EXISTS "year" INTEGER;
+ALTER TABLE "TrackGenre" ADD COLUMN IF NOT EXISTS "explicit" TEXT;
 CREATE INDEX IF NOT EXISTS "TrackGenre_status_idx" ON "TrackGenre"("status");
 CREATE INDEX IF NOT EXISTS "TrackGenre_genre_idx" ON "TrackGenre"("genre");
 

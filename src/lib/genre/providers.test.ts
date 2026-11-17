@@ -174,7 +174,7 @@ describe("FileTagProvider", () => {
     const provider = createFileTagProvider({ readTags: async () => ({ genres: ["Jazz"], album: "Blue", year: 1959 }), now: () => at });
     const r = await provider.classify(input);
     expect(r.tags).toHaveLength(1);
-    expect(r.meta).toEqual({ album: "Blue", year: 1959 });
+    expect(r.meta).toEqual({ album: "Blue", year: 1959, explicit: null });
   });
   it("says why it found nothing, and never throws", async () => {
     const none = createFileTagProvider({ readTags: async () => ({ genres: [] }) });
@@ -497,5 +497,39 @@ describe("moodTags", () => {
     expect(normalizeMood("hip-hop")).toBeNull();
     expect(normalizeMood("")).toBeNull();
     expect(normalizeMood(null)).toBeNull();
+  });
+});
+
+describe("content advisory and release year", () => {
+  it("reads the iTunes advisory from an MP4 atom, an ID3 frame or a Vorbis field", async () => {
+    const { advisoryFromNative } = await import("@/lib/genre/fileTags");
+    expect(advisoryFromNative({ iTunes: [{ id: "rtng", value: 1 }] })).toBe("explicit");
+    expect(advisoryFromNative({ iTunes: [{ id: "rtng", value: 4 }] })).toBe("explicit");
+    expect(advisoryFromNative({ iTunes: [{ id: "rtng", value: 2 }] })).toBe("clean");
+    expect(advisoryFromNative({ "ID3v2.4": [{ id: "TXXX:ITUNESADVISORY", value: "1" }] })).toBe("explicit");
+    expect(advisoryFromNative({ vorbis: [{ id: "ITUNESADVISORY", value: "2" }] })).toBe("clean");
+    expect(advisoryFromNative({ vorbis: [{ id: "ADVISORY", value: "Explicit" }] })).toBe("explicit");
+  });
+  it("is unknown when the file does not say, or says no advisory", async () => {
+    const { advisoryFromNative } = await import("@/lib/genre/fileTags");
+    expect(advisoryFromNative(undefined)).toBeNull();
+    expect(advisoryFromNative({})).toBeNull();
+    expect(advisoryFromNative({ iTunes: [{ id: "rtng", value: 0 }] })).toBeNull();
+    expect(advisoryFromNative({ "ID3v2.4": [{ id: "TIT2", value: "1" }] })).toBeNull();
+  });
+  it("passes the advisory on from the file tags provider", async () => {
+    const p = createFileTagProvider({ readTags: async () => ({ genres: ["Rap"], explicit: "explicit", year: 1999 }) });
+    expect((await p.classify(input)).meta).toMatchObject({ explicit: "explicit", year: 1999 });
+  });
+  it("takes the year from MusicBrainz's first release date", async () => {
+    const { yearOfDate } = await import("@/lib/genre/musicBrainz");
+    expect(yearOfDate("1971-11-05")).toBe(1971);
+    expect(yearOfDate("1971")).toBe(1971);
+    expect(yearOfDate("")).toBeNull();
+    expect(yearOfDate(undefined)).toBeNull();
+    expect(yearOfDate("0001-01-01")).toBeNull();
+    const r = router((url) => (url.includes("/recording/rec1") ? json({ id: "rec1", "first-release-date": "1972-04-01", genres: [{ name: "rock", count: 2 }] }) : undefined));
+    const p = createMusicBrainzProvider({ fetcher: r.fetcher, cache: memoryCache(), limiter: noLimit, userAgent: UA });
+    expect((await p.classify({ ...input, recordingMbid: "rec1" })).meta).toMatchObject({ recordingMbid: "rec1", year: 1972 });
   });
 });
