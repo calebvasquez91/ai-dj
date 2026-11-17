@@ -5,6 +5,7 @@ import { getStorageBackend, saveLocalFile, deleteLocalFile, deleteBlobFile } fro
 import { toTrackApiResponse } from "@/lib/trackApi";
 import { apiHandler, jsonError, unauthorized } from "@/lib/apiRoute";
 import { cleanText, isAcceptableStorageUrl, isValidDuration, normalizeAudioMime } from "@/lib/apiValidation";
+import { loadGenreFields, queueNewTracks } from "@/lib/genre/api";
 
 async function handleGET() {
   const session = await auth();
@@ -14,7 +15,9 @@ async function handleGET() {
     where: { userId: session.user.id },
     orderBy: { createdAt: "asc" },
   });
-  return NextResponse.json(tracks.map(toTrackApiResponse));
+  // Each track's genres, if it has been classified (empty until the genre tables exist).
+  const genres = await loadGenreFields(tracks.map((t) => t.id));
+  return NextResponse.json(tracks.map((t) => ({ ...toTrackApiResponse(t), ...(genres.get(t.id) ?? {}) })));
 }
 
 function isUniqueViolation(err: unknown): boolean {
@@ -58,6 +61,7 @@ async function handlePOST(request: Request) {
           mimeType: normalizeAudioMime(file.type),
         },
       });
+      await queueNewTracks([track.id]); // classify its genres in the background (never fails the upload)
       return NextResponse.json(toTrackApiResponse(track), { status: 201 });
     } catch (err) {
       await deleteLocalFile(storageKey).catch(() => {}); // don't orphan the file if the DB write fails
@@ -94,6 +98,7 @@ async function handlePOST(request: Request) {
         mimeType: normalizeAudioMime(typeof mimeType === "string" ? mimeType : ""),
       },
     });
+    await queueNewTracks([track.id]);
     return NextResponse.json(toTrackApiResponse(track), { status: 201 });
   } catch (err) {
     if (isUniqueViolation(err)) return jsonError(409, "That file is already in your library.");

@@ -5,8 +5,10 @@ import { formatTime, formatRelativeTime, isRecentlyAdded } from "@/lib/format";
 import { useNow } from "@/lib/useNow";
 import { AddToPlaylistButton } from "@/components/AddToPlaylistButton";
 import { SeparateStemsButton } from "@/components/SeparateStemsButton";
+import { GenreBadge } from "@/components/GenreBadge";
+import { useGenreClient } from "@/lib/genreClient";
 import { TrackThumbnail } from "@/components/TrackThumbnail";
-import { CloseIcon, NoEntryIcon, PauseIcon, PlayIcon, StarIcon } from "@/components/Icons";
+import { CloseIcon, NoEntryIcon, PauseIcon, PlayIcon, SparklesIcon, StarIcon } from "@/components/Icons";
 import type { Track } from "@/types/music";
 
 export function TrackList({
@@ -26,6 +28,7 @@ export function TrackList({
   const isPlaying = useStore((s) => s.isPlaying);
   const togglePlay = useStore((s) => s.togglePlay);
   const setTrackPlayPreference = useStore((s) => s.setTrackPlayPreference);
+  const reclassify = useGenreClient((s) => s.reclassify);
   const now = useNow();
   const selectMode = Boolean(onToggleSelect);
 
@@ -97,6 +100,7 @@ export function TrackList({
             <p className="text-xs text-muted truncate">
               {track.artist} · {formatRelativeTime(track.addedAt, now)}
             </p>
+            <GenreBadge track={track} />
           </div>
           <span className="text-xs text-muted">{formatTime(track.durationSec)}</span>
           {!selectMode && (
@@ -138,6 +142,18 @@ export function TrackList({
                 }
               >
                 <NoEntryIcon size={14} />
+              </button>
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  void reclassify({ trackIds: [track.id] });
+                }}
+                className="btn-icon text-muted opacity-100 md:opacity-0 md:group-hover:opacity-100 focus:opacity-100 transition-opacity"
+                title="Re-classify genre"
+                aria-label={`Re-classify the genre of ${track.title}`}
+              >
+                <SparklesIcon size={14} />
               </button>
               <AddToPlaylistButton track={track} />
               <SeparateStemsButton track={track} />

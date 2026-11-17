@@ -1,3 +1,4 @@
+import { queueUnclassified } from "@/lib/genre/api";
 import { NextResponse } from "next/server";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
@@ -79,6 +80,7 @@ async function handlePOST(request: Request) {
       storageKey: { in: items.map((item) => item.videoId) },
     },
   });
+  await queueUnclassified(tracks.map((t) => t.id)); // classify the new ones in the background (never fails the import)
   return NextResponse.json(tracks.map(toTrackApiResponse), { status: 201 });
 }
 

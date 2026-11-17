@@ -2,6 +2,7 @@ import { redirect } from "next/navigation";
 import { auth } from "@/auth";
 import { AuthSessionProvider } from "@/components/AuthSessionProvider";
 import { AppDataLoader } from "@/components/AppDataLoader";
+import { GenreRunner } from "@/components/GenreRunner";
 import { StemAutopilot } from "@/components/StemAutopilot";
 import { VoiceMapLoader } from "@/components/VoiceMapLoader";
 import { STEM_FEATURES_ENABLED, VOCAL_MASHUP_ENABLED } from "@/lib/featureFlags";
@@ -31,6 +32,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
     <AuthSessionProvider>
       <FeedbackOwnerProvider isOwner={isFeedbackAdmin(session.user?.id)}>
       <AppDataLoader />
+      <GenreRunner />
       {STEM_FEATURES_ENABLED && <StemAutopilot />}
       {!STEM_FEATURES_ENABLED && VOCAL_MASHUP_ENABLED && <StemAutopilot scope="mashup-next" />}
       {(STEM_FEATURES_ENABLED || VOCAL_MASHUP_ENABLED) && <VoiceMapLoader />}

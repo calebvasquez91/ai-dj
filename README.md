@@ -35,6 +35,16 @@ Environment variables (all server-side; none reach the browser bundle):
 | `GENRE_LLM_MODEL` | overrides the Haiku model id (default in `llmReconciler.ts`) | default used |
 | `CLASSIFIER_ENABLED` | `true` turns the audio classifier on | off (and no model is bundled anyway) |
 | `GENRE_CONTACT_URL` | the contact in the User-Agent sent to MusicBrainz and Last.fm | the app's public URL |
+| `CRON_SECRET` | lets a scheduler call `GET /api/genre/run` with `Authorization: Bearer <secret>` | only the signed-in app drains the queue |
+
+### How the background work runs
+
+A new upload or import queues a job per track (`GenreJob`). While the app is open it asks the server to work a few jobs at a time
+(`POST /api/genre/run`), at most one MusicBrainz request a second across every instance (the limit is kept in the database).
+Tracks that were never classified are queued once per session at low priority (the backfill). A failed job is retried after
+30 s, 60 s, 2 min... up to an hour, and given up after five tries. Nothing runs while the app is closed unless a scheduler
+calls the run route: Vercel Hobby only allows daily cron jobs, so no schedule is committed; on a plan that allows it, add
+`{ "crons": [{ "path": "/api/genre/run", "schedule": "*/5 * * * *" }] }` to `vercel.json` and set `CRON_SECRET`.
 
 ### Models and licenses
 

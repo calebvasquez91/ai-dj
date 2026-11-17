@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { GENRES, aliasKey, findNode, genreLabels, isTaxonomyNode, normalize, normalizeMany, subgenreLabels } from "@/lib/genres";
-import { GENRE_KEEP_CONFIDENCE, keptGenreTags, summarizeGenreTags } from "@/lib/genreTags";
+import { GENRE_KEEP_CONFIDENCE, summarizeGenreTags } from "@/lib/genreTags";
 import type { GenreTag } from "@/types/music";
 
 describe("the taxonomy", () => {
@@ -197,7 +197,7 @@ describe("findNode / isTaxonomyNode", () => {
 });
 
 describe("summarizeGenreTags", () => {
-  const tag = (genre: string, confidence: number, extra: Partial<GenreTag> = {}): GenreTag => ({ genre, source: "file-tags", confidence, updatedAt: 1, ...extra });
+  const tag = (genre: string, confidence: number, extra: Partial<GenreTag> = {}): GenreTag => ({ genre, source: "musicbrainz", confidence, updatedAt: 1, ...extra });
 
   it("is empty with no tags", () => {
     expect(summarizeGenreTags(undefined)).toEqual({ genre: undefined, genres: [], subgenres: [] });
@@ -205,6 +205,7 @@ describe("summarizeGenreTags", () => {
   });
 
   it("keeps every genre at or above the threshold, best first, and a track can have several", () => {
+    expect(GENRE_KEEP_CONFIDENCE).toBe(0.5);
     const s = summarizeGenreTags([tag("Pop", 0.55), tag("R&B", 0.9, { subgenre: "Neo-Soul" }), tag("Rock", 0.3)]);
     expect(s.genre).toBe("R&B");
     expect(s.genres).toEqual(["R&B", "Pop"]);
@@ -212,19 +213,18 @@ describe("summarizeGenreTags", () => {
   });
 
   it("leaves out a tag below the threshold, and one that is not on the taxonomy", () => {
-    expect(GENRE_KEEP_CONFIDENCE).toBe(0.5);
-    expect(keptGenreTags([tag("Pop", 0.49), tag("Polka", 0.95), tag("Hip-Hop", 0.8, { subgenre: "Polka" })])).toEqual([]);
-    expect(keptGenreTags([tag("Pop", 0.5)])).toHaveLength(1);
+    expect(summarizeGenreTags([tag("Pop", 0.49), tag("Polka", 0.95), tag("Hip-Hop", 0.8, { subgenre: "Polka" })]).genres).toEqual([]);
+    expect(summarizeGenreTags([tag("Pop", 0.5)]).genres).toEqual(["Pop"]);
   });
 
-  it("does not list a genre or a subgenre twice, and puts the manual tag first on a tie", () => {
+  it("does not list a genre or a subgenre twice, and a person's tag decides the summary", () => {
     const s = summarizeGenreTags([
-      tag("Hip-Hop", 1, { subgenre: "Trap", source: "file-tags" }),
-      tag("Hip-Hop", 1, { subgenre: "Drill", source: "manual" }),
+      tag("Hip-Hop", 0.9, { subgenre: "Trap", source: "musicbrainz" }),
       tag("Hip-Hop", 0.6, { subgenre: "Trap", source: "lastfm" }),
+      tag("Hip-Hop", 1, { subgenre: "Drill", source: "manual" }),
     ]);
     expect(s.genres).toEqual(["Hip-Hop"]);
-    expect(s.subgenres).toEqual(["Drill", "Trap"]);
+    expect(s.subgenres).toEqual(["Drill"]);
   });
 
   it("does not change the array it is given", () => {
