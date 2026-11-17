@@ -92,6 +92,9 @@ model Track {
 
   playlistTracks PlaylistTrack[]
   stemJobs       StemSeparationJob[]
+  genreInfo      TrackGenre?
+  genreJobs      GenreJob[]
+  genreLogs      GenreLog[]
 
   @@index([userId])
   // Prevents re-importing the same YouTube video twice for the same user
@@ -234,5 +237,85 @@ model Feedback {
   createdAt DateTime  @default(now())
 
   @@index([userId])
+  @@index([createdAt])
+}
+
+/// A track's genres (src/lib/genre/): every tag with its source and confidence, the resolved summary, and whether a person
+/// has confirmed it. One row per track, kept off Track itself so the library queries never depend on this table existing.
+model TrackGenre {
+  trackId String @id
+  track   Track  @relation(fields: [trackId], references: [id], onDelete: Cascade)
+
+  /// JSON.stringify'd GenreTag[] (src/types/music.ts).
+  tagsJson String @default("[]")
+  /// "auto" | "needs-review" | "confirmed" - enforced in app code, not a DB enum.
+  status String @default("auto")
+  /// The resolved summary of tagsJson: the best genre, its subgenres, and the moods the sources named.
+  genre         String?
+  subgenresJson String   @default("[]")
+  moodsJson     String   @default("[]")
+  updatedAt     DateTime @updatedAt
+
+  @@index([status])
+  @@index([genre])
+}
+
+/// One classification run for a track, queued by an import, a "Re-classify" or the backfill, and worked off in the background
+/// (src/app/api/genre/run/route.ts). At most one queued or running job per track (a partial unique index in prisma/genre-tables.sql).
+model GenreJob {
+  id      String @id @default(cuid())
+  trackId String
+  track   Track  @relation(fields: [trackId], references: [id], onDelete: Cascade)
+
+  /// "queued" | "running" | "done" | "failed" - enforced in app code.
+  status     String    @default("queued")
+  /// Lower runs first: 0 an import or a person's request, 5 the backfill.
+  priority   Int       @default(0)
+  attempts   Int       @default(0)
+  /// Not picked up before this time (the retry backoff).
+  runAfter   DateTime  @default(now())
+  lastError  String?
+  createdAt  DateTime  @default(now())
+  startedAt  DateTime?
+  finishedAt DateTime?
+
+  @@index([status, runAfter, priority])
+  @@index([trackId])
+}
+
+/// What each provider has already told us, so the same lookup is never paid for twice (MusicBrainz, Last.fm, AcoustID, the LLM).
+model ProviderCache {
+  key       String   @id
+  provider  String
+  valueJson String
+  fetchedAt DateTime @default(now())
+  expiresAt DateTime
+
+  @@index([provider])
+  @@index([expiresAt])
+}
+
+/// The last time each rate-limited provider was called, so the one-request-per-second rule holds across serverless instances.
+model ProviderRateLimit {
+  provider      String   @id
+  lastRequestAt DateTime
+}
+
+/// One line per classification: which sources answered and what the track ended up as. Feeds the admin stats screen.
+model GenreLog {
+  id      String @id @default(cuid())
+  trackId String
+  track   Track  @relation(fields: [trackId], references: [id], onDelete: Cascade)
+
+  /// The status the run ended with, and the best genre and confidence.
+  status      String
+  genre       String?
+  confidence  Float?
+  /// JSON.stringify'd { source, hit, tags, ms, error? }[] - one entry per provider that ran.
+  sourcesJson String
+  usedLlm     Boolean  @default(false)
+  createdAt   DateTime @default(now())
+
+  @@index([trackId])
   @@index([createdAt])
 }
