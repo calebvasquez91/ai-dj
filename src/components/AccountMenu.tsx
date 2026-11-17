@@ -103,6 +103,15 @@ export function AccountMenu({ placement = "below" }: { placement?: "below" | "ab
               Feedback inbox
             </Link>
           )}
+          {isFeedbackOwner && (
+            <Link
+              href="/admin/genres"
+              className="flex items-center gap-2 rounded-lg px-1 py-2 text-sm font-medium text-muted hover:text-foreground"
+            >
+              <SparklesIcon size={18} />
+              Genre classification
+            </Link>
+          )}
           <button
             type="button"
             onClick={() => {
