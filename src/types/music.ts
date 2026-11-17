@@ -1,3 +1,22 @@
+/** Where a genre tag came from. `manual` is the user's (or the admin's) own edit and always wins. */
+export type GenreTagSource = "file-tags" | "musicbrainz" | "lastfm" | "audio-classifier" | "llm" | "manual";
+
+/** One genre a track has, on the fixed taxonomy (src/lib/genres.ts), with where it came from and how sure that source was. */
+export interface GenreTag {
+  /** A top-level genre label from the taxonomy, e.g. "Hip-Hop". */
+  genre: string;
+  /** A subgenre label of that genre, e.g. "Trap". */
+  subgenre?: string;
+  source: GenreTagSource;
+  /** 0-1. */
+  confidence: number;
+  /** ms since epoch. */
+  updatedAt: number;
+}
+
+/** `auto`: classified by the pipeline and trusted; `needs-review`: low confidence or sources disagree; `confirmed`: a person set it, and no re-run overwrites it. */
+export type GenreStatus = "auto" | "needs-review" | "confirmed";
+
 interface TrackBase {
   id: string;
   title: string;
@@ -12,6 +31,13 @@ interface TrackBase {
   hotCueOverrides?: Record<number, number>;
   /** User-set free-text tags, e.g. ["halloween","spooky"] — drives the Spooky Music system playlist's auto-membership. Empty/absent means untagged. */
   tags?: string[];
+  /** Every genre the track has, by source (src/lib/genreTags.ts resolves them). Absent until classified. */
+  genreTags?: GenreTag[];
+  genreStatus?: GenreStatus;
+  /** The resolved summary of genreTags, kept for display and filtering: the best genre, the subgenres on the taxonomy, and the moods the sources named. Derived, never edited directly. */
+  genre?: string;
+  subgenres?: string[];
+  moods?: string[];
 }
 
 /** A locally-uploaded file, played through the full Web Audio engine (real BPM/key/energy analysis, EQ, mashups, tempo ramps). */
