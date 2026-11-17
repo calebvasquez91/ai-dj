@@ -8,7 +8,7 @@
  */
 import { normalizeMany, type GenreNode } from "@/lib/genres";
 import type { GenreTag } from "@/types/music";
-import { cachedJsonGet, HttpError } from "@/lib/genre/http";
+import { cachedJsonGet, HttpError, isTransient } from "@/lib/genre/http";
 import { isUnknownArtist, cleanTitle, primaryArtist, sameName } from "@/lib/genre/names";
 import { EMPTY_RESULT, type Fetcher, type GenreProvider, type ProviderCacheStore, type ProviderInput, type ProviderResult, type RateLimiter } from "@/lib/genre/types";
 
@@ -42,6 +42,8 @@ export interface MusicBrainzOptions {
   /** e.g. "QueDJ/2.0 ( https://example.com )": MusicBrainz asks every client to say who it is and how to reach them. */
   userAgent: string;
   now?: () => number;
+  /** For tests: replaces the real wait between tries of a busy service. */
+  sleep?: (ms: number) => Promise<void>;
 }
 
 /** The year in a MusicBrainz date ("1971-11-05", "1971"), or null. */
@@ -72,23 +74,23 @@ function collect(into: Map<string, { node: GenreNode; confidence: number }>, ite
   }
 }
 
-export function createMusicBrainzProvider({ fetcher, cache, limiter, userAgent, now = Date.now }: MusicBrainzOptions): GenreProvider {
+export function createMusicBrainzProvider({ fetcher, cache, limiter, userAgent, now = Date.now, sleep }: MusicBrainzOptions): GenreProvider {
   const get = <T>(path: string) =>
-    cachedJsonGet<T>({ provider: "musicbrainz", url: `${MB}/${path}`, cacheKey: path, fetcher, cache, limiter, headers: { "User-Agent": userAgent } });
+    cachedJsonGet<T>({ provider: "musicbrainz", url: `${MB}/${path}`, cacheKey: path, fetcher, cache, limiter, headers: { "User-Agent": userAgent }, sleep });
 
   async function findRecordingId(input: ProviderInput): Promise<string | null> {
     if (isUnknownArtist(input.artist)) return null;
     const title = cleanTitle(input.title);
     const artist = primaryArtist(input.artist);
     const query = `recording:"${luceneEscape(title)}" AND artist:"${luceneEscape(artist)}"`;
-    const found = await get<MbSearch>(`recording?query=${encodeURIComponent(query)}&limit=5&fmt=json`);
-    for (const r of found?.recordings ?? []) {
-      if ((r.score ?? 0) < 90 || !r.title) continue;
-      if (!sameName(r.title, title)) continue;
-      const credited = (r["artist-credit"] ?? []).some((c) => sameName(c.artist?.name ?? c.name ?? "", artist));
-      if (credited) return r.id;
-    }
-    return null;
+    const found = await get<MbSearch>(`recording?query=${encodeURIComponent(query)}&limit=10&fmt=json`);
+    // Several recordings can share a title and artist (the album cut, a live take, a remaster, a compilation reissue). The
+    // earliest first release is the original, whose genres and year are the ones that belong to the song.
+    const matches = (found?.recordings ?? []).filter(
+      (r) => (r.score ?? 0) >= 90 && r.title && sameName(r.title, title) && (r["artist-credit"] ?? []).some((c) => sameName(c.artist?.name ?? c.name ?? "", artist))
+    );
+    matches.sort((a, b) => (a["first-release-date"] ?? "9999").localeCompare(b["first-release-date"] ?? "9999") || (b.score ?? 0) - (a.score ?? 0));
+    return matches[0]?.id ?? null;
   }
 
   return {
@@ -117,7 +119,7 @@ export function createMusicBrainzProvider({ fetcher, cache, limiter, userAgent, 
           .map(({ node, confidence }) => ({ genre: node.genre, ...(node.subgenre ? { subgenre: node.subgenre } : {}), source: "musicbrainz" as const, confidence, updatedAt: at }));
         return { tags, moods: [], meta: { recordingMbid: mbid, year }, note: tags.length === 0 ? "MusicBrainz has no genre for this recording" : undefined };
       } catch (err) {
-        return { ...EMPTY_RESULT, note: err instanceof HttpError ? err.message : "MusicBrainz lookup failed" };
+        return { ...EMPTY_RESULT, note: err instanceof HttpError ? err.message : "MusicBrainz lookup failed", ...(isTransient(err) ? { transient: true } : {}) };
       }
     },
   };

@@ -82,8 +82,9 @@ export function validateSpec(raw: unknown): SpecResult {
       continue;
     }
     if (!exact || node.genre !== word) notes.push(`"${word}" became ${node.subgenre ? `${node.genre} · ${node.subgenre}` : node.genre}.`);
-    addGenre(node.genre);
+    // A word that names a subgenre asks for that subgenre: its parent genre is not added, or every track of the genre would match.
     if (node.subgenre) addSub(node.subgenre);
+    else addGenre(node.genre);
   }
   for (const word of words(r.subgenres)) {
     const parent = parentOf(word);
@@ -185,8 +186,10 @@ export function parseRequestLocally(text: string): SpecResult {
       if (/^\d+s?$/.test(phrase) || /^(19|20)\d{2}$/.test(phrase)) continue;
       const node = normalize(phrase);
       if (node) {
-        if (!genres.includes(node.genre)) genres.push(node.genre);
-        if (node.subgenre && !subgenres.includes(node.subgenre)) subgenres.push(node.subgenre);
+        // A phrase that names a subgenre ("hard techno") asks for that subgenre, not its whole parent genre.
+        if (node.subgenre) {
+          if (!subgenres.includes(node.subgenre)) subgenres.push(node.subgenre);
+        } else if (!genres.includes(node.genre)) genres.push(node.genre);
         for (let k = i; k < i + size; k++) used[k] = true;
         continue;
       }

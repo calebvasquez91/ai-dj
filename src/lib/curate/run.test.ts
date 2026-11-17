@@ -165,7 +165,7 @@ describe("the model-backed spec reader", () => {
 
 describe("Discover suggestions", () => {
   const body = (names: string[]) => new Response(JSON.stringify({ similarartists: { artist: names.map((name, i) => ({ name, match: String(0.9 - i * 0.1) })) } }));
-  const base = (fetcher: (url: string) => Response) => ({ fetcher: async (u: string) => fetcher(u), cache: memoryCache(), limiter: { acquire: async () => undefined }, userAgent: "QueDJ/2.0 ( x )", apiKey: () => "K" });
+  const base = (fetcher: (url: string) => Response) => ({ fetcher: async (u: string) => fetcher(u), cache: memoryCache(), limiter: { acquire: async () => undefined }, userAgent: "QueDJ/2.0 ( x )", apiKey: () => "K", sleep: async () => undefined });
 
   it("suggests similar artists that are not already in the library, with why", async () => {
     const d = base(() => body(["Brandy", "Aaliyah", "Monica"]));

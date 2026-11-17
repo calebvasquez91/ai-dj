@@ -57,9 +57,9 @@ export function createAudioClassifierProvider({ enabled, model, now = Date.now }
   return {
     id: "audio-classifier",
     async classify(input: ProviderInput): Promise<ProviderResult> {
-      if (!enabled()) return { ...EMPTY_RESULT, note: "the audio classifier is off (CLASSIFIER_ENABLED)" };
-      if (!model) return { ...EMPTY_RESULT, note: "no audio genre model is installed" };
-      if (input.source !== "local" || !input.storageKey) return { ...EMPTY_RESULT, note: "no audio file to classify" };
+      if (!enabled()) return { ...EMPTY_RESULT, skipped: true, note: "the audio classifier is off (CLASSIFIER_ENABLED)" };
+      if (!model) return { ...EMPTY_RESULT, skipped: true, note: "no audio genre model is installed" };
+      if (input.source !== "local" || !input.storageKey) return { ...EMPTY_RESULT, skipped: true, note: "no audio file to classify" };
       try {
         const predictions = await model.predict(input);
         const at = now();

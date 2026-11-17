@@ -10,7 +10,7 @@
  */
 import { LLM_LOW_CONFIDENCE } from "@/lib/genre/constants";
 import { EARLY_STOP_CONFIDENCE, combineSourceTags } from "@/lib/genre/combine";
-import type { FingerprintResolver } from "@/lib/genre/fingerprint";
+import type { FingerprintMatch, FingerprintResolver } from "@/lib/genre/fingerprint";
 import type { GenreTag } from "@/types/music";
 import type { GenreProvider, ProviderInput, ProviderResult, SourceEvidence } from "@/lib/genre/types";
 
@@ -38,6 +38,8 @@ export interface SourceLog {
 }
 
 export interface ClassifyOutcome {
+  /** Sources that failed for a reason that may pass (busy, unreachable): the track is worth another try. */
+  transient: string[];
   /** Raw tags from the sources that ran (no manual tags). */
   tags: GenreTag[];
   moods: string[];
@@ -65,6 +67,7 @@ export async function classifyTrack(input: ProviderInput, deps: PipelineDeps, op
   const evidence: SourceEvidence[] = [];
   let stoppedEarly = false;
   let explicit: "explicit" | "clean" | null = null;
+  const transient: string[] = [];
 
   const absorb = (r: ProviderResult) => {
     if (r.meta?.album && !ctx.album) ctx.album = r.meta.album;
@@ -85,7 +88,9 @@ export async function classifyTrack(input: ProviderInput, deps: PipelineDeps, op
       // A provider is meant never to throw; if one does, it is one failed source, not a failed track.
       r = { tags: [], moods: [], note: `failed: ${err instanceof Error ? err.message : "error"}` };
     }
-    sources.push({ source: label, ran: true, tags: r.tags.length, ms: clock() - started, note: r.note });
+    sources.push({ source: label, ran: !r.skipped, tags: r.tags.length, ms: clock() - started, note: r.note });
+    if (r.transient) transient.push(label);
+    if (r.skipped) return;
     absorb(r);
     tags.push(...r.tags);
     for (const m of r.moods) if (!moods.includes(m)) moods.push(m);
@@ -104,8 +109,8 @@ export async function classifyTrack(input: ProviderInput, deps: PipelineDeps, op
     // With no usable tags in the file, a fingerprint is the way to learn which recording this is.
     if (!hadFileTags && deps.fingerprint) {
       const started = clock();
-      const match = await deps.fingerprint.resolve(ctx).catch(() => ({ recordingMbid: null as string | null, note: "failed" }));
-      sources.push({ source: "fingerprint", ran: true, tags: 0, ms: clock() - started, hit: match.recordingMbid != null, note: match.note });
+      const match = await deps.fingerprint.resolve(ctx).catch((): FingerprintMatch => ({ recordingMbid: null, note: "failed" }));
+      sources.push({ source: "fingerprint", ran: !match.skipped, tags: 0, ms: clock() - started, hit: match.recordingMbid != null, note: match.note });
       if (match.recordingMbid) ctx.recordingMbid = match.recordingMbid;
     }
     await step(deps.musicbrainz, "musicbrainz");
@@ -130,10 +135,11 @@ export async function classifyTrack(input: ProviderInput, deps: PipelineDeps, op
     const { best, conflict } = combineSourceTags(tags);
     if (conflict || best < LLM_LOW_CONFIDENCE) {
       await step(deps.llm, "llm");
-      usedLlm = true;
+      // Only a call that was actually made counts as using it (with no key it is skipped).
+      usedLlm = sources[sources.length - 1].ran;
     }
   }
-  if (!usedLlm) sources.push({ source: "llm", ran: false, tags: 0, ms: 0, note: options.confirmed ? "genres confirmed by a person" : "not needed" });
+  if (!sources.some((s) => s.source === "llm")) sources.push({ source: "llm", ran: false, tags: 0, ms: 0, note: options.confirmed ? "genres confirmed by a person" : "not needed" });
 
-  return { tags, moods: moods.slice(0, MOODS_KEPT), year: ctx.year ?? null, explicit, sources, usedLlm, stoppedEarly };
+  return { tags, moods: moods.slice(0, MOODS_KEPT), year: ctx.year ?? null, explicit, sources, usedLlm, stoppedEarly, transient };
 }

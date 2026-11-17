@@ -98,6 +98,15 @@ export async function runJobs(deps: JobRunnerDeps, options: RunOptions): Promise
       }
       const existing = await deps.store.get(job.trackId);
       const outcome = await classifyTrack(input, deps.pipeline, { confirmed: existing?.status === "confirmed" });
+      // A source that was only busy or unreachable may have been the one that knew. If that left the track unsettled, try it
+      // again later (with the usual backoff) instead of recording "needs review" for something a retry would have found;
+      // what the sources already answered is cached, so the retry is cheap. On the last try the partial answer is kept.
+      const tries = job.attempts + 1;
+      if (outcome.transient.length > 0 && tries < MAX_JOB_ATTEMPTS && resolveGenreTags(outcome.tags).autoStatus !== "auto") {
+        await deps.jobs.fail(job.id, `temporary failure: ${outcome.transient.join(", ")}`, new Date(now().getTime() + backoffMs(job.attempts)), now());
+        summary.retrying++;
+        continue;
+      }
       const stored = mergeRun(existing, outcome, now().getTime());
       await deps.store.save(job.trackId, stored);
       const resolution = resolveGenreTags(stored.tags);

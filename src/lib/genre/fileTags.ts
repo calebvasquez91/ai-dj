@@ -75,7 +75,7 @@ export function createFileTagProvider({ readTags, now = Date.now }: FileTagProvi
   return {
     id: "file-tags",
     async classify(input: ProviderInput): Promise<ProviderResult> {
-      if (input.source !== "local" || !input.storageKey) return { ...EMPTY_RESULT, note: "no audio file to read" };
+      if (input.source !== "local" || !input.storageKey) return { ...EMPTY_RESULT, skipped: true, note: "no audio file to read" };
       let raw: RawFileTags | null;
       try {
         raw = await readTags(input);

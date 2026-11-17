@@ -38,6 +38,10 @@ export interface ProviderResult {
   meta?: { album?: string | null; year?: number | null; recordingMbid?: string | null; explicit?: "explicit" | "clean" | null };
   /** Why a provider that found nothing found nothing ("no tags in the file", "not configured"), for the log. */
   note?: string;
+  /** The provider did not run at all (no key, switched off, nothing to look up): not a miss, so the log and the stats leave it out. */
+  skipped?: boolean;
+  /** The provider failed for a reason that may pass (the service was busy or unreachable): worth trying the track again later. */
+  transient?: boolean;
 }
 
 export const EMPTY_RESULT: ProviderResult = { tags: [], moods: [] };

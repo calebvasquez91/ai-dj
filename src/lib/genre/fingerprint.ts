@@ -40,6 +40,8 @@ export interface FingerprintMatch {
   recordingMbid: string | null;
   score?: number;
   note?: string;
+  /** It did not run (no key, no tool, no file): not a miss. */
+  skipped?: boolean;
 }
 
 export interface FingerprintResolver {
@@ -49,10 +51,10 @@ export interface FingerprintResolver {
 export function createFingerprintResolver({ fingerprinter, fetcher, cache, limiter, userAgent, apiKey }: FingerprintResolverOptions): FingerprintResolver {
   return {
     async resolve(input) {
-      if (input.source !== "local" || !input.storageKey) return { recordingMbid: null, note: "no audio file to fingerprint" };
+      if (input.source !== "local" || !input.storageKey) return { recordingMbid: null, skipped: true, note: "no audio file to fingerprint" };
       const key = apiKey();
-      if (!key) return { recordingMbid: null, note: "ACOUSTID_API_KEY is not set" };
-      if (!fingerprinter) return { recordingMbid: null, note: "no fingerprinting tool (FPCALC_PATH is not set)" };
+      if (!key) return { recordingMbid: null, skipped: true, note: "ACOUSTID_API_KEY is not set" };
+      if (!fingerprinter) return { recordingMbid: null, skipped: true, note: "no fingerprinting tool (FPCALC_PATH is not set)" };
       try {
         const fp = await fingerprinter(input);
         if (!fp) return { recordingMbid: null, note: "the file could not be fingerprinted" };

@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { cleanTitle, isUnknownArtist, primaryArtist, sameName } from "@/lib/genre/names";
 import { createRateLimiter, memoryCache, memoryRateStore, PROVIDER_MIN_INTERVAL_MS, RATE_WAIT_LIMIT_MS } from "@/lib/genre/services";
-import { cachedJsonGet, HttpError } from "@/lib/genre/http";
+import { RETRY_DELAYS_MS, cachedJsonGet, HttpError, isTransient } from "@/lib/genre/http";
 import { FILE_TAG_CLEAN_CONFIDENCE, createFileTagProvider, genreTagsFromFileTags } from "@/lib/genre/fileTags";
 import { artistConfidence, createMusicBrainzProvider, recordingConfidence } from "@/lib/genre/musicBrainz";
 import { createLastFmProvider, trackTagConfidence } from "@/lib/genre/lastFm";
@@ -112,7 +112,8 @@ describe("the rate limiter", () => {
 });
 
 describe("cachedJsonGet", () => {
-  const base = { provider: "p", url: "https://x.test/a?api_key=SECRET", cacheKey: "a", limiter: noLimit };
+  const waits: number[] = [];
+  const base = { provider: "p", url: "https://x.test/a?api_key=SECRET", cacheKey: "a", limiter: noLimit, sleep: async (ms: number) => void waits.push(ms) };
 
   it("asks once and answers the repeat from the cache, without taking a rate-limit slot", async () => {
     const { fetcher, calls } = router(() => json({ ok: 1 }));
@@ -138,10 +139,57 @@ describe("cachedJsonGet", () => {
     const opts = { ...base, fetcher, cache };
     await expect(cachedJsonGet(opts)).rejects.toBeInstanceOf(HttpError);
     await expect(cachedJsonGet(opts)).rejects.toThrow("p answered 503");
-    expect(calls).toHaveLength(2);
+    // Each call tries the busy service three times (the first, then after each wait) before giving up.
+    expect(calls).toHaveLength(2 * (RETRY_DELAYS_MS.length + 1));
     expect(cache.size()).toBe(0);
     const thrown = await cachedJsonGet({ ...opts, fetcher: async () => Promise.reject(new TypeError("boom SECRET")) }).catch((e: Error) => e.message);
     expect(thrown).not.toContain("SECRET");
+  });
+
+  it("tries a busy or failing service again after a wait, and keeps the answer once it comes", async () => {
+    waits.length = 0;
+    let n = 0;
+    const { fetcher, calls } = router(() => (++n < 3 ? json({ error: "busy" }, 503) : json({ ok: 1 })));
+    const cache = memoryCache();
+    expect(await cachedJsonGet({ ...base, fetcher, cache })).toEqual({ ok: 1 });
+    expect(calls).toHaveLength(3);
+    expect(waits).toEqual(RETRY_DELAYS_MS);
+    expect(await cachedJsonGet({ ...base, fetcher, cache })).toEqual({ ok: 1 });
+    expect(calls).toHaveLength(3);
+  });
+
+  it("waits as long as the service asks (within a limit), and takes a rate-limit slot for every try", async () => {
+    waits.length = 0;
+    let n = 0;
+    const acquire = vi.fn(async () => undefined);
+    const fetcher: Fetcher = async () => (++n < 2 ? new Response("busy", { status: 429, headers: { "retry-after": "3" } }) : json({ ok: 1 }));
+    await cachedJsonGet({ ...base, fetcher, cache: memoryCache(), limiter: { acquire } });
+    expect(waits).toEqual([3000]);
+    expect(acquire).toHaveBeenCalledTimes(2);
+    waits.length = 0;
+    n = -10;
+    const slow: Fetcher = async () => new Response("busy", { status: 503, headers: { "retry-after": "600" } });
+    await cachedJsonGet({ ...base, fetcher: slow, cache: memoryCache() }).catch(() => undefined);
+    expect(Math.max(...waits)).toBeLessThanOrEqual(8000);
+  });
+
+  it("does not retry a refusal that will not change (a 4xx), and tries a dropped connection again", async () => {
+    waits.length = 0;
+    const { fetcher, calls } = router(() => json({}, 400));
+    await expect(cachedJsonGet({ ...base, fetcher, cache: memoryCache() })).rejects.toThrow("p answered 400");
+    expect(calls).toHaveLength(1);
+    let n = 0;
+    const flaky: Fetcher = async () => (++n < 2 ? Promise.reject(new TypeError("reset")) : json({ ok: 1 }));
+    expect(await cachedJsonGet({ ...base, fetcher: flaky, cache: memoryCache() })).toEqual({ ok: 1 });
+  });
+
+  it("calls a failure that may pass transient, and a refusal not", () => {
+    expect(isTransient(new HttpError(503, "x"))).toBe(true);
+    expect(isTransient(new HttpError(429, "x"))).toBe(true);
+    expect(isTransient(new HttpError(0, "x"))).toBe(true);
+    expect(isTransient(new HttpError(404, "x"))).toBe(false);
+    expect(isTransient(new HttpError(400, "x"))).toBe(false);
+    expect(isTransient(new Error("x"))).toBe(false);
   });
 
   it("expires a cached answer", async () => {
@@ -213,7 +261,7 @@ describe("MusicBrainzProvider", () => {
   };
   const make = (h = handle, extra: { cache?: ReturnType<typeof memoryCache>; limiter?: { acquire: () => Promise<void> } } = {}) => {
     const r = router(h);
-    const provider = createMusicBrainzProvider({ fetcher: r.fetcher, cache: extra.cache ?? memoryCache(), limiter: extra.limiter ?? noLimit, userAgent: UA, now: () => 9 });
+    const provider = createMusicBrainzProvider({ fetcher: r.fetcher, cache: extra.cache ?? memoryCache(), limiter: extra.limiter ?? noLimit, userAgent: UA, now: () => 9, sleep: async () => undefined });
     return { ...r, provider };
   };
 
@@ -288,7 +336,7 @@ describe("LastFmProvider", () => {
   const handle = (url: string) => (url.includes("track.gettoptags") ? json(trackBody) : url.includes("artist.gettoptags") ? json(artistBody) : undefined);
   const make = (h = handle, key: string | null = "K3Y", cache = memoryCache()) => {
     const r = router(h);
-    return { ...r, cache, provider: createLastFmProvider({ fetcher: r.fetcher, cache, limiter: noLimit, userAgent: UA, apiKey: () => key ?? undefined, now: () => 3 }) };
+    return { ...r, cache, provider: createLastFmProvider({ fetcher: r.fetcher, cache, limiter: noLimit, userAgent: UA, apiKey: () => key ?? undefined, now: () => 3, sleep: async () => undefined }) };
   };
 
   it("sorts tags into genres, moods and noise", async () => {
@@ -531,5 +579,42 @@ describe("content advisory and release year", () => {
     const r = router((url) => (url.includes("/recording/rec1") ? json({ id: "rec1", "first-release-date": "1972-04-01", genres: [{ name: "rock", count: 2 }] }) : undefined));
     const p = createMusicBrainzProvider({ fetcher: r.fetcher, cache: memoryCache(), limiter: noLimit, userAgent: UA });
     expect((await p.classify({ ...input, recordingMbid: "rec1" })).meta).toMatchObject({ recordingMbid: "rec1", year: 1972 });
+  });
+});
+
+describe("MusicBrainz picks the original recording", () => {
+  const credit = [{ artist: { id: "a1", name: "Elton John" } }];
+  it("of several recordings with the same title and artist, uses the one first released earliest", async () => {
+    const search = {
+      recordings: [
+        { id: "live", title: "Tiny Dancer", score: 100, "first-release-date": "2003-05-01", "artist-credit": credit },
+        { id: "original", title: "Tiny Dancer", score: 100, "first-release-date": "1971-11-05", "artist-credit": credit },
+        { id: "undated", title: "Tiny Dancer", score: 100, "artist-credit": credit },
+      ],
+    };
+    const r = router((url) => (url.includes("/recording?query") ? json(search) : url.includes("/recording/original") ? json({ id: "original", "first-release-date": "1971-11-05", genres: [{ name: "rock", count: 3 }] }) : url.includes("/artist/") ? json({}) : undefined));
+    const p = createMusicBrainzProvider({ fetcher: r.fetcher, cache: memoryCache(), limiter: noLimit, userAgent: UA, sleep: async () => undefined });
+    const out = await p.classify(input);
+    expect(out.meta).toMatchObject({ recordingMbid: "original", year: 1971 });
+  });
+  it("marks a busy service as a failure that may pass, and a plain miss as not", async () => {
+    const busy = createMusicBrainzProvider({ fetcher: async () => json({ error: "busy" }, 503), cache: memoryCache(), limiter: noLimit, userAgent: UA, sleep: async () => undefined });
+    expect(await busy.classify(input)).toMatchObject({ transient: true, tags: [] });
+    const miss = createMusicBrainzProvider({ fetcher: async () => json({ recordings: [] }), cache: memoryCache(), limiter: noLimit, userAgent: UA, sleep: async () => undefined });
+    const r = await miss.classify(input);
+    expect(r.transient).toBeUndefined();
+    expect(r.note).toMatch(/no matching recording/);
+  });
+  it("Last.fm and the LLM report not being set up as skipped, and a busy service as transient", async () => {
+    const lf = createLastFmProvider({ fetcher: async () => json({}, 503), cache: memoryCache(), limiter: noLimit, userAgent: UA, apiKey: () => undefined });
+    expect(await lf.classify(input)).toMatchObject({ skipped: true });
+    const lfBusy = createLastFmProvider({ fetcher: async () => json({}, 503), cache: memoryCache(), limiter: noLimit, userAgent: UA, apiKey: () => "K", sleep: async () => undefined });
+    expect(await lfBusy.classify(input)).toMatchObject({ transient: true });
+    const llm = createLlmReconciler({ fetcher: async () => json({}), cache: memoryCache(), apiKey: () => undefined });
+    expect(await llm.classify(input)).toMatchObject({ skipped: true });
+    const llmBusy = createLlmReconciler({ fetcher: async () => json({}, 529), cache: memoryCache(), apiKey: () => "K" });
+    expect(await llmBusy.classify(input)).toMatchObject({ transient: true });
+    const off = createAudioClassifierProvider({ enabled: () => false, model: null });
+    expect(await off.classify(input)).toMatchObject({ skipped: true });
   });
 });

@@ -469,3 +469,67 @@ describe("year and content advisory", () => {
     expect(clearManualGenres(applyManualGenres(second, [{ genre: "Jazz" }], 3)!, 4)).toMatchObject({ year: 1994, explicit: "explicit" });
   });
 });
+
+describe("sources that did not run, and sources that failed for now", () => {
+  it("a skipped source is logged as not run (not a miss), and the LLM counts as used only when it was really asked", async () => {
+    const out = await classifyTrack(input, deps({ lastfm: fake("lastfm", { skipped: true, note: "LASTFM_API_KEY is not set" }), llm: fake("llm", { skipped: true, note: "ANTHROPIC_API_KEY is not set" }) }));
+    expect(out.sources.find((s) => s.source === "lastfm")).toMatchObject({ ran: false, note: "LASTFM_API_KEY is not set" });
+    expect(out.sources.find((s) => s.source === "llm")).toMatchObject({ ran: false });
+    expect(out.usedLlm).toBe(false);
+    expect(out.transient).toEqual([]);
+  });
+  it("lists the sources that failed for a reason that may pass", async () => {
+    const out = await classifyTrack(input, deps({ musicbrainz: fake("musicbrainz", { transient: true, note: "musicbrainz answered 503" }) }));
+    expect(out.transient).toEqual(["musicbrainz"]);
+  });
+  it("a skipped source adds nothing: its tags and facts are not used", async () => {
+    const out = await classifyTrack(input, deps({ musicbrainz: fake("musicbrainz", { skipped: true, tags: [tag("musicbrainz", "Rock", 0.9)], meta: { year: 1970 } }) }));
+    expect(out.tags).toEqual([]);
+    expect(out.year).toBeNull();
+  });
+});
+
+describe("a track whose answer was cut short by a busy service", () => {
+  const busy = (over: Partial<PipelineDeps> = {}) => deps({ musicbrainz: fake("musicbrainz", { transient: true, note: "busy" }), ...over });
+  const setup = (pipeline: PipelineDeps, clock?: () => Date) => {
+    const jobs = memoryJobStore();
+    const store = memoryGenreStore();
+    const log = memoryLog();
+    const d: JobRunnerDeps = { jobs, store, pipeline, loadTrack: async (trackId) => ({ ...input, trackId }), writeLog: log.write, now: clock };
+    return { d, jobs, store, log };
+  };
+
+  it("is tried again later, without recording a premature 'needs review'", async () => {
+    const { d, jobs, store, log } = setup(busy());
+    await jobs.enqueue(["a"], 0);
+    const r = await runJobs(d, { maxJobs: 5, budgetMs: 60_000 });
+    expect(r).toMatchObject({ processed: 0, retrying: 1 });
+    expect(store.all().size).toBe(0);
+    expect(log.entries).toEqual([]);
+    expect(jobs.jobs[0]).toMatchObject({ status: "queued", attempts: 1 });
+    expect(jobs.jobs[0].lastError).toMatch(/temporary failure: musicbrainz/);
+  });
+
+  it("is settled at once when the other sources already agree, even though one was busy", async () => {
+    const pipeline = busy({ fileTags: fake("file-tags", { tags: [tag("file-tags", "Rock", 0.6)] }), lastfm: fake("lastfm", { tags: [tag("lastfm", "Rock", 0.75)] }) });
+    const { d, jobs, store } = setup(pipeline);
+    await jobs.enqueue(["a"], 0);
+    const r = await runJobs(d, { maxJobs: 5, budgetMs: 60_000 });
+    expect(r).toMatchObject({ processed: 1, retrying: 0 });
+    expect(store.all().get("a")).toMatchObject({ status: "auto", genre: "Rock" });
+  });
+
+  it("keeps the partial answer on the last try rather than retrying forever", async () => {
+    let now = new Date("2026-11-17T12:00:00Z").getTime();
+    const { d, jobs, store } = setup(busy(), () => new Date(now));
+    await jobs.enqueue(["a"], 0);
+    for (let attempt = 0; attempt < MAX_JOB_ATTEMPTS - 1; attempt++) {
+      expect((await runJobs(d, { maxJobs: 5, budgetMs: 60_000 })).retrying).toBe(1);
+      now += backoffMs(attempt) + 1;
+    }
+    const last = await runJobs(d, { maxJobs: 5, budgetMs: 60_000 });
+    expect(last).toMatchObject({ processed: 1, retrying: 0 });
+    expect(store.all().get("a")?.status).toBe("needs-review");
+    expect(jobs.jobs[0].status).toBe("done");
+  });
+});

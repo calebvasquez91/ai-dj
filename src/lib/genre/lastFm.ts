@@ -10,7 +10,7 @@
 import { normalize, type GenreNode } from "@/lib/genres";
 import { normalizeMood } from "@/lib/moodTags";
 import type { GenreTag } from "@/types/music";
-import { cachedJsonGet, HttpError } from "@/lib/genre/http";
+import { cachedJsonGet, HttpError, isTransient } from "@/lib/genre/http";
 import { cleanTitle, isUnknownArtist, primaryArtist } from "@/lib/genre/names";
 import { aliasKey } from "@/lib/genres";
 import { EMPTY_RESULT, type Fetcher, type GenreProvider, type ProviderCacheStore, type ProviderInput, type ProviderResult, type RateLimiter } from "@/lib/genre/types";
@@ -36,6 +36,8 @@ export interface LastFmOptions {
   /** Read at call time so a key added to the environment is picked up without a restart. */
   apiKey: () => string | undefined;
   now?: () => number;
+  /** For tests: replaces the real wait between tries of a busy service. */
+  sleep?: (ms: number) => Promise<void>;
 }
 
 /** The most moods kept for a track, and the weight a mood tag needs to count. */
@@ -54,7 +56,7 @@ function tagList(body: LfmTopTags | null): { name: string; weight: number }[] {
     .filter((t) => t.name !== "");
 }
 
-export function createLastFmProvider({ fetcher, cache, limiter, userAgent, apiKey, now = Date.now }: LastFmOptions): GenreProvider {
+export function createLastFmProvider({ fetcher, cache, limiter, userAgent, apiKey, now = Date.now, sleep }: LastFmOptions): GenreProvider {
   async function topTags(method: "track.gettoptags" | "artist.gettoptags", artist: string, track: string | null) {
     const key = apiKey();
     const params = new URLSearchParams({ method, artist, autocorrect: "1", format: "json" });
@@ -62,14 +64,14 @@ export function createLastFmProvider({ fetcher, cache, limiter, userAgent, apiKe
     // The cache key is the lookup without the API key, so the key never reaches the cache.
     const cacheKey = `${method}:${aliasKey(artist)}:${track != null ? aliasKey(track) : ""}`;
     params.set("api_key", key ?? "");
-    return cachedJsonGet<LfmTopTags>({ provider: "lastfm", url: `${LASTFM}?${params.toString()}`, cacheKey, fetcher, cache, limiter, headers: { "User-Agent": userAgent } });
+    return cachedJsonGet<LfmTopTags>({ provider: "lastfm", url: `${LASTFM}?${params.toString()}`, cacheKey, fetcher, cache, limiter, headers: { "User-Agent": userAgent }, sleep });
   }
 
   return {
     id: "lastfm",
     async classify(input: ProviderInput): Promise<ProviderResult> {
-      if (!apiKey()) return { ...EMPTY_RESULT, note: "LASTFM_API_KEY is not set" };
-      if (isUnknownArtist(input.artist)) return { ...EMPTY_RESULT, note: "no artist to look up" };
+      if (!apiKey()) return { ...EMPTY_RESULT, skipped: true, note: "LASTFM_API_KEY is not set" };
+      if (isUnknownArtist(input.artist)) return { ...EMPTY_RESULT, skipped: true, note: "no artist to look up" };
       const artist = primaryArtist(input.artist);
       const title = cleanTitle(input.title);
       try {
@@ -100,7 +102,7 @@ export function createLastFmProvider({ fetcher, cache, limiter, userAgent, apiKe
         const moodList = [...moods.entries()].sort((a, b) => b[1] - a[1]).slice(0, MAX_MOODS).map(([m]) => m);
         return { tags, moods: moodList, note: tags.length === 0 && moodList.length === 0 ? "Last.fm has no usable tags for this track" : undefined };
       } catch (err) {
-        return { ...EMPTY_RESULT, note: err instanceof HttpError ? err.message : "Last.fm lookup failed" };
+        return { ...EMPTY_RESULT, note: err instanceof HttpError ? err.message : "Last.fm lookup failed", ...(isTransient(err) ? { transient: true } : {}) };
       }
     },
   };

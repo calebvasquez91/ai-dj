@@ -28,6 +28,7 @@ export interface DiscoverDeps {
   limiter: RateLimiter;
   userAgent: string;
   apiKey: () => string | undefined;
+  sleep?: (ms: number) => Promise<void>;
 }
 
 export async function similarArtists(artist: string, deps: DiscoverDeps): Promise<{ name: string; match: number }[]> {
@@ -43,6 +44,7 @@ export async function similarArtists(artist: string, deps: DiscoverDeps): Promis
       cache: deps.cache,
       limiter: deps.limiter,
       headers: { "User-Agent": deps.userAgent },
+      sleep: deps.sleep,
     });
     if (!body || body.error) return [];
     const raw = body.similarartists?.artist;

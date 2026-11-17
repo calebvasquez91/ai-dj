@@ -108,7 +108,7 @@ export function createLlmReconciler({ fetcher, cache, apiKey, model = () => proc
     id: "llm",
     async classify(input: ProviderInput): Promise<ProviderResult> {
       const key = apiKey();
-      if (!key) return { ...EMPTY_RESULT, note: "ANTHROPIC_API_KEY is not set" };
+      if (!key) return { ...EMPTY_RESULT, skipped: true, note: "ANTHROPIC_API_KEY is not set" };
       const shown: LlmReconcileInput = {
         title: input.title,
         artist: input.artist,
@@ -141,7 +141,7 @@ export function createLlmReconciler({ fetcher, cache, apiKey, model = () => proc
             }),
             signal: AbortSignal.timeout(20_000),
           });
-          if (!res.ok) return { ...EMPTY_RESULT, note: `the model answered ${res.status}` };
+          if (!res.ok) return { ...EMPTY_RESULT, note: `the model answered ${res.status}`, ...(res.status === 429 || res.status >= 500 ? { transient: true } : {}) };
           const data = (await res.json()) as { content?: { type: string; name?: string; input?: unknown }[] };
           const block = data.content?.find((c) => c.type === "tool_use" && c.name === TOOL_NAME);
           if (!block) return { ...EMPTY_RESULT, note: "the model gave no answer" };
@@ -151,7 +151,7 @@ export function createLlmReconciler({ fetcher, cache, apiKey, model = () => proc
         const { tags, moods, reason } = validateReconcile(answer, now());
         return { tags, moods, note: tags.length === 0 ? `the model did not guess${reason ? `: ${reason}` : ""}` : reason || undefined };
       } catch (err) {
-        return { ...EMPTY_RESULT, note: `the model call failed (${err instanceof Error ? err.name : "error"})` };
+        return { ...EMPTY_RESULT, note: `the model call failed (${err instanceof Error ? err.name : "error"})`, transient: true };
       }
     },
   };

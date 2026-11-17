@@ -30,7 +30,7 @@ describe("reading a request locally", () => {
   it("reads a late-night house request for a dinner party", () => {
     const { spec: s } = parseRequestLocally("late-night chill house for a dinner party");
     expect(s.subgenres).toContain("House");
-    expect(s.genres).toContain("Electronic");
+    expect(s.genres).toEqual([]);
     expect(s.moods).toEqual(expect.arrayContaining(["chill", "late-night"]));
     expect(s.profile).toBe("dinner");
   });
@@ -51,6 +51,9 @@ describe("reading a request locally", () => {
     expect(parseRequestLocally("drum and bass").spec.subgenres).toContain("Drum & Bass");
     expect(parseRequestLocally("neo soul").spec.subgenres).toContain("Neo-Soul");
     expect(parseRequestLocally("some r&b").spec.genres).toEqual(["R&B"]);
+    // A subgenre asks for that subgenre alone, not every track of its parent genre.
+    expect(parseRequestLocally("hard techno").spec).toMatchObject({ genres: [], subgenres: ["Techno"] });
+    expect(parseRequestLocally("hip hop trap").spec).toMatchObject({ genres: ["Hip-Hop"], subgenres: ["Trap"] });
   });
   it("asks one clarifying question when the request names nothing usable", () => {
     for (const text of ["", "something good", "play me a thing", "the best songs ever"]) {
@@ -69,7 +72,7 @@ describe("validateSpec", () => {
   });
   it("maps an unknown word to the nearest taxonomy node by alias, and says so", () => {
     const r = validateSpec({ genres: ["Rap", "hip hop", "drum and bass"], moods: ["mellow"] });
-    expect(r.spec.genres).toEqual(["Hip-Hop", "Electronic"]);
+    expect(r.spec.genres).toEqual(["Hip-Hop"]);
     expect(r.spec.subgenres).toEqual(["Drum & Bass"]);
     expect(r.spec.moods).toEqual(["chill"]);
     expect(r.notes.join(" ")).toMatch(/"Rap" became Hip-Hop/);
