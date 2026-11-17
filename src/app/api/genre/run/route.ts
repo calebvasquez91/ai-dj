@@ -7,7 +7,8 @@ import { NextResponse } from "next/server";
 import { auth } from "@/auth";
 import { apiHandler, unauthorized } from "@/lib/apiRoute";
 import { runJobs } from "@/lib/genre/jobs";
-import { genreTablesReady } from "@/lib/genre/prismaStore";
+import { loadGenreFields } from "@/lib/genre/api";
+import { genreTablesReady, pruneGenreHousekeeping } from "@/lib/genre/prismaStore";
 import { buildRunnerDeps } from "@/lib/genre/server";
 
 export const maxDuration = 60;
@@ -26,13 +27,16 @@ async function drain(request: Request, schedulerOnly = false) {
   if (schedulerOnly && !scheduler) return unauthorized();
   const session = scheduler ? null : await auth();
   if (!scheduler && !session) return unauthorized();
-  if (!(await genreTablesReady())) return NextResponse.json({ ready: false, processed: 0, failed: 0, retrying: 0, more: false });
+  if (!(await genreTablesReady())) return NextResponse.json({ ready: false, processed: 0, failed: 0, retrying: 0, more: false, processedIds: [], fields: {} });
   const summary = await runJobs(buildRunnerDeps(), {
     maxJobs: scheduler ? 8 : 3,
     budgetMs: 40_000,
     userId: scheduler ? undefined : session!.user.id,
   });
-  return NextResponse.json({ ready: true, ...summary });
+  await pruneGenreHousekeeping();
+  // The app reads back just the tracks this run changed (not its whole library) to show their new genres.
+  const fields = scheduler ? {} : Object.fromEntries(await loadGenreFields(summary.processedIds));
+  return NextResponse.json({ ready: true, ...summary, fields });
 }
 
 export const POST = apiHandler((request: Request) => drain(request));

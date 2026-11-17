@@ -9,6 +9,7 @@
  * not requirements. When there are too few candidates the answer is a shortfall with what relaxing each condition would
  * add: the playlist is never padded with tracks of the wrong genre.
  */
+import { GENRES } from "@/lib/genres";
 import { genresOfTrack } from "@/lib/genreLibrary";
 import { bestTempoRatio } from "@/lib/tempoRatio";
 import { eligibleTracks, explicitStatusOf, type EligibleResult } from "@/lib/curate/eligibility";
@@ -35,9 +36,9 @@ export interface ScoredTrack {
   yearUnknown: boolean;
 }
 
-/** Whether the request is for Halloween music (so Halloween tracks may be used). */
+/** Whether the request is for Halloween music (so Halloween tracks may be used). A request for "holiday" music in general is not: Halloween stays in Spooky Music. */
 export function wantsHalloween(spec: CurationSpec): boolean {
-  return spec.subgenres.includes("Halloween") || spec.genres.includes("Holiday");
+  return spec.subgenres.includes("Halloween");
 }
 
 export function profileOf(spec: CurationSpec): EventProfile | null {
@@ -53,24 +54,32 @@ function bpmFit(bpm: number, range: { min: number; max: number }): number {
   return off <= 0.08 ? 0.5 : off <= 0.2 ? 0.2 : 0;
 }
 
+/**
+ * How well a track's genres fit what the spec names, 0 (not at all) to 1. A genre named on its own takes in the whole genre; a
+ * subgenre named narrows its parent: "hip hop" with "trap" wants trap, not every Hip-Hop track (a model's reading of "trap
+ * bangers" names both levels). A parent genre with none of its subgenres named stays wide. Search uses the same rule.
+ */
+export function genreFit(track: Pick<Track, "genreTags" | "genre" | "subgenres">, spec: CurationSpec): number {
+  let best = 0;
+  for (const g of genresOfTrack(track)) {
+    const subMatches = g.subgenres.filter((s) => spec.subgenres.includes(s.subgenre));
+    const narrowed = GENRES.find((x) => x.label === g.genre)?.subgenres.some((s) => spec.subgenres.includes(s.label)) ?? false;
+    const wanted = subMatches.length > 0 || (spec.genres.includes(g.genre) && !narrowed);
+    if (!wanted) continue;
+    best = Math.max(best, Math.min(1, g.confidence + (subMatches.length > 0 ? 0.1 : 0)));
+  }
+  return best;
+}
+
 /** The score of one track for a spec, or null when it fails something the request insists on. */
 export function scoreTrack(track: Track, bpm: number | null, spec: CurationSpec): { score: number; yearUnknown: boolean } | null {
   const profile = profileOf(spec);
-  const genres = genresOfTrack(track);
   const parts: { weight: number; value: number }[] = [];
   let yearUnknown = false;
 
   const wantsGenre = spec.genres.length > 0 || spec.subgenres.length > 0;
   if (wantsGenre) {
-    let best = 0;
-    for (const g of genres) {
-      const genreWanted = spec.genres.includes(g.genre);
-      const subMatches = g.subgenres.filter((s) => spec.subgenres.includes(s.subgenre));
-      if (spec.genres.length > 0 && !genreWanted && subMatches.length === 0) continue;
-      if (spec.genres.length === 0 && subMatches.length === 0) continue;
-      const value = Math.min(1, g.confidence + (subMatches.length > 0 ? 0.1 : 0));
-      best = Math.max(best, value);
-    }
+    const best = genreFit(track, spec);
     if (best === 0) return null;
     parts.push({ weight: WEIGHTS.genre, value: best });
   }

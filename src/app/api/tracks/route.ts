@@ -5,7 +5,7 @@ import { getStorageBackend, saveLocalFile, deleteLocalFile, deleteBlobFile } fro
 import { toTrackApiResponse } from "@/lib/trackApi";
 import { apiHandler, jsonError, unauthorized } from "@/lib/apiRoute";
 import { cleanText, isAcceptableStorageUrl, isValidDuration, normalizeAudioMime } from "@/lib/apiValidation";
-import { loadGenreFields, queueNewTracks } from "@/lib/genre/api";
+import { loadGenreFieldsForUser, queueNewTracks } from "@/lib/genre/api";
 
 async function handleGET() {
   const session = await auth();
@@ -16,7 +16,7 @@ async function handleGET() {
     orderBy: { createdAt: "asc" },
   });
   // Each track's genres, if it has been classified (empty until the genre tables exist).
-  const genres = await loadGenreFields(tracks.map((t) => t.id));
+  const genres = await loadGenreFieldsForUser(session.user.id);
   return NextResponse.json(tracks.map((t) => ({ ...toTrackApiResponse(t), ...(genres.get(t.id) ?? {}) })));
 }
 

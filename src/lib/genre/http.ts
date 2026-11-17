@@ -34,6 +34,8 @@ export interface JsonGetOptions {
   limiter: RateLimiter;
   headers?: Record<string, string>;
   timeoutMs?: number;
+  /** Looks at an answer that came back with a success status and says whether it is really an error (Last.fm sends its rate limit and outages as HTTP 200 with an error code). A `notFound` one is kept as "nothing here"; any other is thrown as an HttpError with that status and is never cached. */
+  errorBody?: (body: unknown) => { status: number; notFound?: boolean } | null;
   /** POST a body instead (AcoustID wants the long fingerprint in the body, not the URL). */
   body?: string;
   /** For tests: replaces the real wait between tries. */
@@ -80,6 +82,14 @@ export async function cachedJsonGet<T>(opts: JsonGetOptions): Promise<T | null> 
     body = await res.json();
   } catch {
     throw new HttpError(res.status, `${opts.provider} sent something that was not JSON`);
+  }
+  const bad = opts.errorBody?.(body);
+  if (bad) {
+    if (bad.notFound) {
+      await opts.cache.set(key, opts.provider, NOT_FOUND, NEGATIVE_CACHE_TTL_MS);
+      return null;
+    }
+    throw new HttpError(bad.status, `${opts.provider} reported an error (${bad.status})`);
   }
   await opts.cache.set(key, opts.provider, body, CACHE_TTL_MS);
   return body as T;

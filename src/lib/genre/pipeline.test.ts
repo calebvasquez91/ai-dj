@@ -345,7 +345,8 @@ describe("the job runner", () => {
     expect(log.entries.map((e) => e.trackId)).toEqual(["a", "b"]);
     expect(log.entries[0]).toMatchObject({ status: "auto", genre: "Rock", usedLlm: false });
     expect(log.entries[0].confidence).toBeGreaterThan(0.7);
-    expect(jobs.jobs.every((j) => j.status === "done")).toBe(true);
+    // A finished job leaves the queue.
+    expect(jobs.jobs).toHaveLength(0);
   });
 
   it("runs the requests before the backfill, and does not queue a track twice", async () => {
@@ -396,7 +397,7 @@ describe("the job runner", () => {
     const { d, jobs } = runnerDeps({ loadTrack: async () => null });
     await jobs.enqueue(["gone"], 0);
     expect(await runJobs(d, { maxJobs: 5, budgetMs: 60_000 })).toMatchObject({ processed: 0, failed: 0, retrying: 0 });
-    expect(jobs.jobs[0].status).toBe("done");
+    expect(jobs.jobs).toHaveLength(0);
   });
 
   it("puts back, uncounted, the jobs it had no time for", async () => {
@@ -442,6 +443,38 @@ describe("the job runner", () => {
     await runJobs(d, { maxJobs: 5, budgetMs: 60_000 });
     expect(calls).toEqual([]);
     expect(store.all().get("a")).toMatchObject({ status: "confirmed", genre: "Jazz" });
+  });
+
+  it("keeps genres a person sets while the sources are still being asked", async () => {
+    const { d, jobs, store } = runnerDeps();
+    // MusicBrainz is slow: while it answers, the person picks Jazz for the track.
+    const slow: GenreProvider = {
+      id: "musicbrainz",
+      classify: async () => {
+        await store.save("a", applyManualGenres(null, [{ genre: "Jazz" }], 5)!);
+        return { tags: [tag("musicbrainz", "Rock", 0.8)], moods: [] };
+      },
+    };
+    d.pipeline = deps({ musicbrainz: slow, lastfm: fake("lastfm", { tags: [tag("lastfm", "Rock", 0.8)] }) });
+    await jobs.enqueue(["a"], 0);
+    const r = await runJobs(d, { maxJobs: 5, budgetMs: 60_000 });
+    expect(r.processedIds).toEqual(["a"]);
+    const saved = store.all().get("a")!;
+    expect(saved).toMatchObject({ status: "confirmed", genre: "Jazz" });
+    expect(saved.tags.some((t) => t.source === "manual" && t.genre === "Jazz")).toBe(true);
+    // The sources' own answer is kept next to it, for the review screen.
+    expect(saved.tags.some((t) => t.source === "musicbrainz" && t.genre === "Rock")).toBe(true);
+  });
+
+  it("clears a job that gave up when the track is asked for again", async () => {
+    const jobs = memoryJobStore();
+    await jobs.enqueue(["a"], 0);
+    const [claimed] = await jobs.claim(1, new Date());
+    await jobs.fail(claimed.id, "boom", null, new Date());
+    expect((await jobs.stateOf(["a"])).get("a")).toBe("failed");
+    expect(await jobs.enqueue(["a"], 0)).toBe(1);
+    expect(jobs.jobs).toHaveLength(1);
+    expect((await jobs.stateOf(["a"])).get("a")).toBe("queued");
   });
 
   it("reports which tracks are queued, running or failed, and nothing for a finished one", async () => {
@@ -530,6 +563,6 @@ describe("a track whose answer was cut short by a busy service", () => {
     const last = await runJobs(d, { maxJobs: 5, budgetMs: 60_000 });
     expect(last).toMatchObject({ processed: 1, retrying: 0 });
     expect(store.all().get("a")?.status).toBe("needs-review");
-    expect(jobs.jobs[0].status).toBe("done");
+    expect(jobs.jobs).toHaveLength(0);
   });
 });

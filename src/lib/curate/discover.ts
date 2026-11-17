@@ -6,6 +6,7 @@
  */
 import { aliasKey } from "@/lib/genres";
 import { cachedJsonGet } from "@/lib/genre/http";
+import { lastFmErrorBody } from "@/lib/genre/lastFm";
 import type { Fetcher, ProviderCacheStore, RateLimiter } from "@/lib/genre/types";
 
 const LASTFM = "https://ws.audioscrobbler.com/2.0/";
@@ -45,6 +46,7 @@ export async function similarArtists(artist: string, deps: DiscoverDeps): Promis
       limiter: deps.limiter,
       headers: { "User-Agent": deps.userAgent },
       sleep: deps.sleep,
+      errorBody: lastFmErrorBody,
     });
     if (!body || body.error) return [];
     const raw = body.similarartists?.artist;

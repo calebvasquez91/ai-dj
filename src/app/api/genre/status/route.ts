@@ -13,12 +13,12 @@ async function handleGET() {
   if (!(await genreTablesReady())) {
     return NextResponse.json({ ready: false, queued: 0, running: 0, failed: 0, needsReview: 0, unclassified: 0, jobs: {} });
   }
-  // The latest job of each track decides its state: an old failure that a later run fixed is not a failure.
+  // Finished jobs are deleted, so this holds only waiting, running and given-up jobs (about one per track at most). The latest
+  // job of each track decides its state.
   const rows = await prisma.genreJob.findMany({
     where: { track: { userId } },
     orderBy: { createdAt: "desc" },
     select: { trackId: true, status: true },
-    take: 5000,
   });
   const jobs: Record<string, "queued" | "running" | "failed"> = {};
   const seen = new Set<string>();

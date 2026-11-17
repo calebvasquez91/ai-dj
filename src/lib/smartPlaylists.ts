@@ -38,16 +38,23 @@ const MOOD_WORDS: Record<string, string> = {
 
 const moodWord = (mood: string) => MOOD_WORDS[mood] ?? mood.charAt(0).toUpperCase() + mood.slice(1);
 
+/** Adds to the list under `key`, creating it once (copying the whole list for every track made grouping quadratic). */
+function push<V>(map: Map<string, V[]>, key: string, value: V) {
+  const list = map.get(key);
+  if (list) list.push(value);
+  else map.set(key, [value]);
+}
+
 export function smartPlaylists(library: readonly Track[], limit = SMART_MAX_PLAYLISTS): SmartPlaylist[] {
   const { tracks } = eligibleTracks(library, { explicitPolicy: "any", allowHalloween: false });
   const byGenre = new Map<string, { track: Track; confidence: number }[]>();
   const byGenreMood = new Map<string, { track: Track; confidence: number }[]>();
   for (const track of tracks) {
     for (const g of genresOfTrack(track)) {
-      byGenre.set(g.genre, [...(byGenre.get(g.genre) ?? []), { track, confidence: g.confidence }]);
+      push(byGenre, g.genre, { track, confidence: g.confidence });
       for (const mood of track.moods ?? []) {
         const key = `${g.genre}\u0000${mood}`;
-        byGenreMood.set(key, [...(byGenreMood.get(key) ?? []), { track, confidence: g.confidence }]);
+        push(byGenreMood, key, { track, confidence: g.confidence });
       }
     }
   }

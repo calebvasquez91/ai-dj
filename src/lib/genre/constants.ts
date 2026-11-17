@@ -12,5 +12,9 @@ export const MAX_JOB_ATTEMPTS = 5;
 export const BACKOFF_BASE_MS = 30_000;
 export const BACKOFF_MAX_MS = 60 * 60 * 1000;
 
+/** Classification log rows older than this are deleted, and expired provider-cache rows are cleared, at most this often. */
+export const LOG_KEEP_MS = 90 * 24 * 60 * 60 * 1000;
+export const HOUSEKEEPING_EVERY_MS = 60 * 60 * 1000;
+
 /** A job still "running" this long after it started was abandoned (the function was cut off); it is picked up again. */
 export const STALE_RUNNING_MS = 10 * 60 * 1000;

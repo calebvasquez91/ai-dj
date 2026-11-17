@@ -20,7 +20,7 @@ export function memoryGenreStore(initial: Record<string, StoredGenre> = {}): Gen
 interface MemJob {
   id: string;
   trackId: string;
-  status: "queued" | "running" | "done" | "failed";
+  status: "queued" | "running" | "failed";
   priority: number;
   attempts: number;
   runAfter: number;
@@ -37,6 +37,8 @@ export function memoryJobStore(ownerOf: (trackId: string) => string | undefined 
     async enqueue(trackIds, priority) {
       let queued = 0;
       for (const trackId of trackIds) {
+        // A job that gave up is cleared when the track is asked for again, so a later success is not shadowed by it.
+        for (let i = jobs.length - 1; i >= 0; i--) if (jobs[i].trackId === trackId && jobs[i].status === "failed") jobs.splice(i, 1);
         if (jobs.some((j) => j.trackId === trackId && (j.status === "queued" || j.status === "running"))) continue;
         jobs.push({ id: `job${++seq}`, trackId, status: "queued", priority, attempts: 0, runAfter: 0, startedAt: null, lastError: null, seq });
         queued++;
@@ -57,8 +59,8 @@ export function memoryJobStore(ownerOf: (trackId: string) => string | undefined 
       return due.map((j) => ({ id: j.id, trackId: j.trackId, attempts: j.attempts }));
     },
     async complete(id) {
-      const j = jobs.find((x) => x.id === id);
-      if (j) j.status = "done";
+      const i = jobs.findIndex((x) => x.id === id);
+      if (i >= 0) jobs.splice(i, 1);
     },
     async fail(id, error, retryAt) {
       const j = jobs.find((x) => x.id === id);
@@ -79,7 +81,7 @@ export function memoryJobStore(ownerOf: (trackId: string) => string | undefined 
       const out = new Map<string, JobState>();
       for (const trackId of trackIds) {
         const latest = [...jobs].filter((j) => j.trackId === trackId).sort((a, b) => b.seq - a.seq)[0];
-        if (latest && latest.status !== "done") out.set(trackId, latest.status);
+        if (latest) out.set(trackId, latest.status);
       }
       return out;
     },

@@ -376,6 +376,17 @@ describe("LastFmProvider", () => {
     expect(r.moods).toEqual([]);
   });
 
+  it("does not keep a rate-limit answer (HTTP 200 with an error code) as if it were the tags", async () => {
+    let limited = true;
+    const m = make((url) => (limited ? json({ error: 29, message: "Rate Limit Exceeded" }) : handle(url)));
+    const first = await m.provider.classify(input);
+    // A retryable failure, and nothing stored: the same lookup is asked again next time.
+    expect(first).toMatchObject({ tags: [], transient: true });
+    expect(m.cache.size()).toBe(0);
+    limited = false;
+    expect((await m.provider.classify(input)).tags.length).toBeGreaterThan(0);
+  });
+
   it("copes with a single tag sent as an object, and with a failure", async () => {
     const one = await make(() => json({ toptags: { tag: { name: "jazz", count: 90 } } })).provider.classify(input);
     expect(one.tags[0].genre).toBe("Jazz");

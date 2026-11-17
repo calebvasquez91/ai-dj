@@ -5,7 +5,7 @@
  * and decades are understood. Tracks it finds rank after the direct text hits and are never mixed into a query that names
  * no genre, mood or decade. Pure; src/lib/search.ts merges these with its text hits.
  */
-import { genresOfTrack } from "@/lib/genreLibrary";
+import { genreFit } from "@/lib/curate/select";
 import { parseRequestLocally, type CurationSpec } from "@/lib/curate/spec";
 import type { SearchHit } from "@/lib/search";
 import type { Track } from "@/types/music";
@@ -26,14 +26,8 @@ export function interpretGenreQuery(query: string): CurationSpec | null {
 export function genreMatchScore(track: Track, spec: CurationSpec): number | null {
   let score = 0.5;
   if (spec.genres.length > 0 || spec.subgenres.length > 0) {
-    let best = 0;
-    for (const g of genresOfTrack(track)) {
-      const subs = g.subgenres.filter((s) => spec.subgenres.includes(s.subgenre));
-      // A query that names a subgenre ("trap") wants that subgenre, not every track of its parent genre.
-      const wanted = spec.subgenres.length > 0 ? subs.length > 0 : spec.genres.includes(g.genre);
-      if (!wanted) continue;
-      best = Math.max(best, Math.min(1, g.confidence + (subs.length > 0 ? 0.1 : 0)));
-    }
+    // A query that names a subgenre ("trap") wants that subgenre, not every track of its parent genre.
+    const best = genreFit(track, spec);
     if (best === 0) return null;
     score = best;
   }

@@ -47,6 +47,21 @@ export const MOOD_MIN_WEIGHT = 20;
 export const trackTagConfidence = (weight: number) => Math.min(0.75, 0.35 + 0.4 * (weight / 100));
 export const artistTagConfidence = (weight: number) => Math.min(0.6, 0.3 + 0.3 * (weight / 100));
 
+/**
+ * Last.fm answers errors with HTTP 200 and {"error": code}. A temporary one (8 operation failed, 11 service offline, 16 temporarily
+ * unavailable, 29 rate limit exceeded) must not be kept as if it were the answer: it is thrown as a retryable failure. Not found
+ * (6, 7) is a real answer, kept as "nothing". Anything else (a bad or suspended key...) is an error that is not cached either.
+ */
+export function lastFmErrorBody(body: unknown): { status: number; notFound?: boolean } | null {
+  const code = (body as { error?: unknown } | null)?.error;
+  if (code == null) return null;
+  const n = Number(code);
+  if (n === 29) return { status: 429 };
+  if (n === 8 || n === 11 || n === 16) return { status: 503 };
+  if (n === 6 || n === 7) return { status: 404, notFound: true };
+  return { status: 403 };
+}
+
 function tagList(body: LfmTopTags | null): { name: string; weight: number }[] {
   if (!body || body.error) return [];
   const raw = body.toptags?.tag;
@@ -64,7 +79,7 @@ export function createLastFmProvider({ fetcher, cache, limiter, userAgent, apiKe
     // The cache key is the lookup without the API key, so the key never reaches the cache.
     const cacheKey = `${method}:${aliasKey(artist)}:${track != null ? aliasKey(track) : ""}`;
     params.set("api_key", key ?? "");
-    return cachedJsonGet<LfmTopTags>({ provider: "lastfm", url: `${LASTFM}?${params.toString()}`, cacheKey, fetcher, cache, limiter, headers: { "User-Agent": userAgent }, sleep });
+    return cachedJsonGet<LfmTopTags>({ provider: "lastfm", url: `${LASTFM}?${params.toString()}`, cacheKey, fetcher, cache, limiter, headers: { "User-Agent": userAgent }, sleep, errorBody: lastFmErrorBody });
   }
 
   return {

@@ -18,6 +18,15 @@ const KEYS = ["LASTFM_API_KEY", "ACOUSTID_API_KEY", "ANTHROPIC_API_KEY", "CRON_S
 /** Modules that read secrets or the database: a browser component must never import them. */
 const SERVER_ONLY = ["@/lib/genre/server", "@/lib/genre/prismaStore", "@/lib/genre/prismaServices", "@/lib/genre/api", "@/lib/genre/statsServer", "@/lib/genre/llmReconciler", "@/lib/genre/fileTagReader", "@/lib/genre/fpcalc", "@/lib/curate/llmSpec", "@/lib/curate/llmRefine", "@/lib/curate/discover", "@/lib/prisma"];
 
+describe("source files are plain text", () => {
+  it("holds no raw NUL byte (git would show the file as binary, and its diffs could not be reviewed); write \u0000 instead", () => {
+    const binary = sourceFiles()
+      .filter(([, text]) => text.includes("\u0000"))
+      .map(([path]) => path);
+    expect(binary).toEqual([]);
+  });
+});
+
 describe("keys stay on the server", () => {
   const files = sourceFiles();
   const isClient = (text: string) => /^\s*["']use client["']/.test(text);

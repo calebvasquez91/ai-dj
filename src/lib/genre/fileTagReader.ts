@@ -1,10 +1,11 @@
 /**
  * Reads the embedded tags of a stored audio file (ID3, Vorbis, MP4 and the rest music-metadata knows; MIT-licensed).
- * Server-only. A local file is opened by path, so a tag at the end of the file (ID3v1) can be read; a blob file is streamed,
- * and the reader stops as soon as it has the tags, so the whole file is not downloaded.
+ * Server-only. A local file and a blob file are both read as a stream, so the song is never held in memory whole (a long WAV or
+ * FLAC can be hundreds of MB); the reader takes the tags and stops. Trailing tags (ID3v1) are skipped on purpose (skipPostHeaders).
  */
-import { readFile } from "node:fs/promises";
-import { parseBuffer, parseWebStream } from "music-metadata";
+import { createReadStream } from "node:fs";
+import { stat } from "node:fs/promises";
+import { parseStream, parseWebStream } from "music-metadata";
 import { getStorageBackend, localFilePath } from "@/lib/storage";
 import type { ProviderInput } from "@/lib/genre/types";
 import { advisoryFromNative, type RawFileTags } from "@/lib/genre/fileTags";
@@ -52,12 +53,20 @@ function yearOf(common: { year?: number; date?: string }): number | null {
 
 export async function readFileTags(input: ProviderInput): Promise<RawFileTags | null> {
   if (!input.storageKey) return null;
-  let parsed: Awaited<ReturnType<typeof parseBuffer>>;
+  let parsed: Awaited<ReturnType<typeof parseStream>>;
   if (getStorageBackend() === "local") {
     // An upload is stored under its id with no extension, so the parser cannot learn the format from the name (opening it by
     // path fails): tell it the MIME type the upload was recorded with. The file is read whole, which also keeps a tag at the
     // end of it (ID3v1) readable; this backend is for development, where files are local.
-    parsed = await parseBuffer(await readFile(localFilePath(input.storageKey)), fileInfoHint(input.mimeType), READ_OPTIONS);
+    const path = localFilePath(input.storageKey);
+    // Stat first: a stream for a missing file would raise an error event with nobody listening yet.
+    const { size } = await stat(path);
+    const stream = createReadStream(path);
+    try {
+      parsed = await parseStream(stream, { ...fileInfoHint(input.mimeType), size }, READ_OPTIONS);
+    } finally {
+      stream.destroy();
+    }
   } else {
     const res = await fetch(input.storageKey, { signal: AbortSignal.timeout(20_000) });
     if (!res.ok || !res.body) return null;

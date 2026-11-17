@@ -6,9 +6,12 @@ import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { apiHandler, jsonError, unauthorized } from "@/lib/apiRoute";
 import { genreTablesReady, prismaGenreStore, storedFromRow } from "@/lib/genre/prismaStore";
-import { acceptBest, confirmCurrent } from "@/lib/genre/stored";
+import { acceptBest, confirmCurrent, type StoredGenre } from "@/lib/genre/stored";
 
 const MAX_BATCH = 1000;
+/** "Accept all" looks at the needs-review tracks a page at a time, up to this many in one request. */
+const PAGE = 500;
+const MAX_SCAN = 5000;
 const DEFAULT_MIN_CONFIDENCE = 0.4;
 
 async function handlePOST(request: Request) {
@@ -24,24 +27,38 @@ async function handlePOST(request: Request) {
   let changed = 0;
   if (body.action === "accept-above") {
     const min = typeof body.minConfidence === "number" && body.minConfidence >= 0 && body.minConfidence <= 1 ? body.minConfidence : DEFAULT_MIN_CONFIDENCE;
-    const rows = await prisma.trackGenre.findMany({ where: { status: "needs-review", track: { userId } }, take: MAX_BATCH });
-    for (const row of rows) {
-      const next = acceptBest(storedFromRow(row), min, now);
-      if (!next) continue;
-      await prismaGenreStore.save(row.trackId, next);
-      changed++;
+    // Walks the tracks waiting for review by id, page by page, keeping those with a suggestion above the bar. Reading only the first
+    // rows would stall once they held nothing acceptable: the same rows would come back on every click.
+    const updates: { trackId: string; stored: StoredGenre }[] = [];
+    let cursor: string | undefined;
+    for (let scanned = 0; scanned < MAX_SCAN && updates.length < MAX_BATCH; scanned += PAGE) {
+      const rows = await prisma.trackGenre.findMany({
+        where: { status: "needs-review", track: { userId } },
+        orderBy: { trackId: "asc" },
+        take: PAGE,
+        ...(cursor ? { cursor: { trackId: cursor }, skip: 1 } : {}),
+      });
+      for (const row of rows) {
+        const next = acceptBest(storedFromRow(row), min, now);
+        if (next) updates.push({ trackId: row.trackId, stored: next });
+      }
+      if (rows.length < PAGE) break;
+      cursor = rows[rows.length - 1].trackId;
     }
+    await prismaGenreStore.saveMany(updates);
+    changed = updates.length;
   } else if (body.action === "confirm") {
     if (!Array.isArray(body.trackIds) || body.trackIds.length === 0 || body.trackIds.length > MAX_BATCH || !body.trackIds.every((t) => typeof t === "string")) {
       return jsonError(400, `Give 1 to ${MAX_BATCH} trackIds.`);
     }
     const rows = await prisma.trackGenre.findMany({ where: { trackId: { in: body.trackIds as string[] }, track: { userId } } });
+    const updates: { trackId: string; stored: StoredGenre }[] = [];
     for (const row of rows) {
       const next = confirmCurrent(storedFromRow(row), now);
-      if (!next) continue;
-      await prismaGenreStore.save(row.trackId, next);
-      changed++;
+      if (next) updates.push({ trackId: row.trackId, stored: next });
     }
+    await prismaGenreStore.saveMany(updates);
+    changed = updates.length;
   } else {
     return jsonError(400, 'Give action "accept-above" or "confirm".');
   }

@@ -3,7 +3,7 @@ import { CLARIFYING_QUESTION, DEFAULT_TARGET_MINUTES, MAX_TARGET_MINUTES, parseR
 import { PROFILES, profileFromText } from "@/lib/curate/profiles";
 import { eligibleTracks, explicitStatusOf, isHalloweenTrack } from "@/lib/curate/eligibility";
 import { arcFit, arcTargets, estimateEnergies, orderByEnergyArc } from "@/lib/curate/energyArc";
-import { SHORTFALL_RATIO, scoreTrack, selectTracks, shortfallOf, wantsHalloween } from "@/lib/curate/select";
+import { SHORTFALL_RATIO, genreFit, scoreTrack, selectTracks, shortfallOf, wantsHalloween } from "@/lib/curate/select";
 import { describeLocal, finishCuration, refineOrder, selectForCuration, titleFromSpec } from "@/lib/curate/curate";
 import type { GenreTag, GenreTagSource, Track } from "@/types/music";
 
@@ -155,8 +155,39 @@ describe("which tracks may be used", () => {
   });
   it("only a request for Halloween music allows Halloween tracks", () => {
     expect(wantsHalloween(spec({ subgenres: ["Halloween"] }))).toBe(true);
-    expect(wantsHalloween(spec({ genres: ["Holiday"] }))).toBe(true);
+    // Holiday music in general is not a request for Halloween: that stays in Spooky Music.
+    expect(wantsHalloween(spec({ genres: ["Holiday"] }))).toBe(false);
     expect(wantsHalloween(spec({ genres: ["Rock"], moods: ["dark"] }))).toBe(false);
+  });
+});
+
+describe("a named subgenre narrows its parent genre", () => {
+  const trap = make({ id: "trap", genres: [tag("Hip-Hop", 0.9, "Trap")] });
+  const boomBap = make({ id: "boomBap", genres: [tag("Hip-Hop", 0.9)] });
+  const rock = make({ id: "rock", genres: [tag("Rock", 0.9)] });
+
+  it("wants the subgenre, not every track of the genre, when both are named (what a model's reading of 'trap bangers' gives)", () => {
+    const both = spec({ genres: ["Hip-Hop"], subgenres: ["Trap"] });
+    expect(genreFit(trap, both)).toBeGreaterThan(0);
+    expect(genreFit(boomBap, both)).toBe(0);
+    expect(scoreTrack(boomBap, null, both)).toBeNull();
+    expect(selectTracks(both, [trap, boomBap, rock], () => null).candidates.map((c) => c.track.id)).toEqual(["trap"]);
+  });
+
+  it("keeps a genre wide when none of its own subgenres is named", () => {
+    expect(genreFit(boomBap, spec({ genres: ["Hip-Hop"] }))).toBeGreaterThan(0);
+    // "rock and trap": Rock stays wide, Trap is the subgenre.
+    const mixed = spec({ genres: ["Rock"], subgenres: ["Trap"] });
+    expect(genreFit(rock, mixed)).toBeGreaterThan(0);
+    expect(genreFit(trap, mixed)).toBeGreaterThan(0);
+    expect(genreFit(boomBap, mixed)).toBe(0);
+  });
+
+  it("lets the shortfall offer to relax the subgenre, since it now really narrows", () => {
+    const lib = [trap, boomBap, make({ id: "bb2", genres: [tag("Hip-Hop", 0.9)] })];
+    const both = spec({ genres: ["Hip-Hop"], subgenres: ["Trap"], targetLengthMinutes: 10 });
+    const sf = shortfallOf(both, lib, () => null, selectTracks(both, lib, () => null));
+    expect(sf?.relaxations).toEqual([expect.objectContaining({ what: "subgenre", gain: 2 })]);
   });
 });
 
@@ -184,14 +215,17 @@ describe("matching tracks to a request", () => {
     expect(scoreTrack(t, 90, withBpm)).toBeNull();
     expect(scoreTrack(t, null, withBpm)?.score).toBeGreaterThan(0);
   });
-  it("prefers a track that matches the mood, a subgenre, or is Must-Play, without requiring them", () => {
+  it("prefers a track that matches the mood or is Must-Play, without requiring them, and requires a named subgenre", () => {
     const withMood = spec({ genres: ["R&B"], moods: ["chill"] });
     const a = make({ genres: [tag("R&B", 0.8)], moods: ["chill"] });
     const b = make({ genres: [tag("R&B", 0.8)], moods: ["party"] });
     expect(scoreTrack(a, null, withMood)!.score).toBeGreaterThan(scoreTrack(b, null, withMood)?.score ?? 0);
     const sub = spec({ genres: ["Hip-Hop"], subgenres: ["Trap"] });
-    expect(scoreTrack(make({ genres: [tag("Hip-Hop", 0.8, "Trap"), tag("Hip-Hop", 0.8, "Trap", "lastfm")] }), null, sub)!.score).toBeGreaterThan(scoreTrack(make({ genres: [tag("Hip-Hop", 0.8)] }), null, sub)!.score);
-    expect(scoreTrack(make({ genres: [tag("Hip-Hop", 0.8)], playPreference: "must" }), null, sub)!.score).toBeGreaterThan(scoreTrack(make({ genres: [tag("Hip-Hop", 0.8)] }), null, sub)!.score);
+    const trapTags = [tag("Hip-Hop", 0.8, "Trap"), tag("Hip-Hop", 0.8, "Trap", "lastfm")];
+    // A plain Hip-Hop track is not a match once Trap is named.
+    expect(scoreTrack(make({ genres: [tag("Hip-Hop", 0.8)] }), null, sub)).toBeNull();
+    expect(scoreTrack(make({ genres: trapTags }), null, sub)).not.toBeNull();
+    expect(scoreTrack(make({ genres: trapTags, playPreference: "must" }), null, sub)!.score).toBeGreaterThan(scoreTrack(make({ genres: trapTags }), null, sub)!.score);
   });
   it("matches a subgenre-only request on the subgenre", () => {
     const only = spec({ subgenres: ["Trap"] });

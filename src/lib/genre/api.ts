@@ -50,6 +50,18 @@ export async function loadGenreFields(trackIds: readonly string[]): Promise<Map<
   return out;
 }
 
+/** The genre fields of every classified track of one person's library: filtered by owner in the database, not by a list of ids (which grows with the library and has a size limit). Empty if the tables are not there yet. */
+export async function loadGenreFieldsForUser(userId: string): Promise<Map<string, TrackGenreFields>> {
+  const out = new Map<string, TrackGenreFields>();
+  try {
+    const rows = await prisma.trackGenre.findMany({ where: { track: { userId } } });
+    for (const row of rows) out.set(row.trackId, fieldsFromStored(storedFromRow(row)));
+  } catch {
+    // Tables not created yet: the library simply has no genres.
+  }
+  return out;
+}
+
 /** Queues classification for tracks that were just added. Never throws; returns how many were queued. */
 export async function queueNewTracks(trackIds: readonly string[], priority = PRIORITY_REQUESTED): Promise<number> {
   try {

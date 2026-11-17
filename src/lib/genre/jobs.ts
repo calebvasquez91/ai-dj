@@ -24,6 +24,7 @@ export interface JobStore {
   enqueue(trackIds: readonly string[], priority: number): Promise<number>;
   /** Takes up to `limit` due jobs (queued and past their wait, or running for too long), oldest priority first, and marks them running. `userId` limits it to that user's tracks. */
   claim(limit: number, now: Date, userId?: string): Promise<ClaimedJob[]>;
+  /** The job is done: it leaves the queue (the classification log keeps the history). */
   complete(id: string, now: Date): Promise<void>;
   /** Counts a failed try. `retryAt` is when to try again; null gives the job up for good. */
   fail(id: string, error: string, retryAt: Date | null, now: Date): Promise<void>;
@@ -70,6 +71,8 @@ export interface RunSummary {
   retrying: number;
   /** Stopped before the queue was empty (the budget or maxJobs ran out). */
   more: boolean;
+  /** The tracks whose result was saved by this run, so a caller can read just those back. */
+  processedIds: string[];
 }
 
 /** The wait before try number `attempts + 1`: 30 s, 60 s, 2 min, 4 min... up to an hour. */
@@ -80,7 +83,7 @@ export function backoffMs(attempts: number): number {
 export async function runJobs(deps: JobRunnerDeps, options: RunOptions): Promise<RunSummary> {
   const now = deps.now ?? (() => new Date());
   const started = Date.now();
-  const summary: RunSummary = { processed: 0, failed: 0, retrying: 0, more: false };
+  const summary: RunSummary = { processed: 0, failed: 0, retrying: 0, more: false, processedIds: [] };
   const claimed = await deps.jobs.claim(options.maxJobs, now(), options.userId);
   for (let i = 0; i < claimed.length; i++) {
     const job = claimed[i];
@@ -107,12 +110,16 @@ export async function runJobs(deps: JobRunnerDeps, options: RunOptions): Promise
         summary.retrying++;
         continue;
       }
-      const stored = mergeRun(existing, outcome, now().getTime());
+      // Read the record again: the sources can take a while, and a person may have set the genres in the meantime. Their tags
+      // are in the record as it is now, and the merge must keep them.
+      const current = await deps.store.get(job.trackId);
+      const stored = mergeRun(current, outcome, now().getTime());
       await deps.store.save(job.trackId, stored);
       const resolution = resolveGenreTags(stored.tags);
       await deps.writeLog({ trackId: job.trackId, status: stored.status, genre: stored.genre ?? null, confidence: resolution.best || null, sources: outcome.sources, usedLlm: outcome.usedLlm });
       await deps.jobs.complete(job.id, now());
       summary.processed++;
+      summary.processedIds.push(job.trackId);
     } catch (err) {
       const message = err instanceof Error ? err.message.slice(0, 300) : "error";
       const tries = job.attempts + 1;

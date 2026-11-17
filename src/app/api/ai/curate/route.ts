@@ -7,7 +7,7 @@ import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { apiHandler, jsonError, unauthorized } from "@/lib/apiRoute";
 import { PLAYLIST_TRACK_OMIT, toTrackSummary } from "@/lib/trackApi";
-import { loadGenreFields } from "@/lib/genre/api";
+import { loadGenreFieldsForUser } from "@/lib/genre/api";
 import { prismaCache, prismaRateStore } from "@/lib/genre/prismaServices";
 import { PROVIDER_MIN_INTERVAL_MS, createRateLimiter } from "@/lib/genre/services";
 import { userAgent } from "@/lib/genre/server";
@@ -35,7 +35,7 @@ async function handlePOST(request: Request) {
 
     loadLibrary: async () => {
       const rows = await prisma.track.findMany({ where: { userId }, orderBy: { createdAt: "asc" }, omit: PLAYLIST_TRACK_OMIT });
-      const genres = await loadGenreFields(rows.map((r) => r.id));
+      const genres = await loadGenreFieldsForUser(userId);
       const bpm = new Map(rows.map((r) => [r.id, r.bpm]));
       const tracks: Track[] = rows.map((r) => ({ ...toTrackSummary(r), ...(genres.get(r.id) ?? {}) }));
       return { tracks, bpmOf: (t) => bpm.get(t.id) ?? null };

@@ -4,7 +4,7 @@
  * genreTablesReady() first, or catch it, and answer "not set up yet".
  */
 import { prisma } from "@/lib/prisma";
-import { STALE_RUNNING_MS } from "@/lib/genre/constants";
+import { HOUSEKEEPING_EVERY_MS, LOG_KEEP_MS, STALE_RUNNING_MS } from "@/lib/genre/constants";
 import type { ClaimedJob, ClassificationLog, GenreStore, JobState, JobStore } from "@/lib/genre/jobs";
 import type { StoredGenre } from "@/lib/genre/stored";
 import type { GenreStatus, GenreTag } from "@/types/music";
@@ -35,28 +35,46 @@ export function storedFromRow(row: { tagsJson: string; status: string; genre: st
   return { tags: parseArray<GenreTag>(row.tagsJson), status, genre: row.genre ?? undefined, subgenres: parseArray<string>(row.subgenresJson), moods: parseArray<string>(row.moodsJson), ...(row.year ? { year: row.year } : {}), ...(row.explicit === "explicit" || row.explicit === "clean" ? { explicit: row.explicit } : {}), updatedAt: row.updatedAt.getTime() };
 }
 
-export const prismaGenreStore: GenreStore = {
+function rowData(stored: StoredGenre) {
+  return {
+    tagsJson: JSON.stringify(stored.tags),
+    status: stored.status,
+    genre: stored.genre ?? null,
+    subgenresJson: JSON.stringify(stored.subgenres),
+    moodsJson: JSON.stringify(stored.moods),
+    year: stored.year ?? null,
+    explicit: stored.explicit ?? null,
+  };
+}
+
+const SAVE_BATCH = 100;
+
+export const prismaGenreStore: GenreStore & {
+  /** Updates records that already exist, a hundred to a transaction (the bulk review actions: one round trip per batch, not per track). */
+  saveMany(entries: readonly { trackId: string; stored: StoredGenre }[]): Promise<void>;
+} = {
   async get(trackId) {
     const row = await prisma.trackGenre.findUnique({ where: { trackId } });
     return row ? storedFromRow(row) : null;
   },
   async save(trackId, stored) {
-    const data = {
-      tagsJson: JSON.stringify(stored.tags),
-      status: stored.status,
-      genre: stored.genre ?? null,
-      subgenresJson: JSON.stringify(stored.subgenres),
-      moodsJson: JSON.stringify(stored.moods),
-      year: stored.year ?? null,
-      explicit: stored.explicit ?? null,
-    };
+    const data = rowData(stored);
     await prisma.trackGenre.upsert({ where: { trackId }, create: { trackId, ...data }, update: data });
+  },
+  async saveMany(entries) {
+    for (let i = 0; i < entries.length; i += SAVE_BATCH) {
+      const batch = entries.slice(i, i + SAVE_BATCH);
+      // updateMany does nothing for a track that was deleted meanwhile, instead of failing the whole batch.
+      await prisma.$transaction(batch.map((e) => prisma.trackGenre.updateMany({ where: { trackId: e.trackId }, data: rowData(e.stored) })));
+    }
   },
 };
 
 export const prismaJobStore: JobStore = {
   async enqueue(trackIds, priority) {
     if (trackIds.length === 0) return 0;
+    // A job that gave up is cleared when the track is asked for again, so a later success is not shadowed by it.
+    await prisma.genreJob.deleteMany({ where: { trackId: { in: [...trackIds] }, status: "failed" } });
     // The partial unique index (one queued or running job per track) makes a duplicate a no-op.
     const result = await prisma.genreJob.createMany({ data: trackIds.map((trackId) => ({ trackId, priority })), skipDuplicates: true });
     return result.count;
@@ -80,8 +98,10 @@ export const prismaJobStore: JobStore = {
     return rows.map((r) => ({ id: r.id, trackId: r.trackId, attempts: Number(r.attempts) }));
   },
 
-  async complete(id, now) {
-    await prisma.genreJob.update({ where: { id }, data: { status: "done", finishedAt: now, lastError: null } });
+  async complete(id) {
+    // A finished job is deleted, not kept: the table only ever holds work that is waiting, running or has given up, so the status
+    // queries stay small. What happened is in GenreLog.
+    await prisma.genreJob.deleteMany({ where: { id } });
   },
 
   async fail(id, error, retryAt, now) {
@@ -111,6 +131,23 @@ export const prismaJobStore: JobStore = {
     return out;
   },
 };
+
+let lastHousekeeping = 0;
+
+/**
+ * Clears what only grows: provider-cache rows past their expiry and classification-log rows older than LOG_KEEP_MS. Cheap
+ * (both are indexed) and run at most once an hour per server instance, from the job runner. Never throws.
+ */
+export async function pruneGenreHousekeeping(nowMs = Date.now()): Promise<void> {
+  if (nowMs - lastHousekeeping < HOUSEKEEPING_EVERY_MS) return;
+  lastHousekeeping = nowMs;
+  try {
+    await prisma.providerCache.deleteMany({ where: { expiresAt: { lt: new Date(nowMs) } } });
+    await prisma.genreLog.deleteMany({ where: { createdAt: { lt: new Date(nowMs - LOG_KEEP_MS) } } });
+  } catch {
+    // Housekeeping is never worth failing a run for; it is tried again next hour.
+  }
+}
 
 export async function writeClassificationLog(entry: ClassificationLog): Promise<void> {
   try {

@@ -125,15 +125,15 @@ export const useGenreClient = create<GenreClientState>()((set, get) => ({
           set({ error: "Genre classification could not run." });
           break;
         }
-        const run = await readJson<{ ready: boolean; processed: number; more: boolean }>(res);
+        const run = await readJson<{ ready: boolean; processed: number; more: boolean; fields?: Record<string, TrackGenreFields> }>(res);
         await get().refresh();
-        if (run?.processed) await pullFields();
+        // Only the tracks this run changed come back, so a long backfill does not re-download the whole library every round.
+        if (run?.fields) applyGenreFields(run.fields);
         if (!run?.ready) break;
         // Nothing left that is due (the rest are waiting out a retry delay): stop and let a later refresh pick them up.
         if (!run.more && run.processed === 0) break;
         await new Promise((r) => setTimeout(r, DRAIN_PAUSE_MS));
       }
-      await pullFields();
     } finally {
       set({ draining: false });
     }
