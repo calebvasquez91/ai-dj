@@ -59,4 +59,10 @@ describe("the Admin page", () => {
     expect(html).toContain("Not recording yet");
     expect(html).toContain("Admin");
   });
+
+  it("does not call a database error \"not recording yet\" (that would send the admin to rerun SQL that already ran)", async () => {
+    mocks.owner = { user: { id: "cmadmin0001" } };
+    mocks.load.mockResolvedValue({ feedbackCount: 1, songs: 10, classified: 5, needsReview: 1, playlists: 2, listenedSeconds: "error" });
+    expect(renderToStaticMarkup(await AdminPage())).not.toContain("Not recording yet");
+  });
 });

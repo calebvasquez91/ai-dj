@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { canManagePlaylist } from "@/lib/playlistAccess";
+import { recordAdminPlaylistAction } from "@/lib/adminAudit";
 import { loadPlaylist, toPlaylistApiResponse } from "@/lib/playlistApi";
 import { loadUserTrackData } from "@/lib/trackUserData";
 import { apiHandler, notFound, unauthorized } from "@/lib/apiRoute";
@@ -45,6 +46,7 @@ async function handlePOST(request: Request, { params }: { params: Promise<{ id: 
     });
   });
 
+  await recordAdminPlaylistAction({ actorId: session.user.id, action: "playlist.add-song", playlist, detail: `${track.title} - ${track.artist}` });
   const updated = await loadPlaylist(id);
   return NextResponse.json(toPlaylistApiResponse(updated!, await loadUserTrackData(session.user.id)), { status: 201 });
 }

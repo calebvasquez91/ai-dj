@@ -16,6 +16,23 @@ async function playtimeByPlaylist(): Promise<Map<string, number>> {
   }
 }
 
+const ACTION_TEXT: Record<string, string> = {
+  "playlist.rename": "renamed",
+  "playlist.delete": "deleted",
+  "playlist.add-song": "added a song to",
+  "playlist.remove-song": "took a song out of",
+  "playlist.reorder": "reordered",
+};
+
+/** The admin's latest changes to other accounts' playlists; empty when the log table does not exist yet. */
+async function recentAdminActions() {
+  try {
+    return await prisma.adminAction.findMany({ orderBy: { createdAt: "desc" }, take: 15 });
+  } catch {
+    return [];
+  }
+}
+
 /**
  * Every account's playlists in one place, grouped by account, with each playlist's size, length and playtime. The admin has full access
  * to all of them (open one to rename it, remove songs, or delete it). Only the admin; for anyone else the page does not exist. The
@@ -24,7 +41,7 @@ async function playtimeByPlaylist(): Promise<Map<string, number>> {
 export default async function AllPlaylistsPage() {
   if (!(await feedbackOwnerSession())) notFound();
 
-  const [playlists, played] = await Promise.all([
+  const [playlists, played, actions] = await Promise.all([
     prisma.playlist.findMany({
       orderBy: { createdAt: "asc" },
       select: {
@@ -36,6 +53,7 @@ export default async function AllPlaylistsPage() {
       },
     }),
     playtimeByPlaylist(),
+    recentAdminActions(),
   ]);
 
   const byAccount = new Map<string, { label: string; playlists: typeof playlists }>();
@@ -80,6 +98,20 @@ export default async function AllPlaylistsPage() {
           </ul>
         </section>
       ))}
+      {actions.length > 0 && (
+        <section className="card p-4 flex flex-col gap-2" aria-label="Recent admin changes">
+          <h2 className="font-semibold">Recent admin changes</h2>
+          <ul className="flex flex-col gap-1">
+            {actions.map((a) => (
+              <li key={a.id} className="text-xs text-muted break-words">
+                {a.createdAt.toISOString().slice(0, 16).replace("T", " ")} UTC · {ACTION_TEXT[a.action] ?? a.action} &ldquo;{a.playlistName}&rdquo;
+                {a.ownerEmail ? ` (${a.ownerEmail})` : ""}
+                {a.detail ? ` · ${a.detail}` : ""}
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
     </div>
   );
 }

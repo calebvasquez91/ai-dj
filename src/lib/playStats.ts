@@ -58,17 +58,49 @@ export function parseDays(raw: string | string[] | undefined): 7 | 30 | null {
   return v === "7" ? 7 : v === "30" ? 30 : null;
 }
 
-export interface Ranked {
-  key: string;
-  label: string;
-  seconds: number;
+/** What an account's first report may carry (there is no earlier report to measure the time against). */
+export const FIRST_REPORT_SECONDS = 90;
+/** Nobody can listen more than a day in a day: the most one account can have credited in any 24 hours. */
+export const DAILY_CAP_SECONDS = 24 * 60 * 60;
+/** A report may carry a little more than the clock time since the previous one (two devices playing at once, timer jitter). */
+const BUDGET_RATE = 1.5;
+const BUDGET_SLACK_SECONDS = 5;
+
+/**
+ * The most seconds one report may be credited with, from how long ago the account last reported and what it already has credited in
+ * the last 24 hours. The player's reports are about 1:1 with the clock, so an honest one always fits; a client that claims hours in a
+ * request, or sends requests faster than real time, does not.
+ */
+export function reportBudgetSeconds(sinceLastReportMs: number | null, creditedLast24hSeconds: number): number {
+  const byClock = sinceLastReportMs == null ? FIRST_REPORT_SECONDS : (Math.max(0, sinceLastReportMs) / 1000) * BUDGET_RATE + BUDGET_SLACK_SECONDS;
+  return Math.max(0, Math.min(byClock, DAILY_CAP_SECONDS - Math.max(0, creditedLast24hSeconds)));
 }
 
-/** The biggest `limit` entries by seconds (ties keep their order), each with its share of the total. */
-export function rankBySeconds<T extends { seconds: number }>(rows: readonly T[], limit: number): (T & { share: number })[] {
-  const total = rows.reduce((sum, r) => sum + r.seconds, 0);
-  return [...rows]
-    .sort((a, b) => b.seconds - a.seconds)
-    .slice(0, limit)
-    .map((r) => ({ ...r, share: total > 0 ? r.seconds / total : 0 }));
+/** Scales the segments down, all by the same factor, so they add up to no more than `budgetSeconds`; unchanged when they already fit. */
+export function fitToBudget(segments: readonly PlaySegment[], budgetSeconds: number): PlaySegment[] {
+  const total = segments.reduce((sum, s) => sum + s.seconds, 0);
+  if (total <= budgetSeconds) return segments.map((s) => ({ ...s }));
+  if (budgetSeconds <= 0 || total <= 0) return [];
+  const factor = budgetSeconds / total;
+  return segments.map((s) => ({ ...s, seconds: Math.round(s.seconds * factor * 10) / 10 })).filter((s) => s.seconds >= 0.5);
+}
+
+export const NOT_CLASSIFIED = "Not classified";
+
+/**
+ * Hours per genre from listening totals per song: a song's genre is its CURRENT genre (so a song classified, or corrected by the
+ * admin, after it was played counts under the right genre), falling back to the genre recorded when it was played (for a song that
+ * has since been deleted), and finally "Not classified". Biggest first.
+ */
+export function foldGenres(
+  rows: readonly { trackId: string | null; genre: string | null; seconds: number }[],
+  currentGenre: ReadonlyMap<string, string | null>,
+): { label: string; seconds: number }[] {
+  const totals = new Map<string, number>();
+  for (const r of rows) {
+    const current = r.trackId ? currentGenre.get(r.trackId) : null;
+    const label = current ?? r.genre ?? NOT_CLASSIFIED;
+    totals.set(label, (totals.get(label) ?? 0) + r.seconds);
+  }
+  return [...totals.entries()].map(([label, seconds]) => ({ label, seconds })).sort((a, b) => b.seconds - a.seconds);
 }

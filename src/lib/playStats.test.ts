@@ -1,5 +1,17 @@
 import { describe, expect, it } from "vitest";
-import { MAX_SEGMENTS_PER_REQUEST, MAX_SEGMENT_SECONDS, formatDuration, parseDays, parsePlaySegments, rangeStart, rankBySeconds } from "./playStats";
+import {
+  DAILY_CAP_SECONDS,
+  FIRST_REPORT_SECONDS,
+  MAX_SEGMENTS_PER_REQUEST,
+  MAX_SEGMENT_SECONDS,
+  fitToBudget,
+  foldGenres,
+  formatDuration,
+  parseDays,
+  parsePlaySegments,
+  rangeStart,
+  reportBudgetSeconds,
+} from "./playStats";
 
 describe("parsePlaySegments", () => {
   it("keeps well-formed segments and drops everything else without failing", () => {
@@ -72,14 +84,51 @@ describe("period helpers", () => {
   });
 });
 
-describe("rankBySeconds", () => {
-  it("orders by seconds, limits, and gives each its share of the whole", () => {
-    const ranked = rankBySeconds([{ id: "a", seconds: 100 }, { id: "b", seconds: 300 }, { id: "c", seconds: 100 }], 2);
-    expect(ranked.map((r) => r.id)).toEqual(["b", "a"]);
-    expect(ranked[0].share).toBeCloseTo(0.6);
-    expect(ranked[1].share).toBeCloseTo(0.2);
+describe("reportBudgetSeconds", () => {
+  it("lets an honest report through: about the clock time since the last one, with room to spare", () => {
+    expect(reportBudgetSeconds(30_000, 0)).toBeGreaterThanOrEqual(30);
+    expect(reportBudgetSeconds(0, 0)).toBeLessThan(10); // requests faster than real time get almost nothing
   });
-  it("has no shares when nothing was played", () => {
-    expect(rankBySeconds([{ seconds: 0 }], 5)[0].share).toBe(0);
+  it("gives a first report a fixed allowance", () => {
+    expect(reportBudgetSeconds(null, 0)).toBe(FIRST_REPORT_SECONDS);
+  });
+  it("never credits more than a day in any 24 hours", () => {
+    expect(reportBudgetSeconds(10 * 60 * 60 * 1000, DAILY_CAP_SECONDS - 100)).toBe(100);
+    expect(reportBudgetSeconds(10 * 60 * 60 * 1000, DAILY_CAP_SECONDS + 5000)).toBe(0);
+  });
+});
+
+describe("fitToBudget", () => {
+  const seg = (trackId: string, seconds: number) => ({ trackId, playlistId: null, seconds });
+  it("leaves segments that fit alone", () => {
+    expect(fitToBudget([seg("a", 10), seg("b", 20)], 30)).toEqual([seg("a", 10), seg("b", 20)]);
+  });
+  it("scales everything down by the same factor when over budget", () => {
+    expect(fitToBudget([seg("a", 100), seg("b", 300)], 40)).toEqual([seg("a", 10), seg("b", 30)]);
+  });
+  it("keeps nothing when there is no budget", () => {
+    expect(fitToBudget([seg("a", 100)], 0)).toEqual([]);
+  });
+});
+
+describe("foldGenres", () => {
+  it("uses a song's current genre, then the one recorded when it was played, then 'Not classified'", () => {
+    const current = new Map<string, string | null>([["t1", "Funk"], ["t2", null]]);
+    const out = foldGenres(
+      [
+        { trackId: "t1", genre: null, seconds: 100 }, // classified after it was played
+        { trackId: "t1", genre: "Pop", seconds: 50 }, // played under an old genre the admin has since corrected
+        { trackId: "t2", genre: "Rock", seconds: 30 }, // no current genre: the recorded one stands
+        { trackId: null, genre: "Disco", seconds: 20 }, // a deleted song keeps its recorded genre
+        { trackId: "t3", genre: null, seconds: 10 }, // never classified
+      ],
+      current,
+    );
+    expect(out).toEqual([
+      { label: "Funk", seconds: 150 },
+      { label: "Rock", seconds: 30 },
+      { label: "Disco", seconds: 20 },
+      { label: "Not classified", seconds: 10 },
+    ]);
   });
 });

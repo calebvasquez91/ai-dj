@@ -365,9 +365,30 @@ model PlayEvent {
   playlistName String?
   seconds      Float
   createdAt    DateTime @default(now())
+  /// When this row last grew: the player's reports for one song and playlist are added into one row while they keep coming, and this is
+  /// the time of the account's latest report (the server measures a new report against it).
+  updatedAt    DateTime @default(now()) @updatedAt
 
   @@index([userId, createdAt])
+  @@index([userId, updatedAt])
   @@index([createdAt])
   @@index([trackId])
   @@index([playlistId])
+}
+
+/// What the admin changed on a playlist that belongs to another account (renamed, took a song out, deleted it...). The playlist's name and
+/// the owner's email are copied in, so the line still reads after the playlist or the account is gone. Not tied to the other tables.
+model AdminAction {
+  id           String   @id @default(cuid())
+  adminId      String
+  /// "playlist.rename" | "playlist.delete" | "playlist.add-song" | "playlist.remove-song" | "playlist.reorder"
+  action       String
+  playlistId   String?
+  playlistName String
+  ownerId      String?
+  ownerEmail   String?
+  detail       String?
+  createdAt    DateTime @default(now())
+
+  @@index([createdAt])
 }

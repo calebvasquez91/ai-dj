@@ -53,7 +53,7 @@ export default async function AdminPage() {
         <Card
           href="/admin/stats"
           title="Listening"
-          line={o.listenedSeconds == null ? "Not recording yet" : `${formatDuration(o.listenedSeconds)} played`}
+          line={o.listenedSeconds === "error" ? "—" : o.listenedSeconds == null ? "Not recording yet" : `${formatDuration(o.listenedSeconds)} played`}
           detail="Hours played by account, genre, playlist and song, for all time or the last 7 or 30 days."
         />
         <Card

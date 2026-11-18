@@ -13,8 +13,8 @@ export interface AdminOverview {
   needsReview: number | null;
   /** Playlists across every account. */
   playlists: number | null;
-  /** Seconds of music played across every account, since recording started; null when the listening table does not exist yet. */
-  listenedSeconds: number | null;
+  /** Seconds of music played across every account, since recording started; null when the listening table does not exist yet, "error" when it could not be read. */
+  listenedSeconds: number | null | "error";
 }
 
 async function orNull(read: () => Promise<number>): Promise<number | null> {

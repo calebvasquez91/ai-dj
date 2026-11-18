@@ -1,7 +1,7 @@
 // Server-only. Reads the listening statistics for the Admin page out of PlayEvent: hours per account, per genre, per playlist and per song,
 // for all time or the last 7 / 30 days, for every account or one. Everything is summed in the database, not in the page.
 import { prisma } from "@/lib/prisma";
-import { rangeStart } from "@/lib/playStats";
+import { foldGenres, rangeStart } from "@/lib/playStats";
 
 export interface Entry {
   key: string;
@@ -24,7 +24,7 @@ export interface PlayStatsReport {
 
 export type PlayStatsResult = { ok: true; report: PlayStatsReport } | { ok: false; reason: "no-table" | "error" };
 
-function isMissingTable(err: unknown): boolean {
+export function isMissingTable(err: unknown): boolean {
   const { code, message } = (err ?? {}) as { code?: unknown; message?: unknown };
   return code === "P2021" || (typeof message === "string" && /PlayEvent/.test(message) && /does not exist/i.test(message));
 }
@@ -41,7 +41,7 @@ export async function loadPlayStats(opts: { days: 7 | 30 | null; accountId: stri
     const [byAccount, total, byGenre, byPlaylist, bySong, outside] = await Promise.all([
       prisma.playEvent.groupBy({ by: ["userId"], where: period, _sum: { seconds: true }, orderBy: { _sum: { seconds: "desc" } } }),
       prisma.playEvent.aggregate({ where: scoped, _sum: { seconds: true } }),
-      prisma.playEvent.groupBy({ by: ["genre"], where: scoped, _sum: { seconds: true }, orderBy: { _sum: { seconds: "desc" } } }),
+      prisma.playEvent.groupBy({ by: ["trackId", "genre"], where: scoped, _sum: { seconds: true } }),
       prisma.playEvent.groupBy({
         by: ["playlistId", "playlistName"],
         where: { ...scoped, playlistName: { not: null } },
@@ -58,6 +58,17 @@ export async function loadPlayStats(opts: { days: 7 | 30 | null; accountId: stri
       }),
       prisma.playEvent.aggregate({ where: { ...scoped, playlistName: null }, _sum: { seconds: true } }),
     ]);
+
+    // A song's genre is read as it is NOW (classified or corrected after it was played still counts under the right genre).
+    const listenedTrackIds = [...new Set(byGenre.flatMap((r) => (r.trackId ? [r.trackId] : [])))];
+    const currentGenre = new Map<string, string | null>();
+    try {
+      for (const row of await prisma.trackGenre.findMany({ where: { trackId: { in: listenedTrackIds } }, select: { trackId: true, genre: true } })) {
+        currentGenre.set(row.trackId, row.genre);
+      }
+    } catch {
+      // no genre tables: the genre recorded when each song was played is used
+    }
 
     const [users, playlists] = await Promise.all([
       prisma.user.findMany({ where: { id: { in: byAccount.map((r) => r.userId) } }, select: { id: true, email: true, name: true } }),
@@ -77,7 +88,7 @@ export async function loadPlayStats(opts: { days: 7 | 30 | null; accountId: stri
           const u = userById.get(r.userId);
           return { id: r.userId, key: r.userId, label: u ? accountLabel(u) : "(deleted account)", seconds: r._sum.seconds ?? 0 };
         }),
-        genres: byGenre.map((r) => ({ key: r.genre ?? "—", label: r.genre ?? "Not classified", seconds: r._sum.seconds ?? 0 })),
+        genres: foldGenres(byGenre.map((r) => ({ trackId: r.trackId, genre: r.genre, seconds: r._sum.seconds ?? 0 })), currentGenre).map((g) => ({ key: g.label, label: g.label, seconds: g.seconds })),
         playlists: byPlaylist.map((r) => ({
           key: r.playlistId ?? r.playlistName ?? "?",
           label: r.playlistName ?? "(playlist)",
@@ -95,12 +106,15 @@ export async function loadPlayStats(opts: { days: 7 | 30 | null; accountId: stri
   }
 }
 
-/** All time, every account: the one number the Admin page's front card shows. Null when the table is not there. */
-export async function totalListenedSeconds(): Promise<number | null> {
+/**
+ * All time, every account: the one number the Admin page's front card shows. Null when the table is not there (nothing is being
+ * recorded yet); "error" for any other failure, so a database hiccup is not mistaken for missing setup.
+ */
+export async function totalListenedSeconds(): Promise<number | null | "error"> {
   try {
     const r = await prisma.playEvent.aggregate({ _sum: { seconds: true } });
     return r._sum.seconds ?? 0;
-  } catch {
-    return null;
+  } catch (err) {
+    return isMissingTable(err) ? null : "error";
   }
 }

@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { canManagePlaylist } from "@/lib/playlistAccess";
+import { recordAdminPlaylistAction } from "@/lib/adminAudit";
 import { loadPlaylist, toPlaylistApiResponse } from "@/lib/playlistApi";
 import { loadUserTrackData } from "@/lib/trackUserData";
 import { apiHandler, notFound, unauthorized } from "@/lib/apiRoute";
@@ -22,6 +23,7 @@ async function handlePATCH(request: Request, { params }: { params: Promise<{ id:
   if (!name) return NextResponse.json({ error: "Name is required." }, { status: 400 });
 
   await prisma.playlist.update({ where: { id }, data: { name } });
+  await recordAdminPlaylistAction({ actorId: session.user.id, action: "playlist.rename", playlist: existing, detail: `${existing.name} -> ${name}` });
   const playlist = await loadPlaylist(id);
   return NextResponse.json(toPlaylistApiResponse(playlist!, await loadUserTrackData(session.user.id)));
 }
@@ -42,6 +44,7 @@ async function handleDELETE(request: Request, { params }: { params: Promise<{ id
   }
 
   await prisma.playlist.delete({ where: { id } });
+  await recordAdminPlaylistAction({ actorId: session.user.id, action: "playlist.delete", playlist: existing });
   return new NextResponse(null, { status: 204 });
 }
 
