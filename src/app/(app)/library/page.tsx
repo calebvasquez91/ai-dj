@@ -3,19 +3,21 @@
 import { Suspense, startTransition, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { useStore } from "@/lib/store";
-import { filesToTracks } from "@/lib/localAudio";
-import { searchTracks } from "@/lib/search";
+import { describeUploadFailures, uploadFiles } from "@/lib/localAudio";
+import { searchTracksWithGenres } from "@/lib/search";
 import { useLiked } from "@/lib/liked";
 import { LIBRARY_VIEWS, artistsOf, likedTracks, parseLibraryView, type LibraryView } from "@/lib/library";
 import { TrackGrid } from "@/components/TrackGrid";
 import { AddSelectedToPlaylistButton } from "@/components/AddSelectedToPlaylistButton";
-import { ConnectYouTubeButton } from "@/components/ConnectYouTubeButton";
-import { YouTubeImportModal } from "@/components/YouTubeImportModal";
+import { useIsAdmin } from "@/components/FeedbackOwnerProvider";
 import { FxLibraryPanel } from "@/components/FxLibraryPanel";
+import { GenresView } from "@/components/GenresView";
+import { GenreReviewView } from "@/components/GenreReviewView";
+import { filterByGenre, genreOverview, type GenreFilter } from "@/lib/genreLibrary";
+import { useGenreClient } from "@/lib/genreClient";
 import { CloseIcon, PlusIcon, ShuffleIcon } from "@/components/Icons";
 import { Chip, ChipRow, CoverMosaic, MediaCard, Text } from "@/ui";
 
-type SourceFilter = "all" | "local" | "youtube";
 
 function LibraryContent() {
   const inputRef = useRef<HTMLInputElement>(null);
@@ -46,24 +48,26 @@ function LibraryContent() {
       if (s.searchQuery !== prev.searchQuery) sync(s.searchQuery);
     });
   }, []);
-  const [sourceFilter, setSourceFilter] = useState<SourceFilter>("all");
+  // Everyone can add songs and take them out of their playlists; taking one out of the library for good is the admin's alone.
+  const isAdmin = useIsAdmin();
+  // A genre chosen in the Genres view narrows the Songs view to it.
+  const [genreFilter, setGenreFilter] = useState<GenreFilter | null>(null);
+  const needsReview = useGenreClient((s) => s.needsReview);
+  const genreChips = useMemo(() => genreOverview(localLibrary).genres.slice(0, 12), [localLibrary]);
 
   // Liked is the library narrowed to the songs liked on this device; every other control works on whatever is shown.
-  const pool = useMemo(() => (view === "liked" ? likedTracks(localLibrary, likedIds) : localLibrary), [view, localLibrary, likedIds]);
-  const searched = useMemo(
-    () => (query.trim() ? searchTracks(pool, query).map((h) => h.item) : pool),
+  const pool = useMemo(() => {
+    const base = view === "liked" ? likedTracks(localLibrary, likedIds) : localLibrary;
+    return genreFilter ? filterByGenre(base, genreFilter) : base;
+  }, [view, localLibrary, likedIds, genreFilter]);
+  const filtered = useMemo(
+    () => (query.trim() ? searchTracksWithGenres(pool, query).map((h) => h.item) : pool),
     [pool, query]
   );
   const artists = useMemo(() => artistsOf(localLibrary), [localLibrary]);
-  const filtered = useMemo(
-    () => (sourceFilter === "all" ? searched : searched.filter((t) => t.source === sourceFilter)),
-    [searched, sourceFilter]
-  );
   const shufflableCount = filtered.filter((t) => t.playPreference !== "do-not").length;
-  const hasYoutubeTracks = localLibrary.some((t) => t.source === "youtube");
 
   const [uploadError, setUploadError] = useState<string | null>(null);
-  const [youtubeModalOpen, setYoutubeModalOpen] = useState(false);
 
   // Bulk "add to playlist" — selecting and moving tracks into a playlist
   // never removes them from the library; it only adds a reference, exactly
@@ -98,10 +102,10 @@ function LibraryContent() {
     setLoading(true);
     setUploadError(null);
     try {
-      const tracks = await filesToTracks(files);
-      addLocalTracks(tracks);
-    } catch (err) {
-      setUploadError(err instanceof Error ? err.message : "Failed to add files.");
+      // Each file on its own: the ones that uploaded are in the account already, so they join the library even if another failed.
+      const { tracks, failed } = await uploadFiles(files);
+      if (tracks.length > 0) addLocalTracks(tracks);
+      setUploadError(describeUploadFailures(failed, files.length));
     } finally {
       setLoading(false);
       e.target.value = "";
@@ -150,7 +154,6 @@ function LibraryContent() {
             {loading ? <span aria-hidden="true">…</span> : <PlusIcon size={15} />}
             <span className="hidden sm:inline">{loading ? "Adding…" : "Add Files"}</span>
           </button>
-          <ConnectYouTubeButton onReady={() => setYoutubeModalOpen(true)} />
         </div>
         <input
           ref={inputRef}
@@ -163,9 +166,9 @@ function LibraryContent() {
       </div>
 
       <ChipRow label="Library sections">
-        {LIBRARY_VIEWS.map((v) => (
+        {LIBRARY_VIEWS.filter((v) => v.id !== "review" || isAdmin).map((v) => (
           <Chip key={v.id} selected={view === v.id} onClick={() => setView(v.id)}>
-            {v.label}
+            {v.id === "review" && needsReview > 0 ? `${v.label} (${needsReview})` : v.label}
           </Chip>
         ))}
       </ChipRow>
@@ -178,6 +181,32 @@ function LibraryContent() {
           <span>Showing songs matching</span>
           <Chip selected onClick={() => useStore.getState().setSearchQuery("")} aria-label={`Clear filter ${query.trim()}`} title="Clear filter">
             &ldquo;{query.trim()}&rdquo; ✕
+          </Chip>
+        </div>
+      )}
+      {genreChips.length > 0 && (
+        <ChipRow label="Filter by genre">
+          {genreChips.map((g) => (
+            <Chip key={g.genre} selected={genreFilter?.genre === g.genre} onClick={() => setGenreFilter(genreFilter?.genre === g.genre && !genreFilter.subgenre ? null : { genre: g.genre })}>
+              {g.genre} <span className="ml-1 font-mono text-xs opacity-70">{g.count}</span>
+            </Chip>
+          ))}
+        </ChipRow>
+      )}
+      {genreFilter && (genreChips.find((g) => g.genre === genreFilter.genre)?.subgenres.length ?? 0) > 0 && (
+        <ChipRow label={`Subgenres of ${genreFilter.genre}`}>
+          {genreChips.find((g) => g.genre === genreFilter.genre)!.subgenres.map((s) => (
+            <Chip key={s.subgenre} selected={genreFilter.subgenre === s.subgenre} onClick={() => setGenreFilter(genreFilter.subgenre === s.subgenre ? { genre: genreFilter.genre } : { genre: genreFilter.genre, subgenre: s.subgenre })}>
+              {s.subgenre} <span className="ml-1 font-mono text-xs opacity-70">{s.count}</span>
+            </Chip>
+          ))}
+        </ChipRow>
+      )}
+      {genreFilter && (
+        <div className="flex flex-wrap items-center gap-2 text-sm text-muted">
+          <span>Showing</span>
+          <Chip selected onClick={() => setGenreFilter(null)} aria-label={`Clear genre filter ${genreFilter.subgenre ?? genreFilter.genre}`} title="Clear genre filter">
+            {genreFilter.subgenre ? `${genreFilter.genre} · ${genreFilter.subgenre}` : genreFilter.genre} ✕
           </Chip>
         </div>
       )}
@@ -195,22 +224,6 @@ function LibraryContent() {
           <span className="text-sm text-muted">{selectedIds.size} selected</span>
           <div className="flex-1" />
           <AddSelectedToPlaylistButton tracks={selectedTracks} onDone={exitSelectMode} />
-        </div>
-      )}
-
-      {hasYoutubeTracks && (
-        <div className="flex items-center gap-2">
-          {(["all", "local", "youtube"] as const).map((option) => (
-            <button
-              key={option}
-              type="button"
-              onClick={() => setSourceFilter(option)}
-              data-active={sourceFilter === option}
-              className="btn-outline"
-            >
-              {option === "all" ? "All" : option === "local" ? "Local files" : "YouTube"}
-            </button>
-          ))}
         </div>
       )}
 
@@ -235,7 +248,7 @@ function LibraryContent() {
       ) : (
         <TrackGrid
           tracks={filtered}
-          onRemove={handleRemove}
+          onRemove={isAdmin ? handleRemove : undefined}
           selectedIds={selectMode ? selectedIds : undefined}
           onToggleSelect={selectMode ? toggleSelect : undefined}
         />
@@ -266,13 +279,25 @@ function LibraryContent() {
           </ul>
         ))}
 
+      {view === "genres" && (
+        <GenresView
+          selected={genreFilter}
+          onPick={(filter) => {
+            setGenreFilter(filter);
+            setView("songs");
+          }}
+          onReview={() => setView("review")}
+        />
+      )}
+
+      {view === "review" && isAdmin && <GenreReviewView />}
+
       {view === "fx" && (
         <div className="flex max-w-2xl flex-col rounded-card border border-border-subtle bg-surface">
           <FxLibraryPanel />
         </div>
       )}
 
-      {youtubeModalOpen && <YouTubeImportModal onClose={() => setYoutubeModalOpen(false)} />}
     </div>
   );
 }

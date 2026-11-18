@@ -3,7 +3,9 @@
 import { useRouter } from "next/navigation";
 import { useStore } from "@/lib/store";
 import { pinnedFirst } from "@/lib/homeSections";
-import { PlusIcon } from "@/components/Icons";
+import { PlusIcon, SparklesIcon } from "@/components/Icons";
+import { useCurateUi } from "@/lib/curateClient";
+import { SmartPlaylists } from "@/components/SmartPlaylists";
 import { Button, CoverMosaic, MediaCard, Skeleton, Text } from "@/ui";
 
 export default function PlaylistsPage() {
@@ -26,10 +28,16 @@ export default function PlaylistsPage() {
     <div className="flex flex-col gap-6 p-4 sm:p-6">
       <div className="flex items-center justify-between gap-3">
         <h1 className="text-2xl font-bold tracking-tight">Playlists</h1>
-        <Button variant="primary" onClick={handleCreate}>
-          <PlusIcon size={14} />
-          New playlist
-        </Button>
+        <div className="flex flex-wrap items-center gap-2">
+          <Button variant="secondary" onClick={() => useCurateUi.getState().show()}>
+            <SparklesIcon size={14} />
+            Create with DJ
+          </Button>
+          <Button variant="primary" onClick={handleCreate}>
+            <PlusIcon size={14} />
+            New playlist
+          </Button>
+        </div>
       </div>
 
       {!playlistsLoaded ? (
@@ -72,6 +80,7 @@ export default function PlaylistsPage() {
           </ul>
         </>
       )}
+      <SmartPlaylists />
     </div>
   );
 }

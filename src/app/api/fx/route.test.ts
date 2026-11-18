@@ -6,6 +6,7 @@ const mocks = vi.hoisted(() => ({
 }));
 
 vi.mock("@/auth", () => ({ auth: vi.fn(async () => ({ user: { id: "u1" } })) }));
+vi.mock("@/lib/uploadGuard", () => ({ uploadLimitResponse: vi.fn(async () => null) }));
 vi.mock("@/lib/prisma", () => ({ prisma: { fxSound: { create: mocks.create, findMany: vi.fn(async () => []) } } }));
 vi.mock("@/lib/storage", () => ({
   getStorageBackend: () => mocks.backend,

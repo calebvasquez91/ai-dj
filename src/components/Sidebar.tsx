@@ -7,7 +7,7 @@ import { useStore } from "@/lib/store";
 import { useFeedbackUi } from "@/lib/feedbackUi";
 import { ThemeToggle } from "@/components/ThemeToggle";
 import { HomeIcon, LibraryIcon, QueueIcon, SearchIcon, SlidersIcon, SparklesIcon } from "@/components/Icons";
-import { useIsFeedbackOwner } from "@/components/FeedbackOwnerProvider";
+import { useIsAdmin } from "@/components/FeedbackOwnerProvider";
 import type { ComponentType } from "react";
 
 function NavLink({
@@ -42,7 +42,7 @@ function NavLink({
 export function Sidebar() {
   const router = useRouter();
   const { data: session } = useSession();
-  const isFeedbackOwner = useIsFeedbackOwner();
+  const isFeedbackOwner = useIsAdmin();
   const playlists = useStore((s) => s.playlists);
   const createPlaylist = useStore((s) => s.createPlaylist);
   const sidebarOpen = useStore((s) => s.sidebarOpen);

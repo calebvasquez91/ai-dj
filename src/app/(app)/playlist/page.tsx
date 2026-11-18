@@ -8,6 +8,9 @@ import { CoverMosaic, IconButton, Text } from "@/ui";
 import { PlayIcon } from "@/components/Icons";
 import { TrackThumbnail } from "@/components/TrackThumbnail";
 import { AddMusicBar } from "@/components/AddMusicBar";
+import { UploadSongsButton } from "@/components/UploadSongsButton";
+import { GenreBadge } from "@/components/GenreBadge";
+import { useGenreClient } from "@/lib/genreClient";
 
 /**
  * The playlist name as a textarea that grows with its content, not an
@@ -68,6 +71,9 @@ function PlaylistContent() {
   const renamePlaylist = useStore((s) => s.renamePlaylist);
   const persistPlaylistName = useStore((s) => s.persistPlaylistName);
   const removePlaylist = useStore((s) => s.removePlaylist);
+  const addLocalTracks = useStore((s) => s.addLocalTracks);
+  const addTrackToPlaylist = useStore((s) => s.addTrackToPlaylist);
+  const reclassifyGenres = useGenreClient((s) => s.reclassify);
   const removeTrackFromPlaylist = useStore((s) => s.removeTrackFromPlaylist);
   const moveTrackInPlaylist = useStore((s) => s.moveTrackInPlaylist);
   const playPlaylist = useStore((s) => s.playPlaylist);
@@ -119,6 +125,26 @@ function PlaylistContent() {
                 </button>
               </>
             )}
+            {/* On every playlist, Spooky Music and Same Beat included: the files go to the library and onto the end of this playlist. */}
+            <UploadSongsButton
+              key={playlist.id}
+              title="Upload audio files from your computer: they are saved to the music library and added to this playlist"
+              onUploaded={async (tracks) => {
+                addLocalTracks(tracks);
+                // They all appear at once; the store saves them to the server one after another, in the order picked.
+                await Promise.all(tracks.map((track) => addTrackToPlaylist(playlist.id, track)));
+              }}
+            />
+            {playlist.tracks.length > 0 && (
+              <button
+                type="button"
+                onClick={() => void reclassifyGenres({ playlistId: playlist.id })}
+                className="btn-outline !text-xs shrink-0"
+                title="Look up the genres of every track in this playlist again. Genres you set yourself are kept."
+              >
+                Re-classify genres
+              </button>
+            )}
             {!playlist.theme && (
               <button
                 type="button"
@@ -137,7 +163,7 @@ function PlaylistContent() {
 
       {playlist.tracks.length === 0 ? (
         <p className="text-sm text-muted">
-          No tracks yet. Add local files and use the + button to add them here.
+          No tracks yet. Upload songs here, or use Add Music below to pick from your library.
         </p>
       ) : (
         <>
@@ -176,6 +202,7 @@ function PlaylistContent() {
                 <div className="min-w-0 flex-1 basis-32">
                   <p className="text-sm font-medium break-words line-clamp-2">{track.title}</p>
                   <p className="text-xs text-muted break-words line-clamp-1">{track.artist}</p>
+                  <GenreBadge track={track} />
                   {analyzingTrackIds.has(track.id) && (
                     <p className="text-[10px] font-medium text-accent-purple" aria-live="polite">
                       Analyzing…

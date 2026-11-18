@@ -94,3 +94,31 @@ describe("pinnedFirst", () => {
     expect(input.map((p) => p.id)).toEqual(["a", "b"]);
   });
 });
+
+describe("genre-aware Home rows", () => {
+  const tag = (genre: string, source: "musicbrainz" | "lastfm" | "manual" = "musicbrainz", confidence = 0.85) => ({ genre, source, confidence, updatedAt: 1 });
+  const song = (id: string, genre: string | null, over: Partial<Track> = {}): Track =>
+    ({ id, title: id, artist: `artist-${id}`, durationSec: 100, addedAt: 0, source: "local", sourceUrl: id, ...(genre ? { genreTags: [tag(genre), tag(genre, "lastfm")] } : {}), ...over }) as Track;
+
+  it("Mixed for you counts a shared genre, using the library's copy of what was played", () => {
+    const library = [song("played", "Jazz"), song("jazz1", "Jazz"), song("jazz2", "Jazz"), song("rock1", "Rock")];
+    // The played copy predates its classification: it carries no genre of its own.
+    const history = [song("played", null)];
+    expect(mixedForYou(library, history).map((t) => t.id)).toEqual(expect.arrayContaining(["jazz1", "jazz2"]));
+    expect(mixedForYou(library, history).map((t) => t.id)).not.toContain("rock1");
+  });
+  it("a person's own genre decides what counts", () => {
+    const manual = song("played", null, { genreTags: [tag("Jazz", "manual", 1), tag("Rock"), tag("Rock", "lastfm")] });
+    const library = [manual, song("jazz1", "Jazz"), song("rock1", "Rock")];
+    expect(mixedForYou(library, [manual]).map((t) => t.id)).toEqual(["jazz1"]);
+  });
+  it("quick picks put songs in the genres you played between what you played and what was added", () => {
+    const library = [song("played", "Jazz", { addedAt: 1 }), song("new1", "Rock", { addedAt: 9 }), song("jazzy", "Jazz", { addedAt: 2 }), song("new2", "Rock", { addedAt: 8 })];
+    const picks = quickPicks(library, [library[0]], 4).map((t) => t.id);
+    expect(picks).toEqual(["played", "jazzy", "new1", "new2"]);
+  });
+  it("with no genre data, quick picks are just played then added, as before", () => {
+    const library = [song("a", null, { addedAt: 1 }), song("b", null, { addedAt: 3 }), song("c", null, { addedAt: 2 })];
+    expect(quickPicks(library, [library[0]], 3).map((t) => t.id)).toEqual(["a", "b", "c"]);
+  });
+});

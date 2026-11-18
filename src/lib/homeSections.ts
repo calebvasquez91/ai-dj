@@ -3,6 +3,7 @@
  * grid, the filter chips. Pure, so the rules are tested; app/(app)/page.tsx only lays them out.
  */
 import type { Mood } from "@/lib/moods";
+import { genresOfTrack } from "@/lib/genreLibrary";
 import type { Playlist, Track } from "@/types/music";
 
 /** Most-recently-played first, deduped by track id: `history` is append-order (oldest first). */
@@ -26,11 +27,42 @@ export function recentlyAdded(library: readonly Track[], limit: number): Track[]
 /** How many songs the quick-picks grid holds: three pages of 3 x 3. */
 export const QUICK_PICKS_LIMIT = 27;
 
-/** What to offer first: what was played lately, then what was added lately, with no song twice. */
+/** Points a library song earns per genre it shares with what was played lately (artists and tags earn one each). */
+const GENRE_AFFINITY_WEIGHT = 1.5;
+
+/** The genres (resolved: a person's own first) of what was played lately, with how many plays each, read from the library's copy of each track since a played copy may predate its classification. */
+function lateGenres(library: readonly Track[], lately: readonly Track[]): Map<string, number> {
+  const byId = new Map(library.map((t) => [t.id, t]));
+  const counts = new Map<string, number>();
+  for (const played of lately) {
+    for (const g of genresOfTrack(byId.get(played.id) ?? played)) counts.set(g.genre, (counts.get(g.genre) ?? 0) + 1);
+  }
+  return counts;
+}
+
+/** Library songs that share genres with what was played lately, the strongest overlap first (newest first on a tie); empty when nothing played has a genre. */
+function genreAffinityPicks(library: readonly Track[], history: readonly Track[], limit: number): Track[] {
+  const lately = recentlyPlayed(history, 20);
+  const genres = lateGenres(library, lately);
+  if (genres.size === 0) return [];
+  const playedIds = new Set(recentlyPlayed(history, 12).map((t) => t.id));
+  return library
+    .filter((t) => !playedIds.has(t.id) && t.playPreference !== "do-not")
+    .map((t) => ({ t, score: genresOfTrack(t).reduce((sum, g) => sum + (genres.get(g.genre) ?? 0) * g.confidence, 0) }))
+    .filter((x) => x.score > 0)
+    .sort((a, b) => b.score - a.score || b.t.addedAt - a.t.addedAt)
+    .slice(0, limit)
+    .map((x) => x.t);
+}
+
+/**
+ * What to offer first: what was played lately, then a few songs in the genres that were played, then what was added lately,
+ * with no song twice. With no genre data the middle step is empty and it is just played, then added.
+ */
 export function quickPicks(library: readonly Track[], history: readonly Track[], limit = QUICK_PICKS_LIMIT): Track[] {
   const seen = new Set<string>();
   const picks: Track[] = [];
-  for (const track of [...recentlyPlayed(history, limit), ...recentlyAdded(library, limit)]) {
+  for (const track of [...recentlyPlayed(history, limit), ...genreAffinityPicks(library, history, Math.floor(limit / 3)), ...recentlyAdded(library, limit)]) {
     if (seen.has(track.id) || picks.length >= limit) continue;
     seen.add(track.id);
     picks.push(track);
@@ -40,7 +72,7 @@ export function quickPicks(library: readonly Track[], history: readonly Track[],
 
 /**
  * Songs like the ones played lately: each library song scores a point for an artist and for every tag it shares with the
- * last twenty plays, and the highest scores come first (newest first on a tie). Songs played lately are never offered
+ * last twenty plays, and up to 1.5 for each genre it shares with them (resolved genres: a person's own decide), and the highest scores come first (newest first on a tie). Songs played lately are never offered
  * back; with nothing played there is nothing to be "like", so the row is empty.
  */
 export function mixedForYou(library: readonly Track[], history: readonly Track[], limit = 12): Track[] {
@@ -56,11 +88,14 @@ export function mixedForYou(library: readonly Track[], history: readonly Track[]
     }
   }
   const playedIds = new Set(recentlyPlayed(history, 12).map((t) => t.id));
+  const genres = lateGenres(library, lately);
   return library
     .filter((t) => !playedIds.has(t.id) && t.playPreference !== "do-not")
     .map((t) => {
       let score = artists.get(t.artist.trim().toLowerCase()) ?? 0;
       for (const tag of new Set((t.tags ?? []).map((x) => x.trim().toLowerCase()))) score += tags.get(tag) ?? 0;
+      // Songs in the genres played lately: a person's own genre counts in full, a source's by how sure it is.
+      for (const g of genresOfTrack(t)) score += GENRE_AFFINITY_WEIGHT * Math.min(1, (genres.get(g.genre) ?? 0) / 3) * g.confidence;
       return { t, score };
     })
     .filter((x) => x.score > 0)

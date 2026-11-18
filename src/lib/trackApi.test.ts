@@ -52,3 +52,45 @@ describe("toTrackApiResponse", () => {
     expect(response.analysis).toBeNull();
   });
 });
+
+describe("per-person data on a shared song", () => {
+  const song = {
+    id: "t1",
+    userId: "someone-else",
+    title: "T",
+    artist: "A",
+    durationSec: 10,
+    source: "local",
+    storageKey: "https://x.public.blob.vercel-storage.com/t.mp3",
+    mimeType: "audio/mpeg",
+    thumbnailUrl: null,
+    playPreference: "must", // the pre-sharing column: ignored
+    createdAt: new Date(0),
+    hotCueOverridesJson: '{"1":5}', // ignored too
+    tagsJson: '["halloween"]', // tags are shared, so kept
+    bpm: null,
+    bpmSource: null,
+    buildDropPairsJson: null,
+    waveformPeaksJson: null,
+    lyricalFingerprintJson: null,
+  } as unknown as Parameters<typeof toTrackApiResponse>[0];
+
+  it("takes the must / do-not-play mark and hot cues from the reader's own data, not from the shared song", () => {
+    const mine = toTrackApiResponse(song, { playPreference: "do-not", hotCueOverridesJson: '{"2":9}' });
+    expect(mine.playPreference).toBe("do-not");
+    expect(mine.hotCueOverrides).toEqual({ "2": 9 });
+    expect(mine.tags).toEqual(["halloween"]);
+  });
+
+  it("shows nothing when the reader has set nothing, whatever the shared song's old columns say", () => {
+    for (const none of [undefined, {}, { playPreference: null, hotCueOverridesJson: null }]) {
+      const r = toTrackApiResponse(song, none);
+      expect(r.playPreference).toBeUndefined();
+      expect(r.hotCueOverrides).toBeUndefined();
+    }
+  });
+
+  it("ignores a value that is not a real mark", () => {
+    expect(toTrackApiResponse(song, { playPreference: "maybe" }).playPreference).toBeUndefined();
+  });
+});

@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { loadPlaylist, toPlaylistApiResponse } from "@/lib/playlistApi";
+import { loadUserTrackData } from "@/lib/trackUserData";
 import { apiHandler, notFound, unauthorized } from "@/lib/apiRoute";
 
 async function handlePOST(request: Request, { params }: { params: Promise<{ id: string }> }) {
@@ -19,7 +20,7 @@ async function handlePOST(request: Request, { params }: { params: Promise<{ id: 
   if (!trackId) return NextResponse.json({ error: "trackId is required." }, { status: 400 });
 
   const track = await prisma.track.findUnique({ where: { id: trackId } });
-  if (!track || track.userId !== session.user.id) {
+  if (!track) {
     return NextResponse.json({ error: "Track not found." }, { status: 404 });
   }
 
@@ -44,7 +45,7 @@ async function handlePOST(request: Request, { params }: { params: Promise<{ id: 
   });
 
   const updated = await loadPlaylist(id);
-  return NextResponse.json(toPlaylistApiResponse(updated!), { status: 201 });
+  return NextResponse.json(toPlaylistApiResponse(updated!, await loadUserTrackData(session.user.id)), { status: 201 });
 }
 
 export const POST = apiHandler(handlePOST);

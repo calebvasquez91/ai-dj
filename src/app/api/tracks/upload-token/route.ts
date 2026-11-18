@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { handleUpload, type HandleUploadBody } from "@vercel/blob/client";
 import { auth } from "@/auth";
 import { apiHandler, unauthorized } from "@/lib/apiRoute";
+import { uploadLimitResponse } from "@/lib/uploadGuard";
 
 const ALLOWED_AUDIO_TYPES = [
   "audio/mpeg",
@@ -18,6 +19,9 @@ const ALLOWED_AUDIO_TYPES = [
 async function handlePOST(request: Request) {
   const session = await auth();
   if (!session) return unauthorized();
+  // A token is the licence to put a file in the shared store, so the daily limit is checked here as well as when the file is recorded.
+  const limited = await uploadLimitResponse(session.user.id);
+  if (limited) return limited;
 
   const body = (await request.json()) as HandleUploadBody;
 

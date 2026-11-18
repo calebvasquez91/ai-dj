@@ -1,6 +1,7 @@
 /**
- * Who may read, and delete from, the feedback inbox (app/(app)/admin/feedback). The owner's account id(s), listed in
- * FEEDBACK_ADMIN_USER_IDS (comma separated). Nothing else grants it, and with the variable unset nobody has it.
+ * Who is the admin: may read and delete from the feedback inbox (app/(app)/admin/feedback) and alone may delete or edit a song in the
+ * shared music library. The account id(s) listed in ADMIN_USER_IDS (comma separated; the older name FEEDBACK_ADMIN_USER_IDS is read when
+ * that one is not set). Nothing else grants it, and with neither variable set nobody has it.
  *
  * It is an id and not an email on purpose: sign-up doesn't verify email addresses, so an allow-list of emails would hand
  * the inbox to anyone who registered a listed address that had no account yet (a typo, a second address, an account that
@@ -8,7 +9,7 @@
  * owner. Each person can see their own id in Settings.
  */
 
-/** The ids in a FEEDBACK_ADMIN_USER_IDS value: trimmed, empty entries dropped (ids are case-sensitive, so left as they are). */
+/** The ids in an ADMIN_USER_IDS value: trimmed, empty entries dropped (ids are case-sensitive, so left as they are). */
 export function parseAdminIds(raw: string | undefined | null): string[] {
   if (!raw) return [];
   return raw
@@ -18,7 +19,11 @@ export function parseAdminIds(raw: string | undefined | null): string[] {
 }
 
 /** True when `userId` is exactly one of the configured admin ids (never a substring or a different case). */
-export function isFeedbackAdmin(userId: string | null | undefined, env: Record<string, string | undefined> = process.env): boolean {
+export function isAdmin(userId: string | null | undefined, env: Record<string, string | undefined> = process.env): boolean {
   if (!userId) return false;
-  return parseAdminIds(env.FEEDBACK_ADMIN_USER_IDS).includes(userId);
+  const raw = env.ADMIN_USER_IDS?.trim() ? env.ADMIN_USER_IDS : env.FEEDBACK_ADMIN_USER_IDS;
+  return parseAdminIds(raw).includes(userId);
 }
+
+/** The same check under its first name, for the feedback inbox code that was written before the admin had other powers. */
+export const isFeedbackAdmin = isAdmin;
