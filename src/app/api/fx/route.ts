@@ -17,10 +17,8 @@ async function handleGET() {
   const session = await auth();
   if (!session) return unauthorized();
 
-  const fx = await prisma.fxSound.findMany({
-    where: { userId: session.user.id },
-    orderBy: { createdAt: "asc" },
-  });
+  // FX sounds are shared: every account sees every one, whoever added it.
+  const fx = await prisma.fxSound.findMany({ orderBy: { createdAt: "asc" } });
   return NextResponse.json(fx.map(toFxApiResponse));
 }
 

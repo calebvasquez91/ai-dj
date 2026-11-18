@@ -16,3 +16,6 @@ export function FeedbackOwnerProvider({ isOwner, children }: { isOwner: boolean;
 export function useIsFeedbackOwner(): boolean {
   return useContext(FeedbackOwnerContext);
 }
+
+/** Whether the signed-in person is the admin (the same account that owns the feedback inbox): only they see the buttons that edit or delete a shared song or FX sound. The server checks again on every request. */
+export const useIsAdmin = useIsFeedbackOwner;

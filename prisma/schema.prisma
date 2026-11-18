@@ -26,6 +26,7 @@ model User {
   playlists    Playlist[]
   fxSounds     FxSound[]
   feedback     Feedback[]
+  trackData    TrackUserData[]
 }
 
 model Track {
@@ -91,6 +92,7 @@ model Track {
   tagsJson String?
 
   playlistTracks PlaylistTrack[]
+  userData       TrackUserData[]
   stemJobs       StemSeparationJob[]
 
   @@index([userId])
@@ -235,4 +237,22 @@ model Feedback {
 
   @@index([userId])
   @@index([createdAt])
+}
+
+/// What one person keeps for themselves on a song everyone shares (Track): their "must / do-not play" mark and their own hot cues.
+/// The song itself (title, tags, analysis, audio) is the same for every account; these two are not. No row = nothing set.
+model TrackUserData {
+  userId  String
+  user    User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  trackId String
+  track   Track  @relation(fields: [trackId], references: [id], onDelete: Cascade)
+
+  /// "must" | "do-not" - enforced in app code, not a DB enum.
+  playPreference      String?
+  /// JSON.stringify'd {"<cue 1-8>": seconds}, same shape as Track.hotCueOverridesJson.
+  hotCueOverridesJson String?
+  updatedAt           DateTime @updatedAt
+
+  @@id([userId, trackId])
+  @@index([trackId])
 }

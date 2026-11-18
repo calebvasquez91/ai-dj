@@ -45,10 +45,9 @@ const REPLICATE_MODEL_VERSION = "5a7041cc9b82e5a558fea6b3d7b12dea89625e89da33f04
 /** How long a "pending" (claimed, Replicate not yet called) job may sit before POST treats it as dead. */
 const PENDING_STALE_MS = 2 * 60 * 1000;
 
-async function loadOwnedTrack(id: string, userId: string) {
-  const track = await prisma.track.findUnique({ where: { id } });
-  if (!track || track.userId !== userId) return null;
-  return track;
+/** Any signed-in person can reach any song's stems: the library is shared. */
+function loadTrack(id: string) {
+  return prisma.track.findUnique({ where: { id } });
 }
 
 function latestJob(trackId: string) {
@@ -60,7 +59,7 @@ async function handlePOST(request: Request, { params }: { params: Promise<{ id: 
   if (!session) return unauthorized();
 
   const { id } = await params;
-  const track = await loadOwnedTrack(id, session.user.id);
+  const track = await loadTrack(id);
   if (!track) return notFound();
 
   if (track.source !== "local") {
@@ -104,7 +103,9 @@ async function handlePOST(request: Request, { params }: { params: Promise<{ id: 
       }
     }
     if (auto) {
-      const summary = await stemSummaryForUser(tx, session.user.id);
+      // The auto-separation budget is counted against the account the song belongs to (whoever added it), so it caps what one
+      // library's songs can cost no matter who asks.
+      const summary = await stemSummaryForUser(tx, track.userId);
       const decision = autoBudgetDecision({ spentUsd: summary.spentUsd, inFlight: summary.inFlight, budgetUsd: summary.budgetUsd });
       if (!decision.allowed) return { blocked: { reason: decision.reason, summary } };
     }
@@ -154,7 +155,7 @@ async function handleGET(request: Request, { params }: { params: Promise<{ id: s
   if (!session) return unauthorized();
 
   const { id } = await params;
-  const track = await loadOwnedTrack(id, session.user.id);
+  const track = await loadTrack(id);
   if (!track) return notFound();
 
   const job = await latestJob(id);

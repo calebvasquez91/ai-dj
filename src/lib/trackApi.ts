@@ -17,11 +17,21 @@ export function trackSourceUrl(track: Pick<PrismaTrack, "id" | "storageKey">): s
   return getStorageBackend() === "local" ? `/api/tracks/${track.id}/audio` : track.storageKey;
 }
 
-function isPlayPreference(value: string | null): value is "must" | "do-not" {
+function isPlayPreference(value: string | null | undefined): value is "must" | "do-not" {
   return value === "must" || value === "do-not";
 }
 
-export function toTrackApiResponse(track: PrismaTrack): TrackApiResponse {
+/**
+ * What one person keeps for themselves on a shared song (TrackUserData): their must / do-not-play mark and their own hot cues. The
+ * Track row's own copies of these two columns are from before the library was shared and are not read any more.
+ */
+export type UserTrackData = { playPreference?: string | null; hotCueOverridesJson?: string | null };
+
+function parseHotCues(json: string | null | undefined): Track["hotCueOverrides"] {
+  return json ? JSON.parse(json) : undefined;
+}
+
+export function toTrackApiResponse(track: PrismaTrack, userData?: UserTrackData): TrackApiResponse {
   const analysis: TrackAnalysis | null =
     track.bpm == null
       ? null
@@ -51,8 +61,8 @@ export function toTrackApiResponse(track: PrismaTrack): TrackApiResponse {
     durationSec: track.durationSec,
     addedAt: track.createdAt.getTime(),
     thumbnailUrl: track.thumbnailUrl ?? undefined,
-    playPreference: isPlayPreference(track.playPreference) ? track.playPreference : undefined,
-    hotCueOverrides: track.hotCueOverridesJson ? JSON.parse(track.hotCueOverridesJson) : undefined,
+    playPreference: isPlayPreference(userData?.playPreference) ? userData?.playPreference : undefined,
+    hotCueOverrides: parseHotCues(userData?.hotCueOverridesJson),
     tags: track.tagsJson ? JSON.parse(track.tagsJson) : undefined,
     analysis,
     lyricalFingerprint,
@@ -87,7 +97,7 @@ export const PLAYLIST_TRACK_OMIT = {
 export type PlaylistTrackRow = Omit<PrismaTrack, keyof typeof PLAYLIST_TRACK_OMIT>;
 
 /** The same Track shape as toTrackApiResponse, minus the analysis/lyricalFingerprint extras (not part of the client's Track type). */
-export function toTrackSummary(track: PlaylistTrackRow): Track {
+export function toTrackSummary(track: PlaylistTrackRow, userData?: UserTrackData): Track {
   const base = {
     id: track.id,
     title: track.title,
@@ -95,8 +105,8 @@ export function toTrackSummary(track: PlaylistTrackRow): Track {
     durationSec: track.durationSec,
     addedAt: track.createdAt.getTime(),
     thumbnailUrl: track.thumbnailUrl ?? undefined,
-    playPreference: isPlayPreference(track.playPreference) ? track.playPreference : undefined,
-    hotCueOverrides: track.hotCueOverridesJson ? JSON.parse(track.hotCueOverridesJson) : undefined,
+    playPreference: isPlayPreference(userData?.playPreference) ? userData?.playPreference : undefined,
+    hotCueOverrides: parseHotCues(userData?.hotCueOverridesJson),
     tags: track.tagsJson ? JSON.parse(track.tagsJson) : undefined,
   };
   if (track.source === "youtube") {

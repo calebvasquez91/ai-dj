@@ -5,11 +5,16 @@ import { getStorageBackend, deleteLocalFile, deleteBlobFile } from "@/lib/storag
 import { toTrackApiResponse } from "@/lib/trackApi";
 import { apiHandler, notFound, unauthorized } from "@/lib/apiRoute";
 import { cleanTags, cleanWaveformPeaks } from "@/lib/apiValidation";
+import { isAdmin } from "@/lib/feedbackAdmin";
+import { loadUserTrackData, saveUserTrackData } from "@/lib/trackUserData";
 
-async function loadOwnedTrack(id: string, userId: string) {
-  const track = await prisma.track.findUnique({ where: { id } });
-  if (!track || track.userId !== userId) return null;
-  return track;
+/** Any signed-in person can reach any song: the library is shared. (Who may change or delete one is decided per action below.) */
+async function loadTrack(id: string) {
+  return prisma.track.findUnique({ where: { id } });
+}
+
+function forbidden() {
+  return NextResponse.json({ error: "Only the admin can do that." }, { status: 403 });
 }
 
 async function handlePATCH(request: Request, { params }: { params: Promise<{ id: string }> }) {
@@ -17,7 +22,7 @@ async function handlePATCH(request: Request, { params }: { params: Promise<{ id:
   if (!session) return unauthorized();
 
   const { id } = await params;
-  const existing = await loadOwnedTrack(id, session.user.id);
+  const existing = await loadTrack(id);
   if (!existing) return notFound();
 
   const body = await request.json().catch(() => null);
@@ -28,8 +33,10 @@ async function handlePATCH(request: Request, { params }: { params: Promise<{ id:
   // Whitelist exactly what's allowed to change — never trust arbitrary
   // client-supplied fields for a mass update.
   const data: Record<string, unknown> = {};
+  // Each person's own: their must / do-not-play mark and hot cues live in TrackUserData, not on the shared song.
+  const mine: { playPreference?: "must" | "do-not" | null; hotCueOverridesJson?: string | null } = {};
   if (body.playPreference === "must" || body.playPreference === "do-not" || body.playPreference === null) {
-    data.playPreference = body.playPreference;
+    mine.playPreference = body.playPreference;
   }
   if (body.bpmSource === "metadata" || body.bpmSource === "tap" || body.bpmSource === null) {
     data.bpmSource = body.bpmSource;
@@ -59,6 +66,8 @@ async function handlePATCH(request: Request, { params }: { params: Promise<{ id:
     if (peaks) data.waveformPeaksJson = JSON.stringify(peaks);
   }
   if (Array.isArray(body.tags)) {
+    // Tags are part of the shared song (they decide what is in the Spooky Music playlist for everybody): the admin's to change.
+    if (!isAdmin(session.user.id)) return forbidden();
     data.tagsJson = JSON.stringify(cleanTags(body.tags));
   }
   if (body.hotCueOverrides && typeof body.hotCueOverrides === "object") {
@@ -69,7 +78,7 @@ async function handlePATCH(request: Request, { params }: { params: Promise<{ id:
         sanitized[cueNumber] = atSec;
       }
     }
-    data.hotCueOverridesJson = JSON.stringify(sanitized);
+    mine.hotCueOverridesJson = JSON.stringify(sanitized);
   }
   if (body.lyricalFingerprint === null) {
     data.lyricalFingerprintJson = null;
@@ -83,20 +92,28 @@ async function handlePATCH(request: Request, { params }: { params: Promise<{ id:
     }
   }
 
-  if (Object.keys(data).length === 0) {
+  if (Object.keys(data).length === 0 && Object.keys(mine).length === 0) {
     return NextResponse.json({ error: "No recognized fields to update." }, { status: 400 });
   }
 
-  const track = await prisma.track.update({ where: { id }, data });
-  return NextResponse.json(toTrackApiResponse(track));
+  const track = Object.keys(data).length > 0 ? await prisma.track.update({ where: { id }, data }) : existing;
+  const userData =
+    Object.keys(mine).length > 0
+      ? await saveUserTrackData(session.user.id, id, mine)
+      : (await loadUserTrackData(session.user.id)).get(id);
+  return NextResponse.json(toTrackApiResponse(track, userData));
 }
 
 async function handleDELETE(request: Request, { params }: { params: Promise<{ id: string }> }) {
   const session = await auth();
   if (!session) return unauthorized();
 
+  // Taking a song out of the app removes it for everybody, for good: only the admin may. Everyone else takes songs out of their
+  // own playlists (which never touches the library).
+  if (!isAdmin(session.user.id)) return forbidden();
+
   const { id } = await params;
-  const existing = await loadOwnedTrack(id, session.user.id);
+  const existing = await loadTrack(id);
   if (!existing) return notFound();
 
   // Separated stems live in Blob under their own URLs; the StemSeparationJob
@@ -111,7 +128,7 @@ async function handleDELETE(request: Request, { params }: { params: Promise<{ id
   // fully playable (nothing was removed); the other order left a "ghost"
   // track whose audio was already gone. deleteMany (not delete) so a double
   // click / second tab racing us is a no-op rather than a P2025 error.
-  await prisma.track.deleteMany({ where: { id, userId: session.user.id } });
+  await prisma.track.deleteMany({ where: { id } });
 
   // Best-effort: a storage-side failure (already gone, transient network
   // error, etc.) must not make an already-deleted track look undeletable.

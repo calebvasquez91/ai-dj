@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { isFeedbackAdmin, parseAdminIds } from "@/lib/feedbackAdmin";
+import { isAdmin, isFeedbackAdmin, parseAdminIds } from "@/lib/feedbackAdmin";
 
 describe("parseAdminIds", () => {
   it("splits on commas, trims and drops empty entries, leaving case alone (ids are case-sensitive)", () => {
@@ -43,5 +43,21 @@ describe("isFeedbackAdmin", () => {
     expect(isFeedbackAdmin("me@gmail.com", { FEEDBACK_ADMIN_USER_IDS: "me@gmail.com" })).toBe(true); // only because it was listed as an id: ids are opaque strings
     expect(isFeedbackAdmin("me@gmail.com", { FEEDBACK_ADMIN_EMAILS: "me@gmail.com" })).toBe(false);
     expect(isFeedbackAdmin("me@gmail.com", { GMAIL_USER: "me@gmail.com", FEEDBACK_TO_EMAIL: "me@gmail.com" })).toBe(false);
+  });
+});
+
+describe("isAdmin: ADMIN_USER_IDS, with the older name as a fallback", () => {
+  it("reads ADMIN_USER_IDS", () => {
+    expect(isAdmin("cmadmin0001", { ADMIN_USER_IDS: "cmadmin0001" })).toBe(true);
+    expect(isAdmin("cmother0002", { ADMIN_USER_IDS: "cmadmin0001" })).toBe(false);
+  });
+  it("falls back to FEEDBACK_ADMIN_USER_IDS only when ADMIN_USER_IDS is not set", () => {
+    expect(isAdmin("cmowner0001", { FEEDBACK_ADMIN_USER_IDS: "cmowner0001" })).toBe(true);
+    expect(isAdmin("cmowner0001", { ADMIN_USER_IDS: "", FEEDBACK_ADMIN_USER_IDS: "cmowner0001" })).toBe(true);
+    // Once ADMIN_USER_IDS is set it is the whole list: the old setting no longer adds anyone.
+    expect(isAdmin("cmowner0001", { ADMIN_USER_IDS: "cmadmin0001", FEEDBACK_ADMIN_USER_IDS: "cmowner0001" })).toBe(false);
+  });
+  it("is nobody when neither is set", () => {
+    expect(isAdmin("cmadmin0001", {})).toBe(false);
   });
 });

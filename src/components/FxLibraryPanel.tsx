@@ -2,6 +2,7 @@
 
 import { useMemo, useRef, useState } from "react";
 import { useStore } from "@/lib/store";
+import { useIsAdmin } from "@/components/FeedbackOwnerProvider";
 import { formatTime } from "@/lib/format";
 import { HALLOWEEN_AFFINITY, getEligibleFX, hasHalloweenAffinity, isHalloweenFx, withHalloweenAffinity } from "@/lib/fxAffinity";
 import { PlayIcon, PlusIcon, CloseIcon } from "@/components/Icons";
@@ -87,6 +88,8 @@ export function FxLibraryPanel() {
   const spooky = useStore((s) => s.activePlaylistTheme === "spooky");
   const fxLibraryLoaded = useStore((s) => s.fxLibraryLoaded);
   const uploadFxSound = useStore((s) => s.uploadFxSound);
+  // FX sounds are shared by everyone; changing or deleting one is the admin's alone (everyone can add and play them).
+  const isAdmin = useIsAdmin();
   const updateFxSound = useStore((s) => s.updateFxSound);
   const patchFxSoundLocal = useStore((s) => s.patchFxSoundLocal);
   const persistFxSound = useStore((s) => s.persistFxSound);
@@ -256,7 +259,7 @@ export function FxLibraryPanel() {
         ))}
       </div>
 
-      {fxLibrary.length > 0 && (
+      {isAdmin && fxLibrary.length > 0 && (
         <div className="flex flex-wrap items-center gap-2">
           <button
             type="button"
@@ -337,16 +340,21 @@ export function FxLibraryPanel() {
                     </span>
                   </div>
                 </div>
-                <button
-                  type="button"
-                  onClick={() => void removeFxSound(fx.id)}
-                  title="Delete FX"
-                  className="btn-icon text-muted hover:text-accent-pink shrink-0"
-                >
-                  <CloseIcon size={14} />
-                </button>
+                {isAdmin && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (window.confirm(`Delete "${fx.name}" for everyone? This can't be undone.`)) void removeFxSound(fx.id);
+                    }}
+                    title="Delete FX (admin)"
+                    className="btn-icon text-muted hover:text-accent-pink shrink-0"
+                  >
+                    <CloseIcon size={14} />
+                  </button>
+                )}
               </div>
 
+              {isAdmin && (
               <div className="flex items-center gap-1.5 pl-7 flex-wrap">
                 <select
                   value={fx.category}
@@ -423,6 +431,7 @@ export function FxLibraryPanel() {
                   className="flex-1 min-w-32 text-[10px] rounded bg-surface-hover border border-border/10 px-1.5 py-1 outline-none"
                 />
               </div>
+              )}
             </div>
             );
           })}
