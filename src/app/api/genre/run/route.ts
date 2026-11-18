@@ -31,7 +31,6 @@ async function drain(request: Request, schedulerOnly = false) {
   const summary = await runJobs(buildRunnerDeps(), {
     maxJobs: scheduler ? 8 : 3,
     budgetMs: 40_000,
-    userId: scheduler ? undefined : session!.user.id,
   });
   await pruneGenreHousekeeping();
   // The app reads back just the tracks this run changed (not its whole library) to show their new genres.

@@ -10,7 +10,7 @@ const mocks = vi.hoisted(() => ({
   cancel: vi.fn(),
 }));
 
-vi.mock("@/auth", () => ({ auth: vi.fn(async () => ({ user: { id: "u1" } })) }));
+vi.mock("@/auth", () => ({ auth: vi.fn(async () => ({ user: { id: process.env.TEST_STEMS_USER ?? "u1" } })) }));
 vi.mock("@/lib/prisma", () => {
   const stemSeparationJob = {
     findFirst: mocks.findFirst,
@@ -44,6 +44,10 @@ const post = (auto: boolean) =>
 const recent = () => new Date(Date.now() - 60_000);
 
 beforeEach(() => {
+  vi.unstubAllEnvs();
+  vi.stubEnv("ADMIN_USER_IDS", "u-admin");
+  vi.stubEnv("FEEDBACK_ADMIN_USER_IDS", "");
+  vi.stubEnv("TEST_STEMS_USER", "u1");
   process.env.REPLICATE_API_TOKEN = "test-token";
   process.env.STEM_AUTO_BUDGET_USD = "5";
   mocks.findFirst.mockReset().mockResolvedValue(null);
@@ -112,15 +116,39 @@ describe("POST /api/tracks/[id]/stems - when this server can't separate", () => 
   });
 });
 
-describe("POST /api/tracks/[id]/stems — manual starts (unchanged)", () => {
-  it("is not held to the automatic budget", async () => {
+describe("POST /api/tracks/[id]/stems — manual starts", () => {
+  it("are held to the budget for anyone but the admin (every account can reach every song, and each job is paid GPU time)", async () => {
+    mocks.findMany.mockResolvedValue([{ status: "ready", estimatedCostUsd: 99, createdAt: new Date(0) }]);
+    const res = await post(false);
+    expect(res.status).toBe(402);
+    expect((await res.json()).error).toMatch(/budget/);
+    expect(mocks.create).not.toHaveBeenCalled();
+    expect(mocks.predict).not.toHaveBeenCalled();
+  });
+
+  it("and to the limit of jobs running at once", async () => {
+    mocks.findMany.mockResolvedValue([
+      { status: "processing", estimatedCostUsd: null, createdAt: recent() },
+      { status: "pending", estimatedCostUsd: null, createdAt: recent() },
+    ]);
+    expect((await post(false)).status).toBe(429);
+    expect(mocks.predict).not.toHaveBeenCalled();
+  });
+
+  it("start normally while there is budget", async () => {
+    expect((await post(false)).status).toBe(201);
+    expect(mocks.predict).toHaveBeenCalledTimes(1);
+  });
+
+  it("are not held to it for the admin", async () => {
+    vi.stubEnv("TEST_STEMS_USER", "u-admin");
     mocks.findMany.mockResolvedValue([{ status: "ready", estimatedCostUsd: 99, createdAt: new Date(0) }]);
     const res = await post(false);
     expect(res.status).toBe(201);
     expect(mocks.predict).toHaveBeenCalledTimes(1);
   });
 
-  it("still retries a failed job when someone presses the button", async () => {
+  it("still retries a failed job when someone presses the button (within the budget)", async () => {
     mocks.findFirst.mockResolvedValue({ id: "j0", status: "failed", createdAt: new Date(0) });
     const res = await post(false);
     expect(res.status).toBe(201);

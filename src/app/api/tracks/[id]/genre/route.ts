@@ -1,19 +1,19 @@
-// A person's own edit of one track's genres. PUT sets them (source "manual", confidence 1, status "confirmed"): the
-// pipeline never overwrites them afterwards. DELETE takes the person's genres back, returning the track to what its sources say.
-// Each person edits their own copy of a track.
+// The admin's edit of one song's genres. PUT sets them (source "manual", confidence 1, status "confirmed"): the pipeline
+// never overwrites them afterwards. DELETE takes the manual genres back, returning the song to what its sources say. Genres
+// belong to the shared song, so nobody else may change them.
 import { NextResponse } from "next/server";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { apiHandler, jsonError, notFound, unauthorized } from "@/lib/apiRoute";
+import { isAdmin } from "@/lib/feedbackAdmin";
 import { fieldsFromStored } from "@/lib/genre/api";
 import { genreTablesReady, prismaGenreStore } from "@/lib/genre/prismaStore";
 import { applyManualGenres, clearManualGenres, finalizeStored, type GenrePick } from "@/lib/genre/stored";
 
 const MAX_PICKS = 5;
 
-async function ownedTrack(id: string, userId: string) {
-  const track = await prisma.track.findUnique({ where: { id }, select: { userId: true } });
-  return track && track.userId === userId ? track : null;
+function trackExists(id: string) {
+  return prisma.track.findUnique({ where: { id }, select: { id: true } });
 }
 
 function readPicks(value: unknown): GenrePick[] | null {
@@ -32,7 +32,8 @@ async function handlePUT(request: Request, { params }: { params: Promise<{ id: s
   const session = await auth();
   if (!session) return unauthorized();
   const { id } = await params;
-  if (!(await ownedTrack(id, session.user.id))) return notFound();
+  if (!isAdmin(session.user.id)) return jsonError(403, "Only the admin can change a song's genres.");
+  if (!(await trackExists(id))) return notFound();
   if (!(await genreTablesReady())) return jsonError(503, "Genre classification is not set up yet (the database tables have not been created).");
 
   const body = (await request.json().catch(() => null)) as { picks?: unknown } | null;
@@ -50,7 +51,8 @@ async function handleDELETE(_request: Request, { params }: { params: Promise<{ i
   const session = await auth();
   if (!session) return unauthorized();
   const { id } = await params;
-  if (!(await ownedTrack(id, session.user.id))) return notFound();
+  if (!isAdmin(session.user.id)) return jsonError(403, "Only the admin can change a song's genres.");
+  if (!(await trackExists(id))) return notFound();
   if (!(await genreTablesReady())) return jsonError(503, "Genre classification is not set up yet (the database tables have not been created).");
 
   const existing = await prismaGenreStore.get(id);

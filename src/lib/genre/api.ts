@@ -50,11 +50,11 @@ export async function loadGenreFields(trackIds: readonly string[]): Promise<Map<
   return out;
 }
 
-/** The genre fields of every classified track of one person's library: filtered by owner in the database, not by a list of ids (which grows with the library and has a size limit). Empty if the tables are not there yet. */
-export async function loadGenreFieldsForUser(userId: string): Promise<Map<string, TrackGenreFields>> {
+/** The genre fields of every classified track in the shared library. Genres belong to the song, so everybody sees the same ones. Read as a whole, not by a list of ids (which grows with the library and has a size limit). Empty if the tables are not there yet. */
+export async function loadAllGenreFields(): Promise<Map<string, TrackGenreFields>> {
   const out = new Map<string, TrackGenreFields>();
   try {
-    const rows = await prisma.trackGenre.findMany({ where: { track: { userId } } });
+    const rows = await prisma.trackGenre.findMany();
     for (const row of rows) out.set(row.trackId, fieldsFromStored(storedFromRow(row)));
   } catch {
     // Tables not created yet: the library simply has no genres.
@@ -81,9 +81,9 @@ export async function queueUnclassified(trackIds: readonly string[], priority = 
   }
 }
 
-/** Which of the given track ids belong to the user. */
-export async function ownedTrackIds(userId: string, ids: readonly string[]): Promise<string[]> {
+/** Which of the given track ids are songs in the library (the library is shared, so any account may ask for any song). */
+export async function existingTrackIds(ids: readonly string[]): Promise<string[]> {
   if (ids.length === 0) return [];
-  const rows = await prisma.track.findMany({ where: { userId, id: { in: [...ids] } }, select: { id: true } });
+  const rows = await prisma.track.findMany({ where: { source: "local", id: { in: [...ids] } }, select: { id: true } });
   return rows.map((r) => r.id);
 }

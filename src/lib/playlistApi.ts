@@ -1,5 +1,6 @@
 import { prisma } from "@/lib/prisma";
-import { PLAYLIST_TRACK_OMIT, toTrackSummary } from "@/lib/trackApi";
+import { PLAYLIST_TRACK_OMIT, toTrackSummary, type UserTrackData } from "@/lib/trackApi";
+import { loadUserTrackData } from "@/lib/trackUserData";
 import { SPOOKY_TRACK_TAGS } from "@/lib/spookyTags";
 import type { Playlist } from "@/types/music";
 import type { Track as PrismaTrack } from "@/generated/prisma/client";
@@ -49,12 +50,13 @@ export async function loadUserPlaylists(userId: string) {
   });
 }
 
-export function toPlaylistApiResponse(playlist: NonNullable<PlaylistWithTracks>): Playlist {
+/** `userData`: the signed-in person's own marks and hot cues (TrackUserData) by song id: they are the only per-person part of a song. */
+export function toPlaylistApiResponse(playlist: NonNullable<PlaylistWithTracks>, userData?: Map<string, UserTrackData>): Playlist {
   return {
     id: playlist.id,
     name: playlist.name,
     createdAt: playlist.createdAt.getTime(),
-    tracks: playlist.tracks.map((pt) => toTrackSummary(pt.track)),
+    tracks: playlist.tracks.map((pt) => toTrackSummary(pt.track, userData?.get(pt.track.id))),
     theme: playlist.theme ?? undefined,
   };
 }
@@ -62,17 +64,19 @@ export function toPlaylistApiResponse(playlist: NonNullable<PlaylistWithTracks>)
 /** loadUserPlaylists + toPlaylistApiResponse, but also ensures the Spooky Music system playlist exists and unions in every spooky-tagged track the user hasn't explicitly added to it. The one extra read (all of the user's *tagged* tracks — `tagsJson: { not: null }` filters the untagged majority out at the DB level) only happens here, not on every playlist load elsewhere in the app. Auto-unioned tracks are also listed separately in `autoIncludedTrackIds`, since they have no backing PlaylistTrack row — a plain "remove from playlist" on one of them would silently no-op server-side and have it reappear on the next load; the client uses this list to not offer that action for them in the first place. */
 export async function loadUserPlaylistsWithSpookyUnion(userId: string): Promise<Playlist[]> {
   await ensureSpookyPlaylist(userId);
-  const [playlists, taggedTracks] = await Promise.all([
+  // Tags belong to the shared song, so Spooky Music takes in every spooky-tagged song in the library, whoever added it.
+  const [playlists, taggedTracks, userData] = await Promise.all([
     loadUserPlaylists(userId),
-    prisma.track.findMany({ where: { userId, tagsJson: { not: null } }, omit: PLAYLIST_TRACK_OMIT }),
+    prisma.track.findMany({ where: { source: "local", tagsJson: { not: null } }, omit: PLAYLIST_TRACK_OMIT }),
+    loadUserTrackData(userId),
   ]);
   const spookyAutoTracks = taggedTracks.filter(hasSpookyTag);
 
   return playlists.map((playlist) => {
-    const base = toPlaylistApiResponse(playlist);
+    const base = toPlaylistApiResponse(playlist, userData);
     if (playlist.theme !== "spooky") return base;
     const explicitIds = new Set(base.tracks.map((t) => t.id));
-    const autoTracks = spookyAutoTracks.filter((t) => !explicitIds.has(t.id)).map(toTrackSummary);
+    const autoTracks = spookyAutoTracks.filter((t) => !explicitIds.has(t.id)).map((t) => toTrackSummary(t, userData.get(t.id)));
     return { ...base, tracks: [...base.tracks, ...autoTracks], autoIncludedTrackIds: autoTracks.map((t) => t.id) };
   });
 }

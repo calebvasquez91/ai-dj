@@ -13,15 +13,15 @@ export default function PrivacyPage() {
         <div className="flex flex-col gap-2">
           <span className="text-2xl wordmark">AI DJ</span>
           <h1 className="text-2xl heading">Privacy Policy</h1>
-          <p className="text-xs text-muted">Last updated November 12, 2026</p>
+          <p className="text-xs text-muted">Last updated November 17, 2026</p>
         </div>
 
         <section className="flex flex-col gap-2">
           <h2 className="text-lg font-semibold text-accent-purple">What this app is</h2>
           <p className="text-sm">
-            AI DJ is a personal music-mixing tool. You upload your own audio files and/or import
-            playlists from a connected YouTube account, and the app plays them back as one
-            continuous, automatically-mixed set.
+            AI DJ is a music-mixing tool. Songs and sound effects that people upload make up one
+            shared music library, and the app plays them back as one continuous,
+            automatically-mixed set.
           </p>
         </section>
 
@@ -46,59 +46,41 @@ export default function PrivacyPage() {
         </section>
 
         <section className="flex flex-col gap-2">
-          <h2 className="text-lg font-semibold text-accent-purple">Your uploaded music</h2>
+          <h2 className="text-lg font-semibold text-accent-purple">The shared music library</h2>
           <p className="text-sm">
-            Audio files you upload are stored securely under your account and are only ever
-            served back to you when you&apos;re signed in. We don&apos;t analyze, share, or use
-            your files for any purpose other than playing them back to you.
-          </p>
-        </section>
-
-        <section className="flex flex-col gap-2">
-          <h2 className="text-lg font-semibold text-accent-purple">Connecting your YouTube account</h2>
-          <p className="text-sm">
-            If you choose to connect a YouTube account, AI DJ requests a single, read-only Google
-            OAuth scope — <code className="text-xs bg-surface-hover px-1 py-0.5 rounded">
-            https://www.googleapis.com/auth/youtube.readonly</code> — solely to list the names of
-            your own playlists and read the title, channel name, duration, and thumbnail of the
-            videos in a playlist you choose to import.
+            Every song and sound effect that is added to AI DJ becomes part of one music library
+            that every signed-in account can see and play. Whoever added a file is not shown to
+            other people, and the library is only listed to people who are signed in. Each file is
+            stored at a long, hard-to-guess web address, so anyone who is given that exact address
+            could open the file without signing in.
+            Only the administrator can edit a song or sound or remove it from the library;
+            everyone else can add files and play them.
           </p>
           <p className="text-sm">
-            This scope cannot modify, delete, or post anything to your YouTube account, and
-            cannot access private data beyond your own playlists and their videos&apos; public
-            metadata. AI DJ never requests access to your Google password, and never sees or
-            stores it.
+            What stays private to you: your playlists (other people cannot see them), the songs
+            you mark Must-Play or Do-Not-Play, your hot cues, and your account details. Taking a
+            song out of one of your playlists never removes it from the library.
           </p>
           <p className="text-sm">
-            Your Google access token is used only in your own browser to call YouTube&apos;s Data
-            API directly — it is never sent to or stored on AI DJ&apos;s servers. When you import a
-            playlist, only the resulting track metadata (title, channel/artist name, duration, and
-            thumbnail URL) is saved to your AI DJ account, exactly like a locally-uploaded file&apos;s
-            metadata, so the tracks can appear in your library. No video or audio content itself
-            is copied, downloaded, or stored — playback of imported tracks streams directly from
-            YouTube&apos;s own player.
-          </p>
-          <p className="text-sm">
-            You can disconnect your YouTube account at any time from within the app; doing so
-            immediately discards the access token from your browser. This does not delete
-            playlist tracks you&apos;ve already imported — remove those from your library the same
-            way you&apos;d remove any other track.
+            Only upload music you have the right to share with the other people who use AI DJ.
           </p>
         </section>
 
         <section className="flex flex-col gap-2">
           <h2 className="text-lg font-semibold text-accent-purple">Data sharing</h2>
           <p className="text-sm">
-            We do not sell, rent, or share your personal information, uploaded music, or YouTube
-            data with any third party, and we do not use it for advertising.
+            We do not sell, rent, or share your personal information with any third party, and we do
+            not use it for advertising. Music in the shared library is available only to people
+            signed in to AI DJ.
           </p>
         </section>
 
         <section className="flex flex-col gap-2">
           <h2 className="text-lg font-semibold text-accent-purple">Data deletion</h2>
           <p className="text-sm">
-            To request deletion of your account and all associated data (uploaded files, imported
-            track metadata, and playlists), contact us at the email below.
+            To request deletion of your account and its data (your details, playlists, marks and
+            feedback), or the removal of a file you added to the shared library, contact us at the
+            email below.
           </p>
         </section>
 

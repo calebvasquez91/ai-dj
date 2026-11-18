@@ -4,10 +4,11 @@
 // playlist from the app.
 import { NextResponse } from "next/server";
 import { auth } from "@/auth";
+import { loadUserTrackData } from "@/lib/trackUserData";
 import { prisma } from "@/lib/prisma";
 import { apiHandler, jsonError, unauthorized } from "@/lib/apiRoute";
 import { PLAYLIST_TRACK_OMIT, toTrackSummary } from "@/lib/trackApi";
-import { loadGenreFieldsForUser } from "@/lib/genre/api";
+import { loadAllGenreFields } from "@/lib/genre/api";
 import { prismaCache, prismaRateStore } from "@/lib/genre/prismaServices";
 import { PROVIDER_MIN_INTERVAL_MS, createRateLimiter } from "@/lib/genre/services";
 import { userAgent } from "@/lib/genre/server";
@@ -34,10 +35,14 @@ async function handlePOST(request: Request) {
     parseWithLlm: (text) => parseRequestWithLlm(text, { fetcher, apiKey: () => process.env.ANTHROPIC_API_KEY }),
 
     loadLibrary: async () => {
-      const rows = await prisma.track.findMany({ where: { userId }, orderBy: { createdAt: "asc" }, omit: PLAYLIST_TRACK_OMIT });
-      const genres = await loadGenreFieldsForUser(userId);
+      // The library is shared, so a playlist can use any song; Must / Do-Not-Play marks are the asker's own.
+      const [rows, genres, marks] = await Promise.all([
+        prisma.track.findMany({ where: { source: "local" }, orderBy: { createdAt: "asc" }, omit: PLAYLIST_TRACK_OMIT }),
+        loadAllGenreFields(),
+        loadUserTrackData(userId),
+      ]);
       const bpm = new Map(rows.map((r) => [r.id, r.bpm]));
-      const tracks: Track[] = rows.map((r) => ({ ...toTrackSummary(r), ...(genres.get(r.id) ?? {}) }));
+      const tracks: Track[] = rows.map((r) => ({ ...toTrackSummary(r, marks.get(r.id)), ...(genres.get(r.id) ?? {}) }));
       return { tracks, bpmOf: (t) => bpm.get(t.id) ?? null };
     },
 
@@ -45,7 +50,7 @@ async function handlePOST(request: Request) {
     loudnessOf: async (ids) => {
       const out = new Map<string, number | null>();
       if (ids.length === 0) return out;
-      const rows = await prisma.track.findMany({ where: { userId, id: { in: ids } }, select: { id: true, waveformPeaksJson: true } });
+      const rows = await prisma.track.findMany({ where: { id: { in: ids } }, select: { id: true, waveformPeaksJson: true } });
       for (const r of rows) {
         try {
           const peaks = r.waveformPeaksJson ? (JSON.parse(r.waveformPeaksJson) as number[]) : [];

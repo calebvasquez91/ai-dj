@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { loadPlaylist, toPlaylistApiResponse } from "@/lib/playlistApi";
+import { loadUserTrackData } from "@/lib/trackUserData";
 import { planReorder } from "@/lib/playlistReorder";
 import { apiHandler, jsonError, notFound, unauthorized } from "@/lib/apiRoute";
 
@@ -46,7 +47,7 @@ async function handlePATCH(request: Request, { params }: { params: Promise<{ id:
 
   const updated = await loadPlaylist(id);
   if (!updated) return notFound();
-  return NextResponse.json(toPlaylistApiResponse(updated));
+  return NextResponse.json(toPlaylistApiResponse(updated, await loadUserTrackData(session.user.id)));
 }
 
 export const PATCH = apiHandler(handlePATCH);

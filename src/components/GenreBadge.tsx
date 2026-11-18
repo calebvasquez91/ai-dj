@@ -1,5 +1,6 @@
 "use client";
 
+import { useIsAdmin } from "@/components/FeedbackOwnerProvider";
 import { useGenreClient } from "@/lib/genreClient";
 import type { Track } from "@/types/music";
 
@@ -14,11 +15,13 @@ export function GenreBadge({ track, addWhenEmpty = false }: { track: Track; /** 
   // A playlist's tracks do not carry genres; the genre store has them for every classified track.
   const info = useGenreClient((s) => s.fields[track.id]) ?? track;
   const openSheet = useGenreClient((s) => s.openSheet);
+  // Genres belong to the shared song: everybody sees them, only the admin changes them.
+  const isAdmin = useIsAdmin();
   if (job === "running") return <span className={`${CHIP} bg-accent-purple/15 text-accent-purple`} role="status">Classifying…</span>;
   if (job === "queued") return <span className={`${CHIP} bg-surface-raised text-muted`} role="status">Queued</span>;
   if (job === "failed") return <span className={`${CHIP} bg-accent-pink/15 text-accent-pink`} role="status">Genre failed</span>;
   if (!info.genre) {
-    if (!addWhenEmpty) return null;
+    if (!addWhenEmpty || !isAdmin) return null;
     return (
       <button type="button" onClick={(e) => { e.stopPropagation(); openSheet(track.id); }} className={`${CHIP} normal-case tracking-normal font-semibold border border-border-subtle text-muted hover:text-foreground`}>
         + Add genre
@@ -26,6 +29,14 @@ export function GenreBadge({ track, addWhenEmpty = false }: { track: Track; /** 
     );
   }
   const review = info.genreStatus === "needs-review";
+  if (!isAdmin) {
+    return (
+      <span className={`${CHIP} normal-case tracking-normal font-semibold bg-surface-raised text-foreground`}>
+        {info.genre}
+        {info.subgenres?.[0] ? ` · ${info.subgenres[0]}` : ""}
+      </span>
+    );
+  }
   return (
     <button
       type="button"

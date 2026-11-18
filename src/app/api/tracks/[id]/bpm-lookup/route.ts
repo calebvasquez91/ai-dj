@@ -19,7 +19,7 @@ async function handlePOST(request: Request, { params }: { params: Promise<{ id: 
 
   const { id } = await params;
   const track = await prisma.track.findUnique({ where: { id } });
-  if (!track || track.userId !== session.user.id) return notFound();
+  if (!track) return notFound();
   if (track.source !== "youtube") {
     return NextResponse.json({ error: "Metadata BPM lookup only applies to YouTube tracks." }, { status: 400 });
   }

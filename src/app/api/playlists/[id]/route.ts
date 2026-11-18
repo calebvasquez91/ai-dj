@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { loadPlaylist, toPlaylistApiResponse } from "@/lib/playlistApi";
+import { loadUserTrackData } from "@/lib/trackUserData";
 import { apiHandler, notFound, unauthorized } from "@/lib/apiRoute";
 import { cleanText, MAX_NAME_LENGTH } from "@/lib/apiValidation";
 
@@ -21,7 +22,7 @@ async function handlePATCH(request: Request, { params }: { params: Promise<{ id:
 
   await prisma.playlist.update({ where: { id }, data: { name } });
   const playlist = await loadPlaylist(id);
-  return NextResponse.json(toPlaylistApiResponse(playlist!));
+  return NextResponse.json(toPlaylistApiResponse(playlist!, await loadUserTrackData(session.user.id)));
 }
 
 async function handleDELETE(request: Request, { params }: { params: Promise<{ id: string }> }) {

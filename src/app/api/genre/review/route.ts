@@ -1,10 +1,11 @@
 // Bulk actions for the Genre review screen: accept the best suggestion for every track waiting for review that is at least
-// `minConfidence` sure of it (default 0.4), or confirm the chosen tracks as they stand. Each change is the person's own
-// genres on their own tracks (source "manual"), so nothing a later re-run finds can overwrite it.
+// `minConfidence` sure of it (default 0.4), or confirm the chosen tracks as they stand. Each change is a manual genre
+// (source "manual") on a shared song, so nothing a later re-run finds can overwrite it, and only the admin may make it.
 import { NextResponse } from "next/server";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { apiHandler, jsonError, unauthorized } from "@/lib/apiRoute";
+import { isAdmin } from "@/lib/feedbackAdmin";
 import { genreTablesReady, prismaGenreStore, storedFromRow } from "@/lib/genre/prismaStore";
 import { acceptBest, confirmCurrent, type StoredGenre } from "@/lib/genre/stored";
 
@@ -17,7 +18,7 @@ const DEFAULT_MIN_CONFIDENCE = 0.4;
 async function handlePOST(request: Request) {
   const session = await auth();
   if (!session) return unauthorized();
-  const userId = session.user.id;
+  if (!isAdmin(session.user.id)) return jsonError(403, "Only the admin can change a song's genres.");
   if (!(await genreTablesReady())) return jsonError(503, "Genre classification is not set up yet (the database tables have not been created).");
 
   const body = (await request.json().catch(() => null)) as { action?: unknown; minConfidence?: unknown; trackIds?: unknown } | null;
@@ -33,7 +34,7 @@ async function handlePOST(request: Request) {
     let cursor: string | undefined;
     for (let scanned = 0; scanned < MAX_SCAN && updates.length < MAX_BATCH; scanned += PAGE) {
       const rows = await prisma.trackGenre.findMany({
-        where: { status: "needs-review", track: { userId } },
+        where: { status: "needs-review" },
         orderBy: { trackId: "asc" },
         take: PAGE,
         ...(cursor ? { cursor: { trackId: cursor }, skip: 1 } : {}),
@@ -51,7 +52,7 @@ async function handlePOST(request: Request) {
     if (!Array.isArray(body.trackIds) || body.trackIds.length === 0 || body.trackIds.length > MAX_BATCH || !body.trackIds.every((t) => typeof t === "string")) {
       return jsonError(400, `Give 1 to ${MAX_BATCH} trackIds.`);
     }
-    const rows = await prisma.trackGenre.findMany({ where: { trackId: { in: body.trackIds as string[] }, track: { userId } } });
+    const rows = await prisma.trackGenre.findMany({ where: { trackId: { in: body.trackIds as string[] } } });
     const updates: { trackId: string; stored: StoredGenre }[] = [];
     for (const row of rows) {
       const next = confirmCurrent(storedFromRow(row), now);
@@ -62,7 +63,7 @@ async function handlePOST(request: Request) {
   } else {
     return jsonError(400, 'Give action "accept-above" or "confirm".');
   }
-  const remaining = await prisma.trackGenre.count({ where: { status: "needs-review", track: { userId } } });
+  const remaining = await prisma.trackGenre.count({ where: { status: "needs-review" } });
   return NextResponse.json({ changed, remaining });
 }
 

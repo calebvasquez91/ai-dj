@@ -9,8 +9,7 @@ import { useLiked } from "@/lib/liked";
 import { LIBRARY_VIEWS, artistsOf, likedTracks, parseLibraryView, type LibraryView } from "@/lib/library";
 import { TrackGrid } from "@/components/TrackGrid";
 import { AddSelectedToPlaylistButton } from "@/components/AddSelectedToPlaylistButton";
-import { ConnectYouTubeButton } from "@/components/ConnectYouTubeButton";
-import { YouTubeImportModal } from "@/components/YouTubeImportModal";
+import { useIsAdmin } from "@/components/FeedbackOwnerProvider";
 import { FxLibraryPanel } from "@/components/FxLibraryPanel";
 import { GenresView } from "@/components/GenresView";
 import { GenreReviewView } from "@/components/GenreReviewView";
@@ -19,7 +18,6 @@ import { useGenreClient } from "@/lib/genreClient";
 import { CloseIcon, PlusIcon, ShuffleIcon } from "@/components/Icons";
 import { Chip, ChipRow, CoverMosaic, MediaCard, Text } from "@/ui";
 
-type SourceFilter = "all" | "local" | "youtube";
 
 function LibraryContent() {
   const inputRef = useRef<HTMLInputElement>(null);
@@ -50,7 +48,8 @@ function LibraryContent() {
       if (s.searchQuery !== prev.searchQuery) sync(s.searchQuery);
     });
   }, []);
-  const [sourceFilter, setSourceFilter] = useState<SourceFilter>("all");
+  // Everyone can add songs and take them out of their playlists; taking one out of the library for good is the admin's alone.
+  const isAdmin = useIsAdmin();
   // A genre chosen in the Genres view narrows the Songs view to it.
   const [genreFilter, setGenreFilter] = useState<GenreFilter | null>(null);
   const needsReview = useGenreClient((s) => s.needsReview);
@@ -61,20 +60,14 @@ function LibraryContent() {
     const base = view === "liked" ? likedTracks(localLibrary, likedIds) : localLibrary;
     return genreFilter ? filterByGenre(base, genreFilter) : base;
   }, [view, localLibrary, likedIds, genreFilter]);
-  const searched = useMemo(
+  const filtered = useMemo(
     () => (query.trim() ? searchTracksWithGenres(pool, query).map((h) => h.item) : pool),
     [pool, query]
   );
   const artists = useMemo(() => artistsOf(localLibrary), [localLibrary]);
-  const filtered = useMemo(
-    () => (sourceFilter === "all" ? searched : searched.filter((t) => t.source === sourceFilter)),
-    [searched, sourceFilter]
-  );
   const shufflableCount = filtered.filter((t) => t.playPreference !== "do-not").length;
-  const hasYoutubeTracks = localLibrary.some((t) => t.source === "youtube");
 
   const [uploadError, setUploadError] = useState<string | null>(null);
-  const [youtubeModalOpen, setYoutubeModalOpen] = useState(false);
 
   // Bulk "add to playlist" — selecting and moving tracks into a playlist
   // never removes them from the library; it only adds a reference, exactly
@@ -161,7 +154,6 @@ function LibraryContent() {
             {loading ? <span aria-hidden="true">…</span> : <PlusIcon size={15} />}
             <span className="hidden sm:inline">{loading ? "Adding…" : "Add Files"}</span>
           </button>
-          <ConnectYouTubeButton onReady={() => setYoutubeModalOpen(true)} />
         </div>
         <input
           ref={inputRef}
@@ -174,7 +166,7 @@ function LibraryContent() {
       </div>
 
       <ChipRow label="Library sections">
-        {LIBRARY_VIEWS.map((v) => (
+        {LIBRARY_VIEWS.filter((v) => v.id !== "review" || isAdmin).map((v) => (
           <Chip key={v.id} selected={view === v.id} onClick={() => setView(v.id)}>
             {v.id === "review" && needsReview > 0 ? `${v.label} (${needsReview})` : v.label}
           </Chip>
@@ -235,22 +227,6 @@ function LibraryContent() {
         </div>
       )}
 
-      {hasYoutubeTracks && (
-        <div className="flex items-center gap-2">
-          {(["all", "local", "youtube"] as const).map((option) => (
-            <button
-              key={option}
-              type="button"
-              onClick={() => setSourceFilter(option)}
-              data-active={sourceFilter === option}
-              className="btn-outline"
-            >
-              {option === "all" ? "All" : option === "local" ? "Local files" : "YouTube"}
-            </button>
-          ))}
-        </div>
-      )}
-
       {uploadError && <p className="text-xs text-accent-pink">{uploadError}</p>}
 
       {!libraryLoaded ? (
@@ -272,7 +248,7 @@ function LibraryContent() {
       ) : (
         <TrackGrid
           tracks={filtered}
-          onRemove={handleRemove}
+          onRemove={isAdmin ? handleRemove : undefined}
           selectedIds={selectMode ? selectedIds : undefined}
           onToggleSelect={selectMode ? toggleSelect : undefined}
         />
@@ -314,7 +290,7 @@ function LibraryContent() {
         />
       )}
 
-      {view === "review" && <GenreReviewView />}
+      {view === "review" && isAdmin && <GenreReviewView />}
 
       {view === "fx" && (
         <div className="flex max-w-2xl flex-col rounded-card border border-border-subtle bg-surface">
@@ -322,7 +298,6 @@ function LibraryContent() {
         </div>
       )}
 
-      {youtubeModalOpen && <YouTubeImportModal onClose={() => setYoutubeModalOpen(false)} />}
     </div>
   );
 }

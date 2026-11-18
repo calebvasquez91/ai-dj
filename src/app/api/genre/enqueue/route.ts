@@ -1,10 +1,10 @@
 // Queues genre classification: for chosen tracks or a whole playlist (the "Re-classify" actions), or, with
-// scope "unclassified", every track of the person's that has never been classified (the backfill, at low priority).
+// scope "unclassified", every song in the library that has never been classified (the backfill, at low priority).
 import { NextResponse } from "next/server";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { apiHandler, jsonError, notFound, unauthorized } from "@/lib/apiRoute";
-import { ownedTrackIds } from "@/lib/genre/api";
+import { existingTrackIds } from "@/lib/genre/api";
 import { PRIORITY_BACKFILL, PRIORITY_REQUESTED } from "@/lib/genre/constants";
 import { genreTablesReady, prismaJobStore } from "@/lib/genre/prismaStore";
 
@@ -23,7 +23,7 @@ async function handlePOST(request: Request) {
   let ids: string[];
   let priority = PRIORITY_REQUESTED;
   if (body.scope === "unclassified") {
-    const rows = await prisma.track.findMany({ where: { userId, genreInfo: null }, select: { id: true }, orderBy: { createdAt: "desc" }, take: BACKFILL_BATCH });
+    const rows = await prisma.track.findMany({ where: { source: "local", genreInfo: null }, select: { id: true }, orderBy: { createdAt: "desc" }, take: BACKFILL_BATCH });
     ids = rows.map((r) => r.id);
     priority = PRIORITY_BACKFILL;
   } else if (typeof body.playlistId === "string") {
@@ -32,7 +32,7 @@ async function handlePOST(request: Request) {
     ids = playlist.tracks.map((t) => t.trackId);
   } else if (Array.isArray(body.trackIds) && body.trackIds.every((t) => typeof t === "string")) {
     if (body.trackIds.length > MAX_TRACK_IDS) return jsonError(400, `Re-classify at most ${MAX_TRACK_IDS} tracks at a time.`);
-    ids = await ownedTrackIds(userId, body.trackIds as string[]);
+    ids = await existingTrackIds(body.trackIds as string[]);
   } else {
     return jsonError(400, "Give trackIds, a playlistId, or scope \"unclassified\".");
   }
