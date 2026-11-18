@@ -59,6 +59,11 @@ export async function localFileSize(storageKey: string): Promise<number> {
   return stats.size;
 }
 
+/** The absolute path of a local-backend file, for a tool that must open it by path (a tag reader, a fingerprinter). Rejects keys that would escape UPLOADS_DIR. */
+export function localFilePath(storageKey: string): string {
+  return resolveLocalPath(storageKey);
+}
+
 export function localFileStream(storageKey: string, range?: { start: number; end: number }) {
   return createReadStream(resolveLocalPath(storageKey), range);
 }

@@ -5,6 +5,7 @@ import { getStorageBackend, saveLocalFile, deleteLocalFile, deleteBlobFile } fro
 import { toTrackApiResponse } from "@/lib/trackApi";
 import { apiHandler, jsonError, unauthorized } from "@/lib/apiRoute";
 import { cleanText, isAcceptableStorageUrl, isValidDuration, normalizeAudioMime } from "@/lib/apiValidation";
+import { loadAllGenreFields, queueNewTracks } from "@/lib/genre/api";
 import { loadUserTrackData } from "@/lib/trackUserData";
 import { uploadLimitResponse } from "@/lib/uploadGuard";
 
@@ -13,12 +14,14 @@ async function handleGET() {
   if (!session) return unauthorized();
 
   // The library is shared: every account sees every song, whoever added it. Only the must / do-not-play marks and hot cues are
-  // each person's own (TrackUserData). YouTube imports were removed from the app, so none are listed.
-  const [tracks, userData] = await Promise.all([
+  // each person's own (TrackUserData). YouTube imports were removed from the app, so none are listed. Genres belong to the song,
+  // so everybody sees the same ones (empty until the genre tables exist).
+  const [tracks, userData, genres] = await Promise.all([
     prisma.track.findMany({ where: { source: "local" }, orderBy: { createdAt: "asc" } }),
     loadUserTrackData(session.user.id),
+    loadAllGenreFields(),
   ]);
-  return NextResponse.json(tracks.map((t) => toTrackApiResponse(t, userData.get(t.id))));
+  return NextResponse.json(tracks.map((t) => ({ ...toTrackApiResponse(t, userData.get(t.id)), ...(genres.get(t.id) ?? {}) })));
 }
 
 function isUniqueViolation(err: unknown): boolean {
@@ -64,6 +67,7 @@ async function handlePOST(request: Request) {
           mimeType: normalizeAudioMime(file.type),
         },
       });
+      await queueNewTracks([track.id]); // classify its genres in the background (never fails the upload)
       return NextResponse.json(toTrackApiResponse(track), { status: 201 });
     } catch (err) {
       await deleteLocalFile(storageKey).catch(() => {}); // don't orphan the file if the DB write fails
@@ -100,6 +104,7 @@ async function handlePOST(request: Request) {
         mimeType: normalizeAudioMime(typeof mimeType === "string" ? mimeType : ""),
       },
     });
+    await queueNewTracks([track.id]);
     return NextResponse.json(toTrackApiResponse(track), { status: 201 });
   } catch (err) {
     if (isUniqueViolation(err)) return jsonError(409, "That file is already in your library.");

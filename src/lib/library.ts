@@ -4,11 +4,13 @@
  */
 import type { Track } from "@/types/music";
 
-export type LibraryView = "songs" | "artists" | "liked" | "fx";
+export type LibraryView = "songs" | "artists" | "genres" | "review" | "liked" | "fx";
 
 export const LIBRARY_VIEWS: readonly { id: LibraryView; label: string }[] = [
   { id: "songs", label: "Songs" },
   { id: "artists", label: "Artists" },
+  { id: "genres", label: "Genres" },
+  { id: "review", label: "Genre review" },
   { id: "liked", label: "Liked" },
   { id: "fx", label: "FX" },
 ];

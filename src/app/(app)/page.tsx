@@ -8,6 +8,7 @@ import { likedTracks } from "@/lib/library";
 import { buildMixes, tracksForMood } from "@/lib/moods";
 import { HOME_CHIPS, chipView, mixedForYou, pinnedFirst, quickPicks, recentlyAdded, recentlyPlayed, type HomeChip } from "@/lib/homeSections";
 import { coverGradient } from "@/lib/coverGradient";
+import { useCurateUi } from "@/lib/curateClient";
 import { PlayIcon, ShuffleIcon, SparklesIcon } from "@/components/Icons";
 import { Card, Carousel, Chip, ChipRow, CoverArt, MediaCard, PagedGrid, SectionHeader, Skeleton, Text, Tile, usePullToRefresh } from "@/ui";
 import type { Track } from "@/types/music";
@@ -193,6 +194,15 @@ export default function Home() {
                 title="Shuffle Play"
                 onClick={canShuffle ? () => startShuffle(localLibrary) : undefined}
                 className={canShuffle ? undefined : "pointer-events-none opacity-50"}
+              />
+              <Tile
+                cover={
+                  <span className="flex h-full w-full items-center justify-center bg-surface-hover text-accent-purple">
+                    <SparklesIcon size={22} />
+                  </span>
+                }
+                title="Create with DJ"
+                onClick={() => useCurateUi.getState().show()}
               />
               {likedCount > 0 && (
                 <Tile

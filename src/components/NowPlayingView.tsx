@@ -11,6 +11,7 @@ import { SpookySparkles } from "@/components/SpookyBackdrop";
 import { LayerIndicator } from "@/components/LayerIndicator";
 import { LikeButton } from "@/components/LikeButton";
 import { NowPlayingTabs } from "@/components/NowPlayingTabs";
+import { GenreBadge } from "@/components/GenreBadge";
 
 const PARTICLE_EMOJIS = ["🍂", "🕸️", "⚡"];
 const PARTICLE_LIFETIME_MS = 4000;
@@ -166,6 +167,9 @@ export function NowPlayingView() {
               <p className="text-base text-muted break-words line-clamp-2 transition-colors duration-1000">
                 {currentTrack.artist}
               </p>
+              <div className="mt-1.5 flex justify-center">
+                <GenreBadge track={currentTrack} addWhenEmpty />
+              </div>
             </div>
             <LikeButton trackId={currentTrack.id} title={currentTrack.title} size={24} />
           </div>

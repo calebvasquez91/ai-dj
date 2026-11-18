@@ -9,6 +9,8 @@ import { PlayIcon } from "@/components/Icons";
 import { TrackThumbnail } from "@/components/TrackThumbnail";
 import { AddMusicBar } from "@/components/AddMusicBar";
 import { UploadSongsButton } from "@/components/UploadSongsButton";
+import { GenreBadge } from "@/components/GenreBadge";
+import { useGenreClient } from "@/lib/genreClient";
 
 /**
  * The playlist name as a textarea that grows with its content, not an
@@ -71,6 +73,7 @@ function PlaylistContent() {
   const removePlaylist = useStore((s) => s.removePlaylist);
   const addLocalTracks = useStore((s) => s.addLocalTracks);
   const addTrackToPlaylist = useStore((s) => s.addTrackToPlaylist);
+  const reclassifyGenres = useGenreClient((s) => s.reclassify);
   const removeTrackFromPlaylist = useStore((s) => s.removeTrackFromPlaylist);
   const moveTrackInPlaylist = useStore((s) => s.moveTrackInPlaylist);
   const playPlaylist = useStore((s) => s.playPlaylist);
@@ -132,6 +135,16 @@ function PlaylistContent() {
                 await Promise.all(tracks.map((track) => addTrackToPlaylist(playlist.id, track)));
               }}
             />
+            {playlist.tracks.length > 0 && (
+              <button
+                type="button"
+                onClick={() => void reclassifyGenres({ playlistId: playlist.id })}
+                className="btn-outline !text-xs shrink-0"
+                title="Look up the genres of every track in this playlist again. Genres you set yourself are kept."
+              >
+                Re-classify genres
+              </button>
+            )}
             {!playlist.theme && (
               <button
                 type="button"
@@ -189,6 +202,7 @@ function PlaylistContent() {
                 <div className="min-w-0 flex-1 basis-32">
                   <p className="text-sm font-medium break-words line-clamp-2">{track.title}</p>
                   <p className="text-xs text-muted break-words line-clamp-1">{track.artist}</p>
+                  <GenreBadge track={track} />
                   {analyzingTrackIds.has(track.id) && (
                     <p className="text-[10px] font-medium text-accent-purple" aria-live="polite">
                       Analyzing…
