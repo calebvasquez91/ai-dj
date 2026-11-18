@@ -1,7 +1,7 @@
 import { readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
-import { FX_SOUND_TRANSITION_IDS, RECENT_TRANSITIONS_KEPT, planArgsFromState, planTransition, type PlanningState } from "./mix-engine";
+import { FX_SOUND_TRANSITION_IDS, LOOP_REPEAT_TRANSITION_IDS, RECENT_TRANSITIONS_KEPT, planArgsFromState, planTransition, type PlanningState } from "./mix-engine";
 import { TRANSITION_FX_ENABLED } from "./syncEngine";
 import type { TrackAnalysis } from "./audio-analysis";
 import type { Track } from "@/types/music";
@@ -42,13 +42,13 @@ describe("planArgsFromState", () => {
   it("keeps vocal-layering out of the running when the incoming track has no vocal stem", () => {
     const args = planArgsFromState(base, weights, track("a"), track("b"));
     expect(args.vocalStemReady).toBe(false);
-    expect(args.excludeTransitionIds).toEqual(["echo-out", "vocal-layering", ...FX_SOUND_TRANSITION_IDS]);
+    expect(args.excludeTransitionIds).toEqual(["echo-out", "vocal-layering", ...FX_SOUND_TRANSITION_IDS, ...LOOP_REPEAT_TRANSITION_IDS]);
   });
 
   it("allows vocal-layering, with its bonus, once the incoming vocal stem is ready", () => {
     const args = planArgsFromState({ ...base, stemAvailability: { b: "https://stem/vocals.wav" } }, weights, track("a"), track("b"));
     expect(args.vocalStemReady).toBe(true);
-    expect(args.excludeTransitionIds).toEqual(["echo-out", ...FX_SOUND_TRANSITION_IDS]);
+    expect(args.excludeTransitionIds).toEqual(["echo-out", ...FX_SOUND_TRANSITION_IDS, ...LOOP_REPEAT_TRANSITION_IDS]);
   });
 
   it("only looks at the INCOMING track's stem, not the outgoing one's", () => {
@@ -59,7 +59,7 @@ describe("planArgsFromState", () => {
   it("ignoreOverrides drops the pin and the re-rolls but keeps the stem rule", () => {
     const args = planArgsFromState(base, weights, track("a"), track("b"), { ignoreOverrides: true });
     expect(args.forceTransitionId).toBeNull();
-    expect(args.excludeTransitionIds).toEqual(["vocal-layering", ...FX_SOUND_TRANSITION_IDS]);
+    expect(args.excludeTransitionIds).toEqual(["vocal-layering", ...FX_SOUND_TRANSITION_IDS, ...LOOP_REPEAT_TRANSITION_IDS]);
   });
 
   it("defaults the playhead to unknown", () => {
@@ -156,5 +156,82 @@ describe("planTransition has one entry point", () => {
       });
     }
     expect(offenders).toEqual([]);
+  });
+});
+
+describe("the loop/repeat transitions", () => {
+  const makeTrack = (id: string): Track => ({ id, title: id, artist: "Test Artist", durationSec: 240, addedAt: 0, source: "local", sourceUrl: `blob:${id}` });
+  const analysis = (bpm: number, camelotKey: string, energyOnsetSec: number): TrackAnalysis => ({
+    bpm,
+    bpmConfidence: 0.8,
+    beatGridOffsetSec: 0.2,
+    energyOnsetSec,
+    key: camelotKey,
+    keyConfidence: 0.6,
+    camelotKey,
+    breakdownAtSec: null,
+    dropAtSec: null,
+    buildDropPairs: [],
+    waveformPeaks: [],
+    fallback: false,
+  });
+
+  it("are exactly the beat-repeat stutter and the held loop", () => {
+    expect([...LOOP_REPEAT_TRANSITION_IDS].sort()).toEqual(["beat-repeat-transition", "loop-hold-transition"]);
+  });
+
+  it("are never planned automatically, whatever the pair, mode or genre", () => {
+    const repeatEffects = new Set(["loop-roll", "loop-hold"]);
+    for (const djMode of ["club", "wedding", "party", "chill", "open-format"] as const) {
+      for (const bpmB of [100, 124, 128, 131, 140, 160]) {
+        for (const keyB of ["8A", "9A", "3B", "5A"]) {
+          for (const genre of [null, "house", "hiphop", "techno"]) {
+            const args = planArgsFromState(
+              { ...base, djMode, styleGenreHint: genre, forcedTransitionId: null, rerolledTransitionIds: [] },
+              {},
+              { track: makeTrack("a"), analysis: analysis(128, "8A", 8) },
+              { track: makeTrack("b"), analysis: analysis(bpmB, keyB, 12) }
+            );
+            for (const id of LOOP_REPEAT_TRANSITION_IDS) expect(args.excludeTransitionIds).toContain(id);
+            const plan = planTransition(args);
+            expect(repeatEffects.has(plan.effect), `${plan.transitionId} -> ${plan.effect}`).toBe(false);
+          }
+        }
+      }
+    }
+  });
+
+  it("stay out even when everything else has been excluded and the planner falls back to unrestricted scoring", () => {
+    const repeatEffects = new Set(["loop-roll", "loop-hold"]);
+    const args = planArgsFromState(
+      { ...base, forcedTransitionId: null, rerolledTransitionIds: [] },
+      {},
+      { track: makeTrack("a"), analysis: analysis(128, "8A", 8) },
+      { track: makeTrack("b"), analysis: analysis(128, "8A", 12) }
+    );
+    // Exclude each pick in turn until the planner has nothing left to choose from; the pick after that is the fallback's.
+    const excluded = [...args.excludeTransitionIds!];
+    let fallbackPick: string | null = null;
+    for (let i = 0; i < 200 && fallbackPick == null; i++) {
+      const plan = planTransition({ ...args, excludeTransitionIds: excluded });
+      expect(repeatEffects.has(plan.effect), `${plan.transitionId} -> ${plan.effect}`).toBe(false);
+      if (excluded.includes(plan.transitionId)) fallbackPick = plan.transitionId;
+      else excluded.push(plan.transitionId);
+    }
+    expect(fallbackPick, "the planner never ran out of candidates").not.toBeNull();
+  });
+
+  it("can still be pinned by hand", () => {
+    for (const [id, effect] of [["beat-repeat-transition", "loop-roll"], ["loop-hold-transition", "loop-hold"]] as const) {
+      const args = planArgsFromState(
+        { ...base, forcedTransitionId: id, rerolledTransitionIds: [] },
+        {},
+        { track: makeTrack("a"), analysis: analysis(128, "8A", 8) },
+        { track: makeTrack("b"), analysis: analysis(128, "8A", 12) }
+      );
+      const plan = planTransition(args);
+      expect(plan.transitionId).toBe(id);
+      expect(plan.effect).toBe(effect);
+    }
   });
 });

@@ -74,7 +74,7 @@ export function BackgroundAudio() {
     }
     const appIcon = [{ src: "/icons/icon-512.png", sizes: "512x512", type: "image/png" }];
     const describe = (artwork: MediaImage[]) =>
-      new MediaMetadata({ title: currentTrack.title, artist: currentTrack.artist, album: "AI DJ", artwork });
+      new MediaMetadata({ title: currentTrack.title, artist: currentTrack.artist, album: "Que DJ", artwork });
     // A cosmetic feature must never take the player down: an artwork URL the browser rejects makes the constructor
     // throw (and a throw inside an effect unmounts the layout), so fall back to the app icon, then to no artwork.
     try {

@@ -482,7 +482,7 @@ export function TopBar() {
       </div>
       {/* A phone's top bar: the wordmark, with the search box swapped in for it on the Search page, and the account button
           at the right on every page (Log out and Dark mode live there now that there is no side panel). */}
-      {!onSearchPage && <span className="tablet:hidden flex-1 min-w-0 text-xl wordmark">AI DJ</span>}
+      {!onSearchPage && <span className="tablet:hidden flex-1 min-w-0 text-xl wordmark">Que DJ</span>}
       <div ref={wrapRef} className={`flex-1 min-w-0 max-w-xl mx-auto relative ${onSearchPage ? "" : "max-tablet:hidden"}`}>
         <span className="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 text-muted text-sm">
           🔍

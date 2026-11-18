@@ -52,8 +52,10 @@ import { isStuckMuted, looksMuted, rmsLevel, shouldResumeContext, wakeVerdict } 
 import { TRANSITION_FX_ENABLED, buildSyncReport } from "@/lib/syncEngine";
 import {
   SONG_SYNC_CROSSFADE_BARS,
+  addElementClockSample,
   addPhaseReading,
   averagedPhaseError,
+  estimateElementClockOffset,
   beatsUntilMixOut,
   fitMorphToRoom,
   initialSongSyncStatus,
@@ -207,6 +209,8 @@ const TEMPO_RAMP_PRE_WINDOW_SEC = 8;
 const SONG_SYNC_TICK_MS = 50;
 /** The wait for the playing track's next bar line polls its <audio> clock this often. */
 const SONG_SYNC_POLL_MS = 10;
+/** While a sync is being set up, the playing track's <audio> clock is read against the audio clock this often (see estimateElementClockOffset). */
+const SONG_SYNC_CLOCK_SAMPLE_MS = 8;
 /** The earliest bar line the morph can start on: far enough off for the swap to be set up. */
 const SONG_SYNC_MIN_LEAD_SEC = 0.4;
 /** While waiting for that bar line, a playhead this far outside the range it should be creeping through means the user sought, and the morph is dropped. */
@@ -2655,6 +2659,21 @@ export function DualDeckStage() {
 
       songSyncStartingRef.current = true;
       const fromTrackId = track.id;
+      // While the sync is set up (the buffer decodes, the AI DJ confirms), keep reading where the playing track's <audio>
+      // clock sits against the audio clock: the hand-over below is timed from their steady mean, not from one jittery reading.
+      // A reading is only valid while the element plays straight on at normal speed: a seek, a pause or another playbackRate
+      // makes the two clocks stop advancing together, so the readings so far are dropped. In a hidden tab the timer runs about
+      // once a second, so a last reading is taken when the offset is used (below) as well.
+      let clockSamples: number[] = [];
+      const sampleClock = () => {
+        if (fromEl.paused || fromEl.seeking || fromEl.playbackRate !== 1) {
+          clockSamples = [];
+          return;
+        }
+        clockSamples = addElementClockSample(clockSamples, fromEl.currentTime - ctx.currentTime);
+      };
+      sampleClock();
+      const clockTimer = setInterval(sampleClock, SONG_SYNC_CLOCK_SAMPLE_MS);
       const stale = () => {
         const s = useStore.getState();
         return (
@@ -2719,7 +2738,14 @@ export function DualDeckStage() {
             barSrcSecForVoice *
             Math.max(1, plan.rateTarget) +
           5;
-        const tBarCtx = ctx.currentTime + Math.max(0, startAt - fromEl.currentTime) + SONG_SYNC_CLOCK_OFFSET_SEC;
+        // The bar line on the audio clock: where it will be by the element's steady clock offset, or (with too few readings,
+        // a decode that finished at once) by one reading of the element's clock.
+        clearInterval(clockTimer);
+        sampleClock();
+        const clockOffset = estimateElementClockOffset(clockSamples);
+        const tBarCtx =
+          (clockOffset == null ? ctx.currentTime + Math.max(0, startAt - fromEl.currentTime) : Math.max(ctx.currentTime, startAt - clockOffset)) +
+          SONG_SYNC_CLOCK_OFFSET_SEC;
         // A morph that holds the tempo and the key never changes the outgoing track at all, so it plays it untouched
         // (sample for sample, no stretching) instead of passing it through the stretcher for nothing.
         const untouched = plan.direction === "hold" && plan.pitchTargetSemitones === 0;
@@ -2795,6 +2821,7 @@ export function DualDeckStage() {
       } catch {
         // Decode/fetch/timeout/SoundTouchJS failure: no morph, the ordinary transition takes the exit.
       } finally {
+        clearInterval(clockTimer);
         songSyncStartingRef.current = false;
         if (!running) {
           try {

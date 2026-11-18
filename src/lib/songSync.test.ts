@@ -27,6 +27,11 @@ import {
   songSyncStateAt,
   songSyncTrigger,
   type SongSyncPlan,
+  estimateElementClockOffset,
+  addElementClockSample,
+  ELEMENT_CLOCK_JUMP_SEC,
+  ELEMENT_CLOCK_SAMPLES_KEPT,
+  ELEMENT_CLOCK_SAMPLES_MIN,
 } from "./songSync";
 import { MAX_ACTIVE_PLAY_SEC } from "./mix-engine";
 import { TRANSITION_FX_ENABLED, buildSyncReport, semitonesToMatchCamelotNumber, shiftCamelot, planKey } from "./syncEngine";
@@ -419,5 +424,51 @@ describe("phase readings", () => {
     expect(mean).toBeCloseTo(-0.01100, 4);
     // each reading is off by up to 3 ms from the centre, the mean by far less
     expect(Math.max(...jitter.map((j) => Math.abs(j - mean)))).toBeGreaterThan(0.002);
+  });
+});
+
+describe("estimateElementClockOffset", () => {
+  it("is the mean of the readings, which averages the element clock's jitter away", () => {
+    // a clock sitting 26.05 s ahead of the audio clock, read with +-6 ms of jitter
+    const jitter = [0.006, -0.004, 0.002, -0.006, 0.005, -0.001, -0.003, 0.001, 0.004, -0.004];
+    const samples = Array.from({ length: 40 }, (_, i) => 26.05 + jitter[i % jitter.length]);
+    expect(estimateElementClockOffset(samples)!).toBeCloseTo(26.05, 3);
+  });
+  it("uses only the latest readings, so an old stretch of the song does not drag it", () => {
+    const samples = [...Array.from({ length: 100 }, () => 5), ...Array.from({ length: ELEMENT_CLOCK_SAMPLES_KEPT }, () => 7)];
+    expect(estimateElementClockOffset(samples)).toBeCloseTo(7, 9);
+  });
+  it("returns null with too few readings, or none that are numbers", () => {
+    expect(estimateElementClockOffset([])).toBeNull();
+    expect(estimateElementClockOffset(Array.from({ length: ELEMENT_CLOCK_SAMPLES_MIN - 1 }, () => 1))).toBeNull();
+    expect(estimateElementClockOffset(Array.from({ length: 30 }, () => Number.NaN))).toBeNull();
+    expect(estimateElementClockOffset(Array.from({ length: ELEMENT_CLOCK_SAMPLES_MIN }, () => 1))).toBe(1);
+  });
+});
+
+describe("addElementClockSample", () => {
+  it("keeps only the latest readings, so the list cannot grow however long the decode takes", () => {
+    let samples: number[] = [];
+    for (let i = 0; i < 500; i++) samples = addElementClockSample(samples, 26 + (i % 2) * 0.002);
+    expect(samples).toHaveLength(ELEMENT_CLOCK_SAMPLES_KEPT);
+  });
+  it("starts over when the clocks jump apart (a seek or a stall), so the mean is not taken across it", () => {
+    let samples: number[] = [];
+    for (let i = 0; i < 20; i++) samples = addElementClockSample(samples, 26 + (i % 2) * 0.004);
+    samples = addElementClockSample(samples, 26 + ELEMENT_CLOCK_JUMP_SEC * 3); // the user scrubbed forward
+    expect(samples).toEqual([26 + ELEMENT_CLOCK_JUMP_SEC * 3]);
+    for (let i = 0; i < 10; i++) samples = addElementClockSample(samples, 26.12 + (i % 2) * 0.004);
+    expect(estimateElementClockOffset(samples)).toBeCloseTo(26.122, 2);
+  });
+  it("does not mistake ordinary jitter for a jump", () => {
+    let samples: number[] = [];
+    for (const j of [0.006, -0.006, 0.005, -0.004, 0.006, -0.005, 0.003, -0.006]) samples = addElementClockSample(samples, 26 + j);
+    expect(samples).toHaveLength(8);
+  });
+  it("ignores a reading that is not a number", () => {
+    expect(addElementClockSample([1, 1], Number.NaN)).toEqual([1, 1]);
+  });
+  it("works from the first reading", () => {
+    expect(addElementClockSample([], 5)).toEqual([5]);
   });
 });

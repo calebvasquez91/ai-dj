@@ -70,7 +70,7 @@ export async function sendFeedbackMail(
   try {
     await withTimeout(
       (transport ?? gmailTransport(config)).sendMail({
-        from: `"AI DJ feedback" <${config.user}>`,
+        from: `"Que DJ feedback" <${config.user}>`,
         to: config.to,
         replyTo: email.replyTo ?? undefined,
         subject: email.subject,

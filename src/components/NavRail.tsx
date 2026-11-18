@@ -37,8 +37,8 @@ export function NavRail() {
       aria-label="Main"
       className="hidden w-16 shrink-0 flex-col items-center gap-1 border-r border-border/10 surface-glass py-3 pl-[env(safe-area-inset-left)] tablet:flex desktop:hidden"
     >
-      <span className="wordmark mb-2 text-lg" aria-hidden="true">
-        AI
+      <span className="wordmark mb-2 text-center text-sm leading-tight" aria-hidden="true">
+        Que DJ
       </span>
       {NAV_TABS.map((tab) => (
         <RailLink key={tab.href} href={tab.href} label={tab.label} icon={NAV_ICONS[tab.href]} active={tab.href === active} />

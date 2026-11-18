@@ -28,8 +28,8 @@ const retroDisplay = Bungee({
 });
 
 export const metadata: Metadata = {
-  title: "AI DJ",
-  description: "An AI DJ that mixes your music into one continuous set.",
+  title: "Que DJ",
+  description: "A music app where an AI DJ mixes your songs into one continuous set.",
   icons: {
     icon: [{ url: "/icons/icon-192.png", sizes: "192x192", type: "image/png" }],
     apple: [{ url: "/icons/icon-180.png", sizes: "180x180", type: "image/png" }],
@@ -37,7 +37,7 @@ export const metadata: Metadata = {
   appleWebApp: {
     capable: true,
     statusBarStyle: "default",
-    title: "AI DJ",
+    title: "Que DJ",
   },
 };
 

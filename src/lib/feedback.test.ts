@@ -106,7 +106,7 @@ describe("formatFeedbackEmail", () => {
 
   it("puts the stars, the comment and who sent it in the text", () => {
     const mail = formatFeedbackEmail(base);
-    expect(mail.subject).toBe("AI DJ feedback: ★★★★☆ 4/5 — Love the crossfades. The FX button is confusing.");
+    expect(mail.subject).toBe("Que DJ feedback: ★★★★☆ 4/5 — Love the crossfades. The FX button is confusing.");
     expect(mail.text).toContain("4 out of 5");
     expect(mail.text).toContain("Love the crossfades.\nThe FX button is confusing.");
     expect(mail.text).toContain("From: Sam <sam@example.com>");
@@ -124,7 +124,7 @@ describe("formatFeedbackEmail", () => {
 
   it("copes with a rating alone and with missing details", () => {
     const mail = formatFeedbackEmail({ rating: 2, comment: "", userEmail: null, userName: null, page: null, appVersion: null, userAgent: null, at: base.at });
-    expect(mail.subject).toBe("AI DJ feedback: ★★☆☆☆ 2/5");
+    expect(mail.subject).toBe("Que DJ feedback: ★★☆☆☆ 2/5");
     expect(mail.text).toContain("(no comment)");
     expect(mail.text).toContain("From: Unknown user");
     expect(mail.text).toContain("Page: unknown");

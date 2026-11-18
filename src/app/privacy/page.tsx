@@ -1,7 +1,7 @@
 import Link from "next/link";
 
 export const metadata = {
-  title: "Privacy Policy — AI DJ",
+  title: "Privacy Policy — Que DJ",
 };
 
 export default function PrivacyPage() {
@@ -11,7 +11,7 @@ export default function PrivacyPage() {
       <div className="min-h-full flex justify-center pt-[max(1.5rem,env(safe-area-inset-top))] pb-[max(1.5rem,env(safe-area-inset-bottom))] pl-[max(1.5rem,env(safe-area-inset-left))] pr-[max(1.5rem,env(safe-area-inset-right))]">
       <div className="card w-full max-w-2xl p-8 max-sm:p-5 flex flex-col gap-6 my-8">
         <div className="flex flex-col gap-2">
-          <span className="text-2xl wordmark">AI DJ</span>
+          <span className="text-2xl wordmark">Que DJ</span>
           <h1 className="text-2xl heading">Privacy Policy</h1>
           <p className="text-xs text-muted">Last updated November 17, 2026</p>
         </div>
@@ -19,7 +19,7 @@ export default function PrivacyPage() {
         <section className="flex flex-col gap-2">
           <h2 className="text-lg font-semibold text-accent-purple">What this app is</h2>
           <p className="text-sm">
-            AI DJ is a music-mixing tool. Songs and sound effects that people upload make up one
+            Que DJ is a music-mixing tool. Songs and sound effects that people upload make up one
             shared music library, and the app plays them back as one continuous,
             automatically-mixed set.
           </p>
@@ -40,7 +40,7 @@ export default function PrivacyPage() {
             If you rate the app or send a comment from the feedback pop-up, we store the star
             rating, your comment, the page you were on, the app version, your browser&apos;s
             description of itself (its user agent), and your account, so we can read it and reply.
-            We email it to the developer. It is only used to improve AI DJ and is never sold or
+            We email it to the developer. It is only used to improve Que DJ and is never sold or
             shared with anyone else. Deleting your account deletes the feedback saved with it.
           </p>
         </section>
@@ -48,7 +48,7 @@ export default function PrivacyPage() {
         <section className="flex flex-col gap-2">
           <h2 className="text-lg font-semibold text-accent-purple">The shared music library</h2>
           <p className="text-sm">
-            Every song and sound effect that is added to AI DJ becomes part of one music library
+            Every song and sound effect that is added to Que DJ becomes part of one music library
             that every signed-in account can see and play. Whoever added a file is not shown to
             other people, and the library is only listed to people who are signed in. Each file is
             stored at a long, hard-to-guess web address, so anyone who is given that exact address
@@ -62,7 +62,7 @@ export default function PrivacyPage() {
             song out of one of your playlists never removes it from the library.
           </p>
           <p className="text-sm">
-            Only upload music you have the right to share with the other people who use AI DJ.
+            Only upload music you have the right to share with the other people who use Que DJ.
           </p>
         </section>
 
@@ -71,7 +71,7 @@ export default function PrivacyPage() {
           <p className="text-sm">
             We do not sell, rent, or share your personal information with any third party, and we do
             not use it for advertising. Music in the shared library is available only to people
-            signed in to AI DJ.
+            signed in to Que DJ.
           </p>
         </section>
 

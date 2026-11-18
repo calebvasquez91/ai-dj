@@ -93,7 +93,7 @@ const EMAIL_SHAPE = /^[^\s@<>",;]+@[^\s@<>",;]+\.[^\s@<>",;]+$/;
 export function formatFeedbackEmail(input: FeedbackEmailInput): FeedbackEmail {
   const stars = starString(input.rating);
   const preview = singleLine(input.comment, 60);
-  const subject = singleLine(`AI DJ feedback: ${stars} ${input.rating}/5${preview ? ` — ${preview}${input.comment.length > 60 ? "…" : ""}` : ""}`, 150);
+  const subject = singleLine(`Que DJ feedback: ${stars} ${input.rating}/5${preview ? ` — ${preview}${input.comment.length > 60 ? "…" : ""}` : ""}`, 150);
   const who = [input.userName ? singleLine(input.userName, 80) : "", input.userEmail ? `<${singleLine(input.userEmail, 120)}>` : ""].filter(Boolean).join(" ") || "Unknown user";
   const details: [string, string][] = [
     ["From", who],
