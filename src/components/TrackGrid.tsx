@@ -5,6 +5,7 @@ import { useStore } from "@/lib/store";
 import { formatRelativeTime, isRecentlyAdded } from "@/lib/format";
 import { useNow } from "@/lib/useNow";
 import { AddToPlaylistButton } from "@/components/AddToPlaylistButton";
+import { useIsAdmin } from "@/components/FeedbackOwnerProvider";
 import { LikeButton } from "@/components/LikeButton";
 import { SeparateStemsButton } from "@/components/SeparateStemsButton";
 import { TrackThumbnail } from "@/components/TrackThumbnail";
@@ -98,6 +99,8 @@ const TrackCard = memo(function TrackCard({
   const setTrackPlayPreference = useStore((s) => s.setTrackPlayPreference);
   const setTrackTags = useStore((s) => s.setTrackTags);
   const [editingTags, setEditingTags] = useState(false);
+  // Tags are part of the shared song, so only the admin edits them.
+  const isAdmin = useIsAdmin();
   const [tagsDraft, setTagsDraft] = useState("");
   const isNew = isRecentlyAdded(track.addedAt, now);
 
@@ -195,20 +198,22 @@ const TrackCard = memo(function TrackCard({
           >
             <NoEntryIcon size={14} />
           </button>
-          <button
-            type="button"
-            onClick={(e) => {
-              e.stopPropagation();
-              setTagsDraft((track.tags ?? []).join(", "));
-              setEditingTags(true);
-            }}
-            className={`btn-icon text-[11px] font-semibold ${
-              track.tags && track.tags.length > 0 ? "text-accent-purple" : "text-muted"
-            }`}
-            title={track.tags?.length ? `Tags: ${track.tags.join(", ")}` : "Add tags (e.g. halloween, spooky)"}
-          >
-            #
-          </button>
+          {isAdmin && (
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                setTagsDraft((track.tags ?? []).join(", "));
+                setEditingTags(true);
+              }}
+              className={`btn-icon text-[11px] font-semibold ${
+                track.tags && track.tags.length > 0 ? "text-accent-purple" : "text-muted"
+              }`}
+              title={track.tags?.length ? `Tags: ${track.tags.join(", ")}` : "Add tags (e.g. halloween, spooky)"}
+            >
+              #
+            </button>
+          )}
           <AddToPlaylistButton track={track} />
           <SeparateStemsButton track={track} />
           {onRemove && (
@@ -216,10 +221,11 @@ const TrackCard = memo(function TrackCard({
               type="button"
               onClick={(e) => {
                 e.stopPropagation();
-                onRemove(track.id);
+                // Admin only, and for good: it takes the song out of the app for every account.
+                if (window.confirm(`Delete "${track.title}" from the music library for everyone? This can't be undone.`)) onRemove(track.id);
               }}
               className="btn-icon text-muted hover:text-accent-pink ml-auto"
-              title="Remove from library"
+              title="Delete from the library (admin)"
             >
               <CloseIcon size={14} />
             </button>

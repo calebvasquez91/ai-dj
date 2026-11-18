@@ -11,7 +11,7 @@ async function handleGET(request: Request, { params }: { params: Promise<{ id: s
 
   const { id } = await params;
   const fx = await prisma.fxSound.findUnique({ where: { id } });
-  if (!fx || fx.userId !== session.user.id) {
+  if (!fx) {
     return notFound();
   }
 

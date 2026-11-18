@@ -11,7 +11,7 @@ async function handleGET(request: Request, { params }: { params: Promise<{ id: s
 
   const { id } = await params;
   const track = await prisma.track.findUnique({ where: { id } });
-  if (!track || track.userId !== session.user.id) {
+  if (!track) {
     return notFound();
   }
 

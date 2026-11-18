@@ -5,16 +5,20 @@ import { getStorageBackend, saveLocalFile, deleteLocalFile, deleteBlobFile } fro
 import { toTrackApiResponse } from "@/lib/trackApi";
 import { apiHandler, jsonError, unauthorized } from "@/lib/apiRoute";
 import { cleanText, isAcceptableStorageUrl, isValidDuration, normalizeAudioMime } from "@/lib/apiValidation";
+import { loadUserTrackData } from "@/lib/trackUserData";
+import { uploadLimitResponse } from "@/lib/uploadGuard";
 
 async function handleGET() {
   const session = await auth();
   if (!session) return unauthorized();
 
-  const tracks = await prisma.track.findMany({
-    where: { userId: session.user.id },
-    orderBy: { createdAt: "asc" },
-  });
-  return NextResponse.json(tracks.map(toTrackApiResponse));
+  // The library is shared: every account sees every song, whoever added it. Only the must / do-not-play marks and hot cues are
+  // each person's own (TrackUserData). YouTube imports were removed from the app, so none are listed.
+  const [tracks, userData] = await Promise.all([
+    prisma.track.findMany({ where: { source: "local" }, orderBy: { createdAt: "asc" } }),
+    loadUserTrackData(session.user.id),
+  ]);
+  return NextResponse.json(tracks.map((t) => toTrackApiResponse(t, userData.get(t.id))));
 }
 
 function isUniqueViolation(err: unknown): boolean {
@@ -24,6 +28,8 @@ function isUniqueViolation(err: unknown): boolean {
 async function handlePOST(request: Request) {
   const session = await auth();
   if (!session) return unauthorized();
+  const limited = await uploadLimitResponse(session.user.id);
+  if (limited) return limited;
 
   const contentType = request.headers.get("content-type") ?? "";
 

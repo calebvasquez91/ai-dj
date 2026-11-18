@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { auth } from "@/auth";
+import { uploadLimitResponse } from "@/lib/uploadGuard";
 import { prisma } from "@/lib/prisma";
 import { getStorageBackend, saveLocalFile, deleteLocalFile, deleteBlobFile } from "@/lib/storage";
 import { toFxApiResponse, isFxCategory } from "@/lib/fxApi";
@@ -17,10 +18,8 @@ async function handleGET() {
   const session = await auth();
   if (!session) return unauthorized();
 
-  const fx = await prisma.fxSound.findMany({
-    where: { userId: session.user.id },
-    orderBy: { createdAt: "asc" },
-  });
+  // FX sounds are shared: every account sees every one, whoever added it.
+  const fx = await prisma.fxSound.findMany({ orderBy: { createdAt: "asc" } });
   return NextResponse.json(fx.map(toFxApiResponse));
 }
 
@@ -31,6 +30,8 @@ function isUniqueViolation(err: unknown): boolean {
 async function handlePOST(request: Request) {
   const session = await auth();
   if (!session) return unauthorized();
+  const limited = await uploadLimitResponse(session.user.id);
+  if (limited) return limited;
 
   const contentType = request.headers.get("content-type") ?? "";
 
