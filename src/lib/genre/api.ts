@@ -5,7 +5,7 @@
  * prisma/genre-tables.sql has been run.
  */
 import { prisma } from "@/lib/prisma";
-import { PRIORITY_REQUESTED } from "@/lib/genre/constants";
+import { PRIORITY_BACKFILL, PRIORITY_REQUESTED } from "@/lib/genre/constants";
 import { disagreesWithManual } from "@/lib/genre/combine";
 import { prismaJobStore, storedFromRow } from "@/lib/genre/prismaStore";
 import type { StoredGenre } from "@/lib/genre/stored";
@@ -76,6 +76,29 @@ export async function queueUnclassified(trackIds: readonly string[], priority = 
   try {
     const rows = await prisma.track.findMany({ where: { id: { in: [...trackIds] }, genreInfo: null }, select: { id: true } });
     return await prismaJobStore.enqueue(rows.map((r) => r.id), priority);
+  } catch {
+    return 0;
+  }
+}
+
+/** How many never-classified songs one top-up queues. */
+export const BACKFILL_TOP_UP = 1000;
+
+/**
+ * For the scheduler: when the queue has run dry, queues the next batch of songs that have never been classified, at low
+ * priority, so a library bigger than one batch gets worked through with nobody having the app open. Songs that already have a
+ * job row (waiting, running, or given up after five tries) are left out, so a song that keeps failing is not retried forever.
+ * Never throws; returns how many were queued.
+ */
+export async function queueBackfillTopUp(limit = BACKFILL_TOP_UP): Promise<number> {
+  try {
+    const rows = await prisma.track.findMany({
+      where: { source: "local", genreInfo: null, genreJobs: { none: {} } },
+      select: { id: true },
+      orderBy: { createdAt: "desc" },
+      take: limit,
+    });
+    return rows.length === 0 ? 0 : await prismaJobStore.enqueue(rows.map((r) => r.id), PRIORITY_BACKFILL);
   } catch {
     return 0;
   }
