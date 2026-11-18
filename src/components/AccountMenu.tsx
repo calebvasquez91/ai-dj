@@ -5,7 +5,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useSession, signOut } from "next-auth/react";
 import { ThemeToggle } from "@/components/ThemeToggle";
-import { QueueIcon, SlidersIcon, SparklesIcon, StarIcon } from "@/components/Icons";
+import { ShieldIcon, SlidersIcon, SparklesIcon, StarIcon } from "@/components/Icons";
 import { useIsAdmin } from "@/components/FeedbackOwnerProvider";
 import { useFeedbackUi } from "@/lib/feedbackUi";
 
@@ -16,7 +16,7 @@ import { useFeedbackUi } from "@/lib/feedbackUi";
  */
 export function AccountMenu({ placement = "below" }: { placement?: "below" | "above-start" } = {}) {
   const { data: session } = useSession();
-  const isFeedbackOwner = useIsAdmin();
+  const isAdmin = useIsAdmin();
   const pathname = usePathname();
   const [open, setOpen] = useState(false);
   const wrapRef = useRef<HTMLDivElement>(null);
@@ -94,22 +94,13 @@ export function AccountMenu({ placement = "below" }: { placement?: "below" | "ab
             <SparklesIcon size={18} />
             DJ Inspiration
           </Link>
-          {isFeedbackOwner && (
+          {isAdmin && (
             <Link
-              href="/admin/feedback"
+              href="/admin"
               className="flex items-center gap-2 rounded-lg px-1 py-2 text-sm font-medium text-muted hover:text-foreground"
             >
-              <QueueIcon size={18} />
-              Feedback inbox
-            </Link>
-          )}
-          {isFeedbackOwner && (
-            <Link
-              href="/admin/genres"
-              className="flex items-center gap-2 rounded-lg px-1 py-2 text-sm font-medium text-muted hover:text-foreground"
-            >
-              <SparklesIcon size={18} />
-              Genre classification
+              <ShieldIcon size={18} />
+              Admin
             </Link>
           )}
           <button

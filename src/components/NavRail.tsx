@@ -3,7 +3,8 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { AccountMenu } from "@/components/AccountMenu";
-import { SlidersIcon, SparklesIcon } from "@/components/Icons";
+import { ShieldIcon, SlidersIcon, SparklesIcon } from "@/components/Icons";
+import { useIsAdmin } from "@/components/FeedbackOwnerProvider";
 import { NAV_ICONS, type NavIcon } from "@/components/navIcons";
 import { NAV_TABS, activeTabHref } from "@/lib/navTabs";
 
@@ -32,6 +33,7 @@ function RailLink({ href, label, icon: Icon, active }: { href: string; label: st
 export function NavRail() {
   const pathname = usePathname();
   const active = activeTabHref(pathname);
+  const isAdmin = useIsAdmin();
   return (
     <nav
       aria-label="Main"
@@ -45,6 +47,7 @@ export function NavRail() {
       ))}
       <RailLink href="/inspiration" label="DJ Inspiration" icon={SparklesIcon} active={pathname === "/inspiration"} />
       <RailLink href="/settings" label="Settings" icon={SlidersIcon} active={pathname === "/settings"} />
+      {isAdmin && <RailLink href="/admin" label="Admin" icon={ShieldIcon} active={pathname === "/admin" || pathname.startsWith("/admin/")} />}
       <div className="mt-auto pt-2">
         <AccountMenu placement="above-start" />
       </div>

@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
+import { canManagePlaylist } from "@/lib/playlistAccess";
 import { loadPlaylist, toPlaylistApiResponse } from "@/lib/playlistApi";
 import { loadUserTrackData } from "@/lib/trackUserData";
 import { planReorder } from "@/lib/playlistReorder";
@@ -13,7 +14,7 @@ async function handlePATCH(request: Request, { params }: { params: Promise<{ id:
 
   const { id } = await params;
   const playlist = await prisma.playlist.findUnique({ where: { id } });
-  if (!playlist || playlist.userId !== session.user.id) {
+  if (!playlist || !canManagePlaylist(playlist.userId, session.user.id)) {
     return notFound();
   }
 

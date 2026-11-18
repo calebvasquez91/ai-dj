@@ -13,7 +13,7 @@ export default function PrivacyPage() {
         <div className="flex flex-col gap-2">
           <span className="text-2xl wordmark">Que DJ</span>
           <h1 className="text-2xl heading">Privacy Policy</h1>
-          <p className="text-xs text-muted">Last updated November 17, 2026</p>
+          <p className="text-xs text-muted">Last updated November 18, 2026</p>
         </div>
 
         <section className="flex flex-col gap-2">
@@ -57,12 +57,25 @@ export default function PrivacyPage() {
             everyone else can add files and play them.
           </p>
           <p className="text-sm">
-            What stays private to you: your playlists (other people cannot see them), the songs
-            you mark Must-Play or Do-Not-Play, your hot cues, and your account details. Taking a
-            song out of one of your playlists never removes it from the library.
+            What other accounts cannot see: your playlists, the songs you mark Must-Play or
+            Do-Not-Play, your hot cues, and your account details. The administrator of Que DJ can
+            see, rename and delete every account&apos;s playlists, and can read the listening
+            statistics described below. Taking a song out of one of your playlists never removes it
+            from the library.
           </p>
           <p className="text-sm">
             Only upload music you have the right to share with the other people who use Que DJ.
+          </p>
+        </section>
+
+        <section className="flex flex-col gap-2">
+          <h2 className="text-lg font-semibold text-accent-purple">Listening statistics</h2>
+          <p className="text-sm">
+            While music is playing, Que DJ records how long each song was played: which account,
+            which song, which playlist it was played from (if any), its genre, and the number of
+            seconds, about every 30 seconds. The administrator uses this to see how the app is being
+            used: hours played per account, per genre, per playlist and per song. It is not shared
+            with anyone else, and it is deleted with your account.
           </p>
         </section>
 

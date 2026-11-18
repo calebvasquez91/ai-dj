@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
+import { canManagePlaylist } from "@/lib/playlistAccess";
 import { apiHandler, notFound, unauthorized } from "@/lib/apiRoute";
 
 async function handleDELETE(
@@ -12,7 +13,7 @@ async function handleDELETE(
 
   const { id, trackId } = await params;
   const playlist = await prisma.playlist.findUnique({ where: { id } });
-  if (!playlist || playlist.userId !== session.user.id) {
+  if (!playlist || !canManagePlaylist(playlist.userId, session.user.id)) {
     return notFound();
   }
 
