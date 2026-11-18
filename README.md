@@ -35,7 +35,7 @@ Environment variables (all server-side; none reach the browser bundle):
 | `GENRE_LLM_MODEL` | overrides the Haiku model id (default in `llmReconciler.ts`) | default used |
 | `CLASSIFIER_ENABLED` | `true` turns the audio classifier on | off (and no model is bundled anyway) |
 | `GENRE_CONTACT_URL` | the contact in the User-Agent sent to MusicBrainz and Last.fm | the app's public URL |
-| `CRON_SECRET` | lets a scheduler call `GET /api/genre/run` with `Authorization: Bearer <secret>` | only the signed-in app drains the queue |
+| `CRON_SECRET` | the secret Vercel Cron (and any scheduler) sends as `Authorization: Bearer <secret>` to `GET /api/genre/run` | the cron call is refused (401); only the signed-in app drains the queue |
 
 ### How the background work runs
 
@@ -43,8 +43,11 @@ A new upload or import queues a job per track (`GenreJob`). While the app is ope
 (`POST /api/genre/run`), at most one MusicBrainz request a second across every instance (the limit is kept in the database).
 Tracks that were never classified are queued once per session at low priority (the backfill). A failed job is retried after
 30 s, 60 s, 2 min... up to an hour, and given up after five tries. Nothing runs while the app is closed unless a scheduler
-calls the run route: Vercel Hobby only allows daily cron jobs, so no schedule is committed; on a plan that allows it, add
-`{ "crons": [{ "path": "/api/genre/run", "schedule": "*/5 * * * *" }] }` to `vercel.json` and set `CRON_SECRET`.
+calls the run route. `vercel.json` schedules that every minute (`GET /api/genre/run`): it takes up to 20 jobs per call and,
+when the queue is empty, queues the next 1,000 never-classified songs, so the whole library gets classified with nobody having the
+app open. It needs `CRON_SECRET` set in Vercel (Vercel then sends it as `Authorization: Bearer ...` itself); without it the call
+is refused. **Per-minute schedules need Vercel Pro**: on Hobby (daily cron only) a deployment with this schedule fails, so change
+the schedule in `vercel.json` to `0 4 * * *` or remove it.
 
 ### Models and licenses
 
