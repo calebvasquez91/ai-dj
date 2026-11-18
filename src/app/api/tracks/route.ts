@@ -6,6 +6,7 @@ import { toTrackApiResponse } from "@/lib/trackApi";
 import { apiHandler, jsonError, unauthorized } from "@/lib/apiRoute";
 import { cleanText, isAcceptableStorageUrl, isValidDuration, normalizeAudioMime } from "@/lib/apiValidation";
 import { loadUserTrackData } from "@/lib/trackUserData";
+import { uploadLimitResponse } from "@/lib/uploadGuard";
 
 async function handleGET() {
   const session = await auth();
@@ -27,6 +28,8 @@ function isUniqueViolation(err: unknown): boolean {
 async function handlePOST(request: Request) {
   const session = await auth();
   if (!session) return unauthorized();
+  const limited = await uploadLimitResponse(session.user.id);
+  if (limited) return limited;
 
   const contentType = request.headers.get("content-type") ?? "";
 

@@ -50,7 +50,9 @@ export default function PrivacyPage() {
           <p className="text-sm">
             Every song and sound effect that is added to AI DJ becomes part of one music library
             that every signed-in account can see and play. Whoever added a file is not shown to
-            other people, and the files are only ever served to people who are signed in.
+            other people, and the library is only listed to people who are signed in. Each file is
+            stored at a long, hard-to-guess web address, so anyone who is given that exact address
+            could open the file without signing in.
             Only the administrator can edit a song or sound or remove it from the library;
             everyone else can add files and play them.
           </p>

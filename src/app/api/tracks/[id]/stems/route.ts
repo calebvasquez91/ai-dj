@@ -22,6 +22,7 @@ import { prisma } from "@/lib/prisma";
 import { getStorageBackend } from "@/lib/storage";
 import { trackSourceUrl } from "@/lib/trackApi";
 import { apiHandler, notFound, unauthorized } from "@/lib/apiRoute";
+import { isAdmin } from "@/lib/feedbackAdmin";
 import { autoBudgetDecision } from "@/lib/stemBudget";
 import { stemSummaryForUser } from "@/lib/stemSummary";
 import { advanceStemJob, replicateClient, stemWebhookUrl } from "@/lib/stemJobs";
@@ -87,6 +88,10 @@ async function handlePOST(request: Request, { params }: { params: Promise<{ id: 
   // would be billed again for the same likely failure) — all enforced here, since a client can't be trusted with
   // the money.
   const auto = new URL(request.url).searchParams.get("auto") === "1";
+  // Every account can now reach every song, so a button press from anyone but the admin is held to the same budget and limit
+  // of jobs at a time as the autopilot (counted against the account the song belongs to). Otherwise one account could queue
+  // paid separations for the whole library.
+  const budgeted = auto || !isAdmin(session.user.id);
   const claim = await prisma.$transaction(async (tx) => {
     await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${"stems:" + id}))`;
     const existing = await tx.stemSeparationJob.findFirst({ where: { trackId: id }, orderBy: { createdAt: "desc" } });
@@ -102,8 +107,8 @@ async function handlePOST(request: Request, { params }: { params: Promise<{ id: 
         return { existing };
       }
     }
-    if (auto) {
-      // The auto-separation budget is counted against the account the song belongs to (whoever added it), so it caps what one
+    if (budgeted) {
+      // The separation budget is counted against the account the song belongs to (whoever added it), so it caps what one
       // library's songs can cost no matter who asks.
       const summary = await stemSummaryForUser(tx, track.userId);
       const decision = autoBudgetDecision({ spentUsd: summary.spentUsd, inFlight: summary.inFlight, budgetUsd: summary.budgetUsd });
@@ -116,7 +121,7 @@ async function handlePOST(request: Request, { params }: { params: Promise<{ id: 
     const { reason, summary } = claim.blocked;
     return NextResponse.json(
       {
-        error: reason === "budget" ? "The automatic stem separation budget has been reached." : "Too many separations are already running.",
+        error: reason === "budget" ? "The stem separation budget has been reached." : "Too many separations are already running.",
         reason,
         ...summary,
       },

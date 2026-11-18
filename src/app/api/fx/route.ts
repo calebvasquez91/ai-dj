@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { auth } from "@/auth";
+import { uploadLimitResponse } from "@/lib/uploadGuard";
 import { prisma } from "@/lib/prisma";
 import { getStorageBackend, saveLocalFile, deleteLocalFile, deleteBlobFile } from "@/lib/storage";
 import { toFxApiResponse, isFxCategory } from "@/lib/fxApi";
@@ -29,6 +30,8 @@ function isUniqueViolation(err: unknown): boolean {
 async function handlePOST(request: Request) {
   const session = await auth();
   if (!session) return unauthorized();
+  const limited = await uploadLimitResponse(session.user.id);
+  if (limited) return limited;
 
   const contentType = request.headers.get("content-type") ?? "";
 

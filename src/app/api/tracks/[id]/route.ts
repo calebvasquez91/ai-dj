@@ -6,7 +6,7 @@ import { toTrackApiResponse } from "@/lib/trackApi";
 import { apiHandler, notFound, unauthorized } from "@/lib/apiRoute";
 import { cleanTags, cleanWaveformPeaks } from "@/lib/apiValidation";
 import { isAdmin } from "@/lib/feedbackAdmin";
-import { loadUserTrackData, saveUserTrackData } from "@/lib/trackUserData";
+import { loadOneUserTrackData, saveUserTrackData } from "@/lib/trackUserData";
 
 /** Any signed-in person can reach any song: the library is shared. (Who may change or delete one is decided per action below.) */
 async function loadTrack(id: string) {
@@ -96,11 +96,21 @@ async function handlePATCH(request: Request, { params }: { params: Promise<{ id:
     return NextResponse.json({ error: "No recognized fields to update." }, { status: 400 });
   }
 
+  // The analysis, BPM source and lyric fingerprint belong to the song, not to a person: the first account to work one out
+  // fills it in, and from then on only the admin can change it. Otherwise any signed-in account could overwrite what everybody
+  // mixes with. A value sent for a field that is already filled is left as it is (the request still succeeds, since the client
+  // only wants it cached), and an empty field is always filled.
+  if (!isAdmin(session.user.id)) {
+    for (const column of Object.keys(data)) {
+      if ((existing as Record<string, unknown>)[column] != null) delete data[column];
+    }
+  }
+
   const track = Object.keys(data).length > 0 ? await prisma.track.update({ where: { id }, data }) : existing;
   const userData =
     Object.keys(mine).length > 0
       ? await saveUserTrackData(session.user.id, id, mine)
-      : (await loadUserTrackData(session.user.id)).get(id);
+      : await loadOneUserTrackData(session.user.id, id);
   return NextResponse.json(toTrackApiResponse(track, userData));
 }
 
@@ -133,10 +143,7 @@ async function handleDELETE(request: Request, { params }: { params: Promise<{ id
   // Best-effort: a storage-side failure (already gone, transient network
   // error, etc.) must not make an already-deleted track look undeletable.
   const cleanups: Promise<void>[] = [];
-  if (existing.source !== "youtube") {
-    // (youtube: nothing stored — storageKey holds the video id, not a file/blob)
-    cleanups.push(getStorageBackend() === "local" ? deleteLocalFile(existing.storageKey) : deleteBlobFile(existing.storageKey));
-  }
+  cleanups.push(getStorageBackend() === "local" ? deleteLocalFile(existing.storageKey) : deleteBlobFile(existing.storageKey));
   if (getStorageBackend() === "blob") cleanups.push(...stemUrls.map((u) => deleteBlobFile(u)));
   const results = await Promise.allSettled(cleanups);
   for (const r of results) {

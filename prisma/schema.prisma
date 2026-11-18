@@ -31,6 +31,8 @@ model User {
 
 model Track {
   id             String   @id @default(cuid())
+  /// The account that added the song (the library itself is shared). CAUTION: deleting that account deletes its songs for every
+  /// account, and from every playlist. Before deleting an account, hand its songs on: UPDATE "Track" SET "userId" = '<admin id>' WHERE "userId" = '<id>';
   userId         String
   user           User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   title          String

@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const mocks = vi.hoisted(() => ({ findMany: vi.fn(), load: vi.fn() }));
+const mocks = vi.hoisted(() => ({ findMany: vi.fn(), load: vi.fn(), limit: vi.fn() }));
 
 vi.mock("@/auth", () => ({ auth: vi.fn(async () => ({ user: { id: "u-reader" } })) }));
 vi.mock("@/lib/prisma", () => ({ prisma: { track: { findMany: mocks.findMany } } }));
@@ -11,8 +11,9 @@ vi.mock("@/lib/storage", () => ({
   deleteBlobFile: vi.fn(),
 }));
 vi.mock("@/lib/trackUserData", () => ({ loadUserTrackData: mocks.load }));
+vi.mock("@/lib/uploadGuard", () => ({ uploadLimitResponse: mocks.limit }));
 
-import { GET } from "./route";
+import { GET, POST } from "./route";
 
 const row = (id: string, userId: string) => ({
   id,
@@ -38,6 +39,7 @@ const row = (id: string, userId: string) => ({
 beforeEach(() => {
   mocks.findMany.mockReset().mockResolvedValue([row("mine", "u-reader"), row("theirs", "u-someone-else")]);
   mocks.load.mockReset().mockResolvedValue(new Map([["theirs", { playPreference: "do-not" }]]));
+  mocks.limit.mockReset().mockResolvedValue(null);
 });
 
 describe("GET /api/tracks: one library for every account", () => {
@@ -52,5 +54,15 @@ describe("GET /api/tracks: one library for every account", () => {
     const body = (await (await GET()).json()) as { id: string; playPreference?: string }[];
     expect(body.find((t) => t.id === "theirs")?.playPreference).toBe("do-not");
     expect(body.find((t) => t.id === "mine")?.playPreference).toBeUndefined();
+  });
+});
+
+describe("POST /api/tracks: the daily upload limit", () => {
+  it("answers 429 and records nothing when the account is over its limit", async () => {
+    const { NextResponse } = await import("next/server");
+    mocks.limit.mockResolvedValue(NextResponse.json({ error: "Upload limit reached" }, { status: 429 }));
+    const res = await POST(new Request("http://x/api/tracks", { method: "POST", body: JSON.stringify({ title: "t" }), headers: { "content-type": "application/json" } }));
+    expect(res.status).toBe(429);
+    expect(mocks.findMany).not.toHaveBeenCalled();
   });
 });

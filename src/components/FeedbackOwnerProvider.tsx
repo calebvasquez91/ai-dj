@@ -13,9 +13,7 @@ export function FeedbackOwnerProvider({ isOwner, children }: { isOwner: boolean;
   return <FeedbackOwnerContext.Provider value={isOwner}>{children}</FeedbackOwnerContext.Provider>;
 }
 
-export function useIsFeedbackOwner(): boolean {
+/** Whether the signed-in person is the admin (the account that owns the feedback inbox and alone edits or deletes shared songs and FX sounds): only they are shown those links and buttons. The server checks again on every request. */
+export function useIsAdmin(): boolean {
   return useContext(FeedbackOwnerContext);
 }
-
-/** Whether the signed-in person is the admin (the same account that owns the feedback inbox): only they see the buttons that edit or delete a shared song or FX sound. The server checks again on every request. */
-export const useIsAdmin = useIsFeedbackOwner;

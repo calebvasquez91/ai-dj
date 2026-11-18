@@ -6,7 +6,7 @@ const mocks = vi.hoisted(() => ({
   update: vi.fn(),
   deleteMany: vi.fn(),
   save: vi.fn(),
-  load: vi.fn(),
+  loadOne: vi.fn(),
   deleteBlob: vi.fn(),
 }));
 
@@ -22,7 +22,7 @@ vi.mock("@/lib/storage", () => ({
   deleteLocalFile: vi.fn(async () => {}),
   deleteBlobFile: mocks.deleteBlob,
 }));
-vi.mock("@/lib/trackUserData", () => ({ saveUserTrackData: mocks.save, loadUserTrackData: mocks.load }));
+vi.mock("@/lib/trackUserData", () => ({ saveUserTrackData: mocks.save, loadOneUserTrackData: mocks.loadOne }));
 
 import { DELETE, PATCH } from "./route";
 
@@ -54,11 +54,11 @@ beforeEach(() => {
   vi.stubEnv("ADMIN_USER_IDS", "u-admin");
   vi.stubEnv("FEEDBACK_ADMIN_USER_IDS", "");
   mocks.user = "u-other";
-  for (const m of [mocks.findUnique, mocks.update, mocks.deleteMany, mocks.save, mocks.load, mocks.deleteBlob]) m.mockReset();
+  for (const m of [mocks.findUnique, mocks.update, mocks.deleteMany, mocks.save, mocks.loadOne, mocks.deleteBlob]) m.mockReset();
   mocks.findUnique.mockResolvedValue(song);
   mocks.update.mockImplementation(async ({ data }: { data: object }) => ({ ...song, ...data }));
   mocks.save.mockImplementation(async (_u: string, _t: string, p: object) => p);
-  mocks.load.mockResolvedValue(new Map());
+  mocks.loadOne.mockResolvedValue(undefined);
   mocks.deleteMany.mockResolvedValue({ count: 1 });
   mocks.deleteBlob.mockResolvedValue(undefined);
 });
@@ -95,6 +95,13 @@ describe("PATCH /api/tracks/[id]: what is shared and what is each person's own",
     expect((await res.json()).playPreference).toBe("do-not");
   });
 
+  it("reads back the caller's own single row when the request only caches analysis", async () => {
+    mocks.loadOne.mockResolvedValue({ playPreference: "must" });
+    const res = await PATCH(patch({ analysis: { key: "C" } }), ctx);
+    expect(mocks.loadOne).toHaveBeenCalledWith("u-other", "t1");
+    expect((await res.json()).playPreference).toBe("must");
+  });
+
   it("keeps hot cues per person too", async () => {
     await PATCH(patch({ hotCueOverrides: { "1": 12.5, "9": 3 } }), ctx);
     expect(mocks.save).toHaveBeenCalledWith("u-other", "t1", { hotCueOverridesJson: JSON.stringify({ "1": 12.5 }) });
@@ -106,6 +113,29 @@ describe("PATCH /api/tracks/[id]: what is shared and what is each person's own",
     expect(res.status).toBe(200);
     expect(mocks.update).toHaveBeenCalledWith({ where: { id: "t1" }, data: { bpm: 128 } });
     expect(mocks.save).not.toHaveBeenCalled();
+  });
+
+  it("fills an empty analysis field for anyone, but never overwrites one that is already set (first write wins)", async () => {
+    mocks.findUnique.mockResolvedValue({ ...song, bpm: 120, bpmConfidence: 0.9, key: null });
+    const res = await PATCH(patch({ analysis: { bpm: 60, bpmConfidence: 0.1, key: "C" } }), ctx);
+    expect(res.status).toBe(200);
+    // bpm and bpmConfidence were already worked out: only the empty key is written.
+    expect(mocks.update).toHaveBeenCalledWith({ where: { id: "t1" }, data: { key: "C" } });
+  });
+
+  it("answers 200 and writes nothing when everything sent is already set", async () => {
+    mocks.findUnique.mockResolvedValue({ ...song, bpm: 120, lyricalFingerprintJson: '{"words":[],"moodTags":[]}' });
+    const res = await PATCH(patch({ analysis: { bpm: 1 }, lyricalFingerprint: null }), ctx);
+    expect(res.status).toBe(200);
+    expect(mocks.update).not.toHaveBeenCalled();
+    expect((await res.json()).analysis.bpm).toBe(120);
+  });
+
+  it("lets the admin overwrite the analysis", async () => {
+    mocks.user = "u-admin";
+    mocks.findUnique.mockResolvedValue({ ...song, bpm: 120 });
+    await PATCH(patch({ analysis: { bpm: 126 } }), ctx);
+    expect(mocks.update).toHaveBeenCalledWith({ where: { id: "t1" }, data: { bpm: 126 } });
   });
 
   it("refuses tags from anyone but the admin (they decide what is in Spooky Music for everybody)", async () => {
