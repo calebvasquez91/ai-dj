@@ -27,6 +27,7 @@ model User {
   fxSounds     FxSound[]
   feedback     Feedback[]
   trackData    TrackUserData[]
+  playEvents   PlayEvent[]
 }
 
 model Track {
@@ -95,6 +96,7 @@ model Track {
 
   playlistTracks PlaylistTrack[]
   userData       TrackUserData[]
+  playEvents     PlayEvent[]
   stemJobs       StemSeparationJob[]
   genreInfo      TrackGenre?
   genreJobs      GenreJob[]
@@ -157,6 +159,7 @@ model Playlist {
   name      String
   createdAt DateTime        @default(now())
   tracks    PlaylistTrack[]
+  playEvents PlayEvent[]
 
   // Marks a system-curated playlist (e.g. "spooky" for the built-in Spooky
   // Music playlist) — null for a normal user-made playlist. Used to key
@@ -343,4 +346,49 @@ model TrackUserData {
 
   @@id([userId, trackId])
   @@index([trackId])
+}
+
+/// How long one account played one song, reported by the player about every 30 seconds while music is playing (the Admin page's
+/// listening statistics). Title, artist, genre and playlist name are copied in so the numbers survive a deleted song or playlist.
+model PlayEvent {
+  id         String    @id @default(cuid())
+  userId     String
+  user       User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  trackId    String?
+  track      Track?    @relation(fields: [trackId], references: [id], onDelete: SetNull)
+  playlistId String?
+  playlist   Playlist? @relation(fields: [playlistId], references: [id], onDelete: SetNull)
+
+  title        String
+  artist       String
+  genre        String?
+  playlistName String?
+  seconds      Float
+  createdAt    DateTime @default(now())
+  /// When this row last grew: the player's reports for one song and playlist are added into one row while they keep coming, and this is
+  /// the time of the account's latest report (the server measures a new report against it).
+  updatedAt    DateTime @default(now()) @updatedAt
+
+  @@index([userId, createdAt])
+  @@index([userId, updatedAt])
+  @@index([createdAt])
+  @@index([trackId])
+  @@index([playlistId])
+}
+
+/// What the admin changed on a playlist that belongs to another account (renamed, took a song out, deleted it...). The playlist's name and
+/// the owner's email are copied in, so the line still reads after the playlist or the account is gone. Not tied to the other tables.
+model AdminAction {
+  id           String   @id @default(cuid())
+  adminId      String
+  /// "playlist.rename" | "playlist.delete" | "playlist.add-song" | "playlist.remove-song" | "playlist.reorder"
+  action       String
+  playlistId   String?
+  playlistName String
+  ownerId      String?
+  ownerEmail   String?
+  detail       String?
+  createdAt    DateTime @default(now())
+
+  @@index([createdAt])
 }

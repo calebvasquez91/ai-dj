@@ -22,6 +22,7 @@ import { DeckView } from "@/components/DeckView";
 import { Mixer } from "@/components/Mixer";
 import { KeyboardShortcuts } from "@/components/KeyboardShortcuts";
 import { BackgroundAudio } from "@/components/BackgroundAudio";
+import { PlayStatsReporter } from "@/components/PlayStatsReporter";
 import { FeedbackPrompt } from "@/components/FeedbackPrompt";
 import { FeedbackOwnerProvider } from "@/components/FeedbackOwnerProvider";
 import { isFeedbackAdmin } from "@/lib/feedbackAdmin";
@@ -35,6 +36,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
       <FeedbackOwnerProvider isOwner={isFeedbackAdmin(session.user?.id)}>
       <AppDataLoader />
       <GenreRunner />
+      <PlayStatsReporter />
       <TrackGenreSheetHost />
       <CreateWithDjSheet />
       {STEM_FEATURES_ENABLED && <StemAutopilot />}

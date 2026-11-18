@@ -206,6 +206,15 @@ export function SlidersIcon({ size = 18, className }: IconProps) {
   );
 }
 
+export function ShieldIcon({ size = 18, className }: IconProps) {
+  return (
+    <svg {...base(size)} className={className} aria-hidden="true">
+      <path d="M12 3.5 5 6v5.5c0 4.2 2.8 7.4 7 9 4.2-1.6 7-4.8 7-9V6l-7-2.5Z" stroke="currentColor" strokeWidth="1.8" strokeLinejoin="round" />
+      <path d="m9 12 2.2 2.2L15.2 10" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
 export function SparklesIcon({ size = 18, className }: IconProps) {
   return (
     <svg {...base(size)} className={className} aria-hidden="true">
