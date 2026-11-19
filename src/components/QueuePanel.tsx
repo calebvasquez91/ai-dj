@@ -7,6 +7,7 @@ import { TrackThumbnail } from "@/components/TrackThumbnail";
 import { CloseIcon } from "@/components/Icons";
 import { FxLibraryPanel } from "@/components/FxLibraryPanel";
 import { LayerIndicator } from "@/components/LayerIndicator";
+import { RadioStrip } from "@/components/RadioStrip";
 
 type PanelTab = "queue" | "fx";
 
@@ -56,6 +57,7 @@ export function QueueBody() {
         <FxLibraryPanel />
       ) : (
         <div className="flex-1 overflow-y-auto p-3 flex flex-col gap-4">
+          <RadioStrip />
           {isTransitioning && queue[0] && (
             <p className="rounded-full bg-accent-pink/15 px-3 py-1.5 text-center text-xs font-semibold text-accent-pink break-words">
               Mixing into &ldquo;{queue[0].title}&rdquo;

@@ -7,7 +7,7 @@ import { useNow } from "@/lib/useNow";
 import { AddToPlaylistButton } from "@/components/AddToPlaylistButton";
 import { SeparateStemsButton } from "@/components/SeparateStemsButton";
 import { useIsAdmin } from "@/components/FeedbackOwnerProvider";
-import { SHOW_STEM_BUTTON_ON_SONGS } from "@/lib/featureFlags";
+import { SEED_RADIO_ENABLED, SHOW_STEM_BUTTON_ON_SONGS } from "@/lib/featureFlags";
 import { confirmDeleteFromLibrary } from "@/lib/confirmCopy";
 import { ConfirmSheet } from "@/ui";
 import { GenreBadge } from "@/components/GenreBadge";
@@ -29,6 +29,7 @@ export function TrackList({
   onToggleSelect?: (trackId: string) => void;
 }) {
   const playTrackList = useStore((s) => s.playTrackList);
+  const startRadio = useStore((s) => s.startRadio);
   const currentTrack = useStore((s) => s.currentTrack);
   const isPlaying = useStore((s) => s.isPlaying);
   const togglePlay = useStore((s) => s.togglePlay);
@@ -165,6 +166,20 @@ export function TrackList({
               >
                 <SparklesIcon size={14} />
               </button>
+              {SEED_RADIO_ENABLED && (
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    startRadio(track);
+                  }}
+                  className="btn-icon text-muted hover:text-accent-purple text-[11px] font-semibold"
+                  title="Start radio: songs that go with this one"
+                  aria-label={`Start radio from ${track.title}`}
+                >
+                  Radio
+                </button>
+              )}
               <AddToPlaylistButton track={track} />
               {SHOW_STEM_BUTTON_ON_SONGS && <SeparateStemsButton track={track} />}
               {onRemove && (

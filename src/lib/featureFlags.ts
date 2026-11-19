@@ -37,3 +37,20 @@ export const SYNC_TEST_ENABLED = false;
  * also needs the "Mashups" toggle on the DJ board).
  */
 export const VOCAL_MASHUP_ENABLED = process.env.NEXT_PUBLIC_VOCAL_MASHUP === "on";
+
+// ---- The new DJ abilities. Each has its own switch, all off until it has been checked on real playback, so one can be turned on without turning on
+// ---- another (and without touching the paused transition effects: TRANSITION_FX_ENABLED in lib/syncEngine.ts is a separate flag and stays as it is).
+// ---- Every DJ move is locked to the master clock and the beat grid, rate-limited and gated by energy; none of them is ever random.
+
+/** Seed radio (lib/radio.ts): playing one song on its own queues songs that go with it, kept topped up; "Start radio" on a song. */
+export const SEED_RADIO_ENABLED = false;
+/** Stutter repeats (lib/stutter.ts) on 1/16, 1/8 and 1/4 notes at energy peaks and drops. */
+export const STUTTER_ENABLED = false;
+/** Scratching (lib/scratch.ts): beat-quantised scratch patterns over a song, and as a transition bridge. */
+export const SCRATCH_ENABLED = false;
+/** Instrumental bridges (lib/instrumentalBridge.ts): a song morphs into an instrumental, which morphs into the next song. */
+export const INSTRUMENTAL_BRIDGE_ENABLED = false;
+/** DJ EQ moves (lib/djEq.ts): low cuts, bass returns, high lifts and bass swaps on beat and phrase boundaries. */
+export const DJ_EQ_ENABLED = false;
+/** Echo-out (lib/echoOut.ts): a song that ends abruptly echoes into silence, holds 3 to 5 seconds, and the next starts at its peak. */
+export const ECHO_OUT_ENABLED = false;

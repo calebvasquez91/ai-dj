@@ -8,7 +8,7 @@ import { AddToPlaylistButton } from "@/components/AddToPlaylistButton";
 import { useIsAdmin } from "@/components/FeedbackOwnerProvider";
 import { LikeButton } from "@/components/LikeButton";
 import { SeparateStemsButton } from "@/components/SeparateStemsButton";
-import { SHOW_STEM_BUTTON_ON_SONGS } from "@/lib/featureFlags";
+import { SEED_RADIO_ENABLED, SHOW_STEM_BUTTON_ON_SONGS } from "@/lib/featureFlags";
 import { confirmDeleteFromLibrary } from "@/lib/confirmCopy";
 import { ConfirmSheet } from "@/ui";
 import { GenreBadge } from "@/components/GenreBadge";
@@ -101,6 +101,7 @@ const TrackCard = memo(function TrackCard({
   onRemove?: (trackId: string) => void;
 }) {
   const setTrackPlayPreference = useStore((s) => s.setTrackPlayPreference);
+  const startRadio = useStore((s) => s.startRadio);
   const setTrackTags = useStore((s) => s.setTrackTags);
   const [editingTags, setEditingTags] = useState(false);
   const [confirmingDelete, setConfirmingDelete] = useState(false);
@@ -220,6 +221,20 @@ const TrackCard = memo(function TrackCard({
               title={track.tags?.length ? `Tags: ${track.tags.join(", ")}` : "Add tags (e.g. halloween, spooky)"}
             >
               #
+            </button>
+          )}
+          {SEED_RADIO_ENABLED && (
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                startRadio(track);
+              }}
+              className="btn-icon text-muted hover:text-accent-purple text-[11px] font-semibold"
+              title="Start radio: songs that go with this one"
+              aria-label={`Start radio from ${track.title}`}
+            >
+              Radio
             </button>
           )}
           <AddToPlaylistButton track={track} />
