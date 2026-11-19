@@ -47,8 +47,9 @@ import { ANALYSIS_JOB_TIMEOUT_MS, pickNextAnalysisJob, tempoChanged } from "@/li
 import { LOOKUP_LOOKAHEAD, reachableTracks } from "@/lib/lookahead";
 import { withTimeout } from "@/lib/withTimeout";
 import { voiceCutoffSec, voiceMapFromStem } from "@/lib/voiceMap";
-import { DJ_EQ_ENABLED, SONG_SYNC_ENABLED, STEM_FEATURES_ENABLED, VOCAL_MASHUP_ENABLED } from "@/lib/featureFlags";
+import { DJ_EQ_ENABLED, STUTTER_ENABLED, SONG_SYNC_ENABLED, STEM_FEATURES_ENABLED, VOCAL_MASHUP_ENABLED } from "@/lib/featureFlags";
 import { runDjEqTick } from "@/lib/djEq";
+import { manualStutter, planStutter, scheduleStutter, type StutterMove } from "@/lib/stutter";
 import { useDjMoves } from "@/lib/djMovesStore";
 import { isStuckMuted, looksMuted, rmsLevel, shouldResumeContext, wakeVerdict } from "@/lib/backgroundAudio";
 import { TRANSITION_FX_ENABLED, buildSyncReport } from "@/lib/syncEngine";
@@ -1050,6 +1051,68 @@ export function DualDeckStage() {
         // a hiccup in a move must never reach the music
       }
     }, 250);
+    return () => clearInterval(timer);
+  }, [deckEl]);
+
+  // Stutter repeats (lib/stutter.ts, STUTTER_ENABLED): at an energy peak or a drop, no more than once every 16 bars (the frequency setting stretches
+  // that), the deck's own delay line repeats one slice of the song on the beat; the button on the DJ board does the same on the next beat. Done as
+  // parameter automation on the audio clock; skips transitions. With the flag off this effect does nothing at all.
+  useEffect(() => {
+    if (!STUTTER_ENABLED) return;
+    useDjMoves.getState().load();
+    let lastMoveAtSec: number | null = null;
+    let lastTrackId: string | null = null;
+    let handledManual = useDjMoves.getState().manualStutterRequestId;
+    const run = (move: StutterMove, ctx: AudioContext, el: HTMLAudioElement, nodes: DeckNodes) => {
+      const startCtx = ctx.currentTime + (move.startSec - el.currentTime) / Math.max(0.1, el.playbackRate || 1);
+      scheduleStutter(
+        { delaySendGain: nodes.delaySend.gain, delayTime: nodes.delay.delayTime, feedbackGain: nodes.delayFeedback.gain, dryGain: nodes.gain.gain },
+        move,
+        startCtx,
+        ctx.currentTime,
+        { delayTime: ECHO_DELAY_SEC, feedback: ECHO_FEEDBACK, send: 0, dry: nodes.gain.gain.value }
+      );
+      lastMoveAtSec = move.startSec;
+      useDjMoves.getState().setReadout("stutter", `${move.reason}`);
+    };
+    const timer = setInterval(() => {
+      try {
+        const s = useStore.getState();
+        const moves = useDjMoves.getState();
+        const track = s.currentTrack;
+        const analysis = track ? s.trackAnalysis[track.id] : undefined;
+        const ctx = audioCtxRef.current;
+        const deckId = activeDeckRef.current;
+        const nodes = deckNodesRef.current[deckId];
+        const el = deckEl(deckId);
+        const manual = moves.manualStutterRequestId !== handledManual;
+        handledManual = moves.manualStutterRequestId;
+        if (!track || !analysis || !ctx || !nodes || !el || !s.isPlaying || s.isTransitioning) return;
+        if (lastTrackId !== track.id) {
+          lastTrackId = track.id;
+          lastMoveAtSec = null;
+        }
+        const genre = track.source === "local" ? track.genre : null;
+        if (manual) {
+          const move = manualStutter({ analysis, currentTimeSec: el.currentTime, genre, mode: s.djMode });
+          if (move) run(move, ctx, el, nodes);
+          return;
+        }
+        if (!moves.settings.stutter) return;
+        const move = planStutter({
+          analysis,
+          durationSec: Number.isFinite(el.duration) && el.duration > 0 ? el.duration : track.durationSec,
+          currentTimeSec: el.currentTime,
+          lastMoveAtSec,
+          genre,
+          mode: s.djMode,
+          frequency: moves.settings.stutterFrequency,
+        });
+        if (move) run(move, ctx, el, nodes);
+      } catch {
+        // a hiccup in a move must never reach the music
+      }
+    }, 100);
     return () => clearInterval(timer);
   }, [deckEl]);
 

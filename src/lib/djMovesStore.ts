@@ -11,6 +11,9 @@ interface DjMovesState {
   loaded: boolean;
   /** The latest planned move of each kind, with its reason, for the DJ readout ("energy 0.82, 128 BPM, drop in 4 bars"). Null until one is planned. */
   readout: Record<DjMoveKind, string | null>;
+  /** Counts the presses of the stutter button on the DJ board; the deck engine acts on each new one. */
+  manualStutterRequestId: number;
+  requestManualStutter: () => void;
   load: () => void;
   update: (patch: Partial<DjMoveSettings>) => void;
   setReadout: (kind: DjMoveKind, text: string | null) => void;
@@ -19,6 +22,8 @@ interface DjMovesState {
 export const useDjMoves = create<DjMovesState>((set, get) => ({
   settings: DJ_MOVE_DEFAULTS,
   loaded: false,
+  manualStutterRequestId: 0,
+  requestManualStutter: () => set((s) => ({ manualStutterRequestId: s.manualStutterRequestId + 1 })),
   readout: { eq: null, stutter: null, scratch: null, echoOut: null, bridge: null },
   load: () => {
     if (get().loaded) return;

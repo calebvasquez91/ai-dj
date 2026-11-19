@@ -20,6 +20,7 @@ export function DjMovesReadout() {
   const settings = useDjMoves((s) => s.settings);
   const readout = useDjMoves((s) => s.readout);
   const load = useDjMoves((s) => s.load);
+  const requestManualStutter = useDjMoves((s) => s.requestManualStutter);
   useEffect(load, [load]);
   const rows = ROWS.filter((r) => r.enabled);
   if (rows.length === 0) return null;
@@ -34,6 +35,11 @@ export function DjMovesReadout() {
           </li>
         ))}
       </ul>
+      {STUTTER_ENABLED && (
+        <button type="button" className="btn-outline !text-xs self-start" onClick={requestManualStutter} title="Stutter the playing song on the next beat">
+          Stutter now
+        </button>
+      )}
     </section>
   );
 }
