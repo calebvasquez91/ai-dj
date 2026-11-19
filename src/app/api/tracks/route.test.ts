@@ -1,8 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const mocks = vi.hoisted(() => ({ findMany: vi.fn(), load: vi.fn(), limit: vi.fn() }));
+const mocks = vi.hoisted(() => ({ findMany: vi.fn(), load: vi.fn(), limit: vi.fn(), user: "u-reader" }));
 
-vi.mock("@/auth", () => ({ auth: vi.fn(async () => ({ user: { id: "u-reader" } })) }));
+vi.mock("@/auth", () => ({ auth: vi.fn(async () => ({ user: { id: mocks.user } })) }));
 vi.mock("@/lib/prisma", () => ({ prisma: { track: { findMany: mocks.findMany } } }));
 vi.mock("@/lib/storage", () => ({
   getStorageBackend: () => "blob",
@@ -37,6 +37,10 @@ const row = (id: string, userId: string) => ({
 });
 
 beforeEach(() => {
+  vi.unstubAllEnvs();
+  vi.stubEnv("ADMIN_USER_IDS", "u-admin");
+  vi.stubEnv("FEEDBACK_ADMIN_USER_IDS", "");
+  mocks.user = "u-reader";
   mocks.findMany.mockReset().mockResolvedValue([row("mine", "u-reader"), row("theirs", "u-someone-else")]);
   mocks.load.mockReset().mockResolvedValue(new Map([["theirs", { playPreference: "do-not" }]]));
   mocks.limit.mockReset().mockResolvedValue(null);
@@ -50,10 +54,22 @@ describe("GET /api/tracks: one library for every account", () => {
     expect(mocks.findMany).toHaveBeenCalledWith({ where: { source: "local" }, orderBy: { createdAt: "asc" } });
   });
 
-  it("shows each reader their own must / do-not-play marks, not the song's old shared one", async () => {
+  it("shows each reader their own must mark, not the song's old shared one", async () => {
+    mocks.load.mockResolvedValue(new Map([["theirs", { playPreference: "must" }]]));
+    const body = (await (await GET()).json()) as { id: string; playPreference?: string }[];
+    expect(body.find((t) => t.id === "theirs")?.playPreference).toBe("must");
+    expect(body.find((t) => t.id === "mine")?.playPreference).toBeUndefined();
+  });
+
+  it("does not apply an old do-not-play mark for anyone but the admin (the feature is the admin's alone)", async () => {
+    const body = (await (await GET()).json()) as { id: string; playPreference?: string }[];
+    expect(body.find((t) => t.id === "theirs")?.playPreference).toBeUndefined();
+  });
+
+  it("still shows the admin their own do-not-play marks", async () => {
+    mocks.user = "u-admin";
     const body = (await (await GET()).json()) as { id: string; playPreference?: string }[];
     expect(body.find((t) => t.id === "theirs")?.playPreference).toBe("do-not");
-    expect(body.find((t) => t.id === "mine")?.playPreference).toBeUndefined();
   });
 });
 

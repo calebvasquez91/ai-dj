@@ -22,6 +22,7 @@ const ACTION_TEXT: Record<string, string> = {
   "playlist.add-song": "added a song to",
   "playlist.remove-song": "took a song out of",
   "playlist.reorder": "reordered",
+  "library.delete-song": "deleted from the library",
 };
 
 /** The admin's latest changes to other accounts' playlists; empty when the log table does not exist yet. */

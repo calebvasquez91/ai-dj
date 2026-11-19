@@ -8,6 +8,7 @@ import { cleanText, isAcceptableStorageUrl, isValidDuration, normalizeAudioMime 
 import { loadAllGenreFields, queueNewTracks } from "@/lib/genre/api";
 import { loadUserTrackData } from "@/lib/trackUserData";
 import { uploadLimitResponse } from "@/lib/uploadGuard";
+import { isAdmin } from "@/lib/feedbackAdmin";
 
 async function handleGET() {
   const session = await auth();
@@ -21,7 +22,14 @@ async function handleGET() {
     loadUserTrackData(session.user.id),
     loadAllGenreFields(),
   ]);
-  return NextResponse.json(tracks.map((t) => ({ ...toTrackApiResponse(t, userData.get(t.id)), ...(genres.get(t.id) ?? {}) })));
+  // The do-not-play mark is the admin's alone now. A mark an account made before that is not applied for them (shuffle, Home and the
+  // curators all read it from here), and it comes back if that account is ever the admin.
+  const admin = isAdmin(session.user.id);
+  const mineFor = (id: string) => {
+    const data = userData.get(id);
+    return !admin && data?.playPreference === "do-not" ? { ...data, playPreference: null } : data;
+  };
+  return NextResponse.json(tracks.map((t) => ({ ...toTrackApiResponse(t, mineFor(t.id)), ...(genres.get(t.id) ?? {}) })));
 }
 
 function isUniqueViolation(err: unknown): boolean {

@@ -7,6 +7,13 @@
 export const STEM_FEATURES_ENABLED = process.env.NEXT_PUBLIC_STEM_FEATURES === "on";
 
 /**
+ * The per-song stem button (components/SeparateStemsButton.tsx) on library rows and cards. Off: no song shows a stem button, a
+ * "Separating stems…" chip or a stem badge. The stem engine itself (separation jobs, the stem caches, per-stem handling in the
+ * sync, the DJ board's controls) is not affected: it is switched by STEM_FEATURES_ENABLED above. Set true to bring the button back.
+ */
+export const SHOW_STEM_BUTTON_ON_SONGS = false;
+
+/**
  * Song Sync Mode (lib/songSync.ts): the playing track's tempo and pitch morph, bar by bar, onto the next track's before
  * a plain four-bar crossfade. On by default (the "Auto" switch beside the SYNC button on the DJ board decides whether
  * every automatic transition is one); set NEXT_PUBLIC_SONG_SYNC="off" at build time to remove it entirely and get the
