@@ -1,0 +1,33 @@
+@keyframes spooky-bar-color-cycle { 0% { background-color: #ff6b00; } 33% { background-color: #8b00ff; } 66% { background-color: #00ff41; } 100% { background-color: #ff6b00; } }
+@keyframes spooky-bar-flicker { 0%, 100% { opacity: 1; } 50% { opacity: 0.85; } }
+.spooky-bar-played { animation-name: spooky-bar-color-cycle, spooky-bar-flicker; animation-duration: 30s, 2.2s; animation-timing-function: linear, ease-in-out; animation-iteration-count: infinite, infinite; }
+.spooky-bar-played:nth-child(3n) { animation-delay: 0s, 0.4s; }
+.spooky-bar-played:nth-child(3n+1) { animation-delay: 0s, 0.9s; }
+.spooky-bar-played:nth-child(3n+2) { animation-delay: 0s, 1.3s; }
+.spooky-bar-unplayed { background-color: #2a0a2a; }
+@media (prefers-reduced-motion: reduce) { .spooky-bar-played { animation: none; background-color: #ff6b00; } }
+@keyframes spooky-particle-drift { 0% { transform: translateY(0) rotate(0deg); opacity: 0; } 12% { opacity: 0.9; } 100% { transform: translateY(-140px) rotate(25deg); opacity: 0; } }
+.spooky-particle { position: absolute; bottom: 10%; font-size: 1.25rem; pointer-events: none; animation: spooky-particle-drift 4s ease-out forwards; }
+@media (prefers-reduced-motion: reduce) { .spooky-particle { display: none; } }
+@keyframes spooky-card-pulse-border { 0%, 100% { box-shadow: 0 0 0 0 rgba(255, 107, 0, 0), 0 2px 10px color-mix(in srgb, var(--foreground) calc(6% * var(--shadow-boost)), transparent); } 50% { box-shadow: 0 0 0 3px rgba(255, 107, 0, 0.35), 0 2px 10px color-mix(in srgb, var(--foreground) calc(6% * var(--shadow-boost)), transparent); } }
+.spooky-card-pulse { animation: spooky-card-pulse-border 2.5s ease-in-out infinite; }
+@media (prefers-reduced-motion: reduce) { .spooky-card-pulse { animation: none; } }
+.music-wave-bar::after { content: ""; position: absolute; inset: 0; border-radius: inherit; opacity: 0; transition: opacity 1s ease; background: linear-gradient( to top, var(--spooky-bar, #ff6b00), color-mix(in srgb, var(--spooky-bar, #ff6b00) 55%, #000) ); box-shadow: 0 0 8px var(--spooky-bar, #ff6b00); }
+.music-wave-bar:nth-child(4n + 1) { --spooky-bar: #ff6b00; }
+.music-wave-bar:nth-child(4n + 2) { --spooky-bar: #8b00ff; }
+.music-wave-bar:nth-child(4n + 3) { --spooky-bar: #00ff41; }
+.music-wave-bar:nth-child(4n) { --spooky-bar: #ff1a1a; }
+.music-wave-bg.spooky .music-wave-bar::after { opacity: 1; }
+.music-wave-bg.spooky .music-wave-bar { animation-name: music-wave-bob-spooky; }
+@keyframes music-wave-bob-spooky { 0%, 100% { transform: scaleY(calc(6 / var(--wave-peak, 40))); opacity: 0.3; } 50% { transform: scaleY(1); opacity: 0.6; } }
+.now-playing-panel.spooky { --foreground: #fff1e0; --muted: #d4bfe6; --surface: #2a1236; --surface-hover: #3a1a48; --border: #6b3a73; --background: #000000; color: var(--foreground); }
+:root[data-spooky="true"] { color-scheme: dark; --background: #000000; --surface: #0c0813; --surface-hover: #181022; --foreground: #fff1e0; --muted: #cdb8e0; --accent: #2dd4bf; --accent-strong: #c084fc; --accent-teal: #2dd4bf; --accent-teal-bright: #5eead4; --accent-purple: #c084fc; --accent-purple-bright: #e9d5ff; --accent-pink: #f472b6; --accent-yellow: #fde047; --border: #3a2150; --shadow-boost: 1.8; }
+:root[data-spooky="true"] body { background-image: none; }
+.spooky-sparkles { position: absolute; inset: 0; overflow: hidden; pointer-events: none; }
+.spooky-sparkles-page { position: fixed; z-index: -1; opacity: 0; visibility: hidden; transition: opacity 1s ease, visibility 0s linear 1s; }
+.spooky-sparkles-page.is-on { opacity: 1; visibility: visible; transition: opacity 1s ease, visibility 0s; }
+.spooky-sparkle { position: absolute; left: var(--x); top: var(--y); width: var(--size); height: var(--size); border-radius: 50%; background: var(--tint); box-shadow: 0 0 calc(var(--size) * 2.5) var(--tint); opacity: 0; animation: spooky-twinkle var(--dur, 4s) ease-in-out var(--delay, 0s) infinite; }
+.spooky-sparkle.glint { border-radius: 0; background: linear-gradient(var(--tint), var(--tint)) center / 100% 1px no-repeat, linear-gradient(var(--tint), var(--tint)) center / 1px 100% no-repeat; box-shadow: none; filter: drop-shadow(0 0 3px var(--tint)); animation-name: spooky-glint; }
+@keyframes spooky-twinkle { 0%, 100% { opacity: 0; transform: scale(0.4); } 50% { opacity: 0.95; transform: scale(1); } }
+@keyframes spooky-glint { 0%, 100% { opacity: 0; transform: scale(0.3) rotate(0deg); } 50% { opacity: 1; transform: scale(1) rotate(45deg); } }
+@media (prefers-reduced-motion: reduce) { .spooky-sparkle { animation: none; opacity: 0.55; } }

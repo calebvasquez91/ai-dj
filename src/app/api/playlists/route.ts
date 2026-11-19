@@ -6,6 +6,7 @@ import { apiHandler, unauthorized } from "@/lib/apiRoute";
 import { cleanText, MAX_NAME_LENGTH } from "@/lib/apiValidation";
 import { recordAuditEvent, requestDeviceId } from "@/lib/telemetryServer";
 import { loadPlaylistImages } from "@/lib/playlistImageServer";
+import { loadPlaylistHolidays } from "@/lib/playlistHolidayServer";
 
 async function handleGET() {
   const session = await auth();
@@ -13,8 +14,15 @@ async function handleGET() {
 
   const playlists = await loadUserPlaylistsWithSpookyUnion(session.user.id);
   // A playlist's own picture, when it has one (an empty answer, not an error, until prisma/telemetry.sql has been run).
-  const images = await loadPlaylistImages(playlists.map((p) => p.id));
-  return NextResponse.json(playlists.map((p) => (images.has(p.id) ? { ...p, imageUrl: images.get(p.id) } : p)));
+  const [images, holidays] = await Promise.all([loadPlaylistImages(playlists.map((p) => p.id)), loadPlaylistHolidays(playlists.map((p) => p.id))]);
+  return NextResponse.json(
+    playlists.map((p) => ({
+      ...p,
+      ...(images.has(p.id) ? { imageUrl: images.get(p.id) } : {}),
+      // a system playlist (Spooky Music) never has a holiday theme
+      ...(holidays.has(p.id) && !p.theme ? { holidayTheme: holidays.get(p.id) } : {}),
+    })),
+  );
 }
 
 async function handlePOST(request: Request) {

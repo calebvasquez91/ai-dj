@@ -7,6 +7,7 @@ import { formatTime, formatTotalDuration } from "@/lib/format";
 import { ConfirmSheet, IconButton, Text } from "@/ui";
 import { PlaylistCover } from "@/components/PlaylistCover";
 import { PlaylistImageControl } from "@/components/PlaylistImageControl";
+import { PlaylistHolidayControl } from "@/components/PlaylistHolidayControl";
 import { useIsAdmin } from "@/components/FeedbackOwnerProvider";
 import { confirmDeletePlaylist, confirmRemoveSongFromPlaylist, confirmRenamePlaylist, type ConfirmCopy } from "@/lib/confirmCopy";
 import { PlayIcon } from "@/components/Icons";
@@ -133,6 +134,7 @@ function PlaylistContent() {
             }}
           />
           {!playlist.theme && <PlaylistImageControl playlist={playlist} />}
+          {!playlist.theme && <PlaylistHolidayControl playlist={playlist} />}
           <Text variant="secondary">
             {playlist.tracks.length} song{playlist.tracks.length === 1 ? "" : "s"}
             {playlist.tracks.length > 0 && ` · ${formatTotalDuration(playlist.tracks.reduce((sum, t) => sum + (t.durationSec || 0), 0))}`}
