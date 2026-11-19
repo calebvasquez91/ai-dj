@@ -47,9 +47,11 @@ import { ANALYSIS_JOB_TIMEOUT_MS, pickNextAnalysisJob, tempoChanged } from "@/li
 import { LOOKUP_LOOKAHEAD, reachableTracks } from "@/lib/lookahead";
 import { withTimeout } from "@/lib/withTimeout";
 import { voiceCutoffSec, voiceMapFromStem } from "@/lib/voiceMap";
-import { DJ_EQ_ENABLED, STUTTER_ENABLED, SONG_SYNC_ENABLED, STEM_FEATURES_ENABLED, VOCAL_MASHUP_ENABLED } from "@/lib/featureFlags";
+import { DJ_EQ_ENABLED, SCRATCH_ENABLED, STUTTER_ENABLED, SONG_SYNC_ENABLED, STEM_FEATURES_ENABLED, VOCAL_MASHUP_ENABLED } from "@/lib/featureFlags";
 import { runDjEqTick } from "@/lib/djEq";
 import { manualStutter, planStutter, scheduleStutter, type StutterMove } from "@/lib/stutter";
+import { planScratchOverSong } from "@/lib/scratch";
+import { playScratch } from "@/lib/scratchAudio";
 import { useDjMoves } from "@/lib/djMovesStore";
 import { isStuckMuted, looksMuted, rmsLevel, shouldResumeContext, wakeVerdict } from "@/lib/backgroundAudio";
 import { TRANSITION_FX_ENABLED, buildSyncReport } from "@/lib/syncEngine";
@@ -1113,6 +1115,54 @@ export function DualDeckStage() {
         // a hiccup in a move must never reach the music
       }
     }, 100);
+    return () => clearInterval(timer);
+  }, [deckEl]);
+
+  // Scratching over a song (lib/scratch.ts, SCRATCH_ENABLED): in hip-hop, rap and electronic, at an occasion that leans in, with the energy there,
+  // a one-bar scratch pattern of 1/4, 1/8 or 1/16 notes starts on the next phrase boundary, stretched to the tempo and pitched to the key of the
+  // song, no more often than the frequency setting allows. The scratch as a transition bridge between two songs that do not mix cleanly is planned
+  // and tested (shouldScratchBridge, planScratchBridge) but not yet handed to the transition engine. With the flag off this does nothing at all.
+  useEffect(() => {
+    if (!SCRATCH_ENABLED) return;
+    useDjMoves.getState().load();
+    let lastMoveAtSec: number | null = null;
+    let lastTrackId: string | null = null;
+    const timer = setInterval(() => {
+      try {
+        const s = useStore.getState();
+        const moves = useDjMoves.getState();
+        const track = s.currentTrack;
+        if (!track || !s.isPlaying || s.isTransitioning || !moves.settings.scratch) return;
+        const analysis = s.trackAnalysis[track.id];
+        const ctx = audioCtxRef.current;
+        const master = masterGainRef.current;
+        const deckId = activeDeckRef.current;
+        const el = deckEl(deckId);
+        if (!analysis || !ctx || !master || !el) return;
+        if (lastTrackId !== track.id) {
+          lastTrackId = track.id;
+          lastMoveAtSec = null;
+        }
+        const move = planScratchOverSong({
+          analysis,
+          durationSec: Number.isFinite(el.duration) && el.duration > 0 ? el.duration : track.durationSec,
+          currentTimeSec: el.currentTime,
+          lastMoveAtSec,
+          genre: track.source === "local" ? track.genre : null,
+          mode: s.djMode,
+          frequency: moves.settings.scratchFrequency,
+          volume: moves.settings.scratchVolume,
+          stems: { vocals: Boolean(s.stemAvailability[track.id]) },
+        });
+        if (!move) return;
+        const startCtx = ctx.currentTime + (move.startSec - el.currentTime) / Math.max(0.1, el.playbackRate || 1);
+        const played = playScratch(ctx, master, move, startCtx);
+        lastMoveAtSec = move.startSec;
+        moves.setReadout("scratch", `${move.reason} (${played.source})`);
+      } catch {
+        // a hiccup in a move must never reach the music
+      }
+    }, 250);
     return () => clearInterval(timer);
   }, [deckEl]);
 

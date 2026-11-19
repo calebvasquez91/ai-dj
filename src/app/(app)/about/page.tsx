@@ -31,6 +31,13 @@ export default function AboutPage() {
         )}
       </section>
 
+      <section className="flex flex-col gap-2" aria-labelledby="sounds-heading">
+        <h2 id="sounds-heading" className="text-sm font-semibold text-muted">Sounds</h2>
+        <p className="text-sm text-muted">
+          The scratch sounds the DJ uses are made by the app itself (synthesised), not recorded from anyone, so there is nothing to credit or license.
+        </p>
+      </section>
+
       <p className="text-sm text-muted">
         <Link href="/privacy" className="text-accent underline">Privacy Policy</Link>
       </p>
