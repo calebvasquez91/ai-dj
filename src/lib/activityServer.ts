@@ -173,8 +173,11 @@ export interface Health {
   storage: { usedBytes: number; limitBytes: number | null } | null;
   /** Bytes the database holds, and the limit when ADMIN_DB_LIMIT_MB is set. */
   database: { usedBytes: number; limitBytes: number | null } | null;
-  /** Jobs waiting or running, by kind, and how many of each have failed. */
-  queues: { kind: string; waiting: number; running: number; failed: number }[];
+  /**
+   * Jobs waiting or running, by kind, and how many of each failed in the last FAILED_JOB_WINDOW_DAYS days (an old failure is history, not a current
+   * problem). `failed` is null when that count could not be read (never shown as 0); `earlier` is how many failed before the window.
+   */
+  queues: { kind: string; waiting: number; running: number; failed: number | null; earlier: number }[];
   /** Songs the player has not analysed yet (analysis happens the first time a song plays). */
   unanalysed: number | null;
 }
@@ -209,21 +212,36 @@ async function listBlobBytes(): Promise<number> {
   return total; // more than 30,000 files: the figure is a floor
 }
 
-export function loadHealth(): Promise<Section<Health>> {
+/** A failed job counts toward the health figure for this many days after it failed. */
+export const FAILED_JOB_WINDOW_DAYS = 30;
+
+/**
+ * Jobs that failed since `since`: by the time the failure was recorded, else (a job with no finish time) by when it was created. One function per
+ * model, so the compiler checks each model's own field names.
+ */
+const failedGenreJobsSince = (since: Date) => ({ status: "failed", OR: [{ finishedAt: { gte: since } }, { finishedAt: null, createdAt: { gte: since } }] });
+const failedStemJobsSince = (since: Date) => ({ status: "failed", OR: [{ completedAt: { gte: since } }, { completedAt: null, createdAt: { gte: since } }] });
+
+export function loadHealth(now = Date.now()): Promise<Section<Health>> {
   return section(async () => {
     const orNull = async <T>(read: () => Promise<T>): Promise<T | null> => read().catch(() => null);
-    const [blob, dbRows, genreJobs, stemJobs, unanalysed] = await Promise.all([
+    const since = new Date(now - FAILED_JOB_WINDOW_DAYS * 86_400_000);
+    const [blob, dbRows, genreJobs, stemJobs, genreFailed, stemFailed, unanalysed] = await Promise.all([
       orNull(blobBytes),
       orNull(() => prisma.$queryRaw<{ bytes: bigint }[]>`SELECT pg_database_size(current_database()) AS bytes`),
-      orNull(() => prisma.genreJob.groupBy({ by: ["status"], _count: { _all: true } })),
-      orNull(() => prisma.stemSeparationJob.groupBy({ by: ["status"], _count: { _all: true } })),
+      orNull(() => prisma.genreJob.groupBy({ by: ["status"], where: { status: { in: ["queued", "running", "failed"] } }, _count: { _all: true } })),
+      orNull(() => prisma.stemSeparationJob.groupBy({ by: ["status"], where: { status: { in: ["pending", "processing", "failed"] } }, _count: { _all: true } })),
+      orNull(() => prisma.genreJob.count({ where: failedGenreJobsSince(since) })),
+      orNull(() => prisma.stemSeparationJob.count({ where: failedStemJobsSince(since) })),
       orNull(() => prisma.track.count({ where: { source: "local", bpm: null } })),
     ]);
     const count = (rows: { status: string; _count: { _all: number } }[] | null, ...statuses: string[]) =>
       rows ? rows.filter((r) => statuses.includes(r.status)).reduce((n, r) => n + r._count._all, 0) : 0;
     const queues: Health["queues"] = [];
-    if (genreJobs) queues.push({ kind: "Genre classification", waiting: count(genreJobs, "queued"), running: count(genreJobs, "running"), failed: count(genreJobs, "failed") });
-    if (stemJobs) queues.push({ kind: "Stem separation", waiting: count(stemJobs, "pending"), running: count(stemJobs, "processing"), failed: count(stemJobs, "failed") });
+    // The failed figure comes from its own count; when that could not be read it stays null (shown as unavailable), never a false 0.
+    const earlier = (rows: { status: string; _count: { _all: number } }[], recent: number | null) => (recent == null ? 0 : Math.max(0, count(rows, "failed") - recent));
+    if (genreJobs) queues.push({ kind: "Genre classification", waiting: count(genreJobs, "queued"), running: count(genreJobs, "running"), failed: genreFailed, earlier: earlier(genreJobs, genreFailed) });
+    if (stemJobs) queues.push({ kind: "Stem separation", waiting: count(stemJobs, "pending"), running: count(stemJobs, "processing"), failed: stemFailed, earlier: earlier(stemJobs, stemFailed) });
     return {
       storage: blob == null ? null : { usedBytes: blob, limitBytes: limitBytes(process.env.ADMIN_BLOB_LIMIT_GB, 1024 ** 3) },
       database: dbRows?.[0] ? { usedBytes: Number(dbRows[0].bytes), limitBytes: limitBytes(process.env.ADMIN_DB_LIMIT_MB, 1024 ** 2) } : null,

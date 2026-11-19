@@ -13,6 +13,8 @@ const mocks = vi.hoisted(() => ({
   playAggregate: vi.fn(),
   genreJobGroup: vi.fn(),
   stemJobGroup: vi.fn(),
+  genreJobCount: vi.fn(),
+  stemJobCount: vi.fn(),
   list: vi.fn(),
   trackGenreFindMany: vi.fn(),
   trackGenreCount: vi.fn(),
@@ -29,14 +31,14 @@ vi.mock("@/lib/prisma", () => ({
     playlist: { count: mocks.playlistCount },
     playEvent: { aggregate: mocks.playAggregate },
     trackGenre: { findMany: mocks.trackGenreFindMany, count: mocks.trackGenreCount },
-    genreJob: { groupBy: mocks.genreJobGroup },
-    stemSeparationJob: { groupBy: mocks.stemJobGroup },
+    genreJob: { groupBy: mocks.genreJobGroup, count: mocks.genreJobCount },
+    stemSeparationJob: { groupBy: mocks.stemJobGroup, count: mocks.stemJobCount },
     $queryRaw: mocks.queryRaw,
   },
 }));
 vi.mock("@vercel/blob", () => ({ list: mocks.list }));
 
-import { BLOB_SIZE_CACHE_MS, exportRows, loadAuditLog, loadDevices, loadGenreCounts, loadHealth, loadOverview, loadPlaytime, resetBlobSizeCache } from "./activityServer";
+import { BLOB_SIZE_CACHE_MS, FAILED_JOB_WINDOW_DAYS, exportRows, loadAuditLog, loadDevices, loadGenreCounts, loadHealth, loadOverview, loadPlaytime, resetBlobSizeCache } from "./activityServer";
 import type { ActivityFilter } from "./activity";
 
 const NO_FILTER: ActivityFilter = { from: null, to: null, type: null };
@@ -155,8 +157,11 @@ describe("loadHealth: the file store is listed once per ten minutes", () => {
     vi.stubEnv("BLOB_READ_WRITE_TOKEN", "token");
     mocks.list.mockResolvedValue({ blobs: [{ size: 1000 }, { size: 500 }], hasMore: false });
     mocks.queryRaw.mockResolvedValue([{ bytes: BigInt(4096) }]);
-    mocks.genreJobGroup.mockResolvedValue([{ status: "queued", _count: { _all: 3 } }, { status: "failed", _count: { _all: 1 } }]);
-    mocks.stemJobGroup.mockResolvedValue([{ status: "processing", _count: { _all: 2 } }]);
+    // the grouped rows hold the all-time failed total; the failed figure itself must come from the recent-failure count
+    mocks.genreJobGroup.mockResolvedValue([{ status: "queued", _count: { _all: 3 } }, { status: "failed", _count: { _all: 40 } }]);
+    mocks.stemJobGroup.mockResolvedValue([{ status: "processing", _count: { _all: 2 } }, { status: "failed", _count: { _all: 2 } }]);
+    mocks.genreJobCount.mockResolvedValue(1);
+    mocks.stemJobCount.mockResolvedValue(0);
     mocks.trackCount.mockResolvedValue(900);
   }
   it("adds up every file, reports the queues and the failures, and uses the limits in the settings", async () => {
@@ -166,10 +171,43 @@ describe("loadHealth: the file store is listed once per ten minutes", () => {
     expect(r.ok && r.data.storage).toEqual({ usedBytes: 1500, limitBytes: 1024 ** 3 });
     expect(r.ok && r.data.database).toEqual({ usedBytes: 4096, limitBytes: null });
     expect(r.ok && r.data.queues).toEqual([
-      { kind: "Genre classification", waiting: 3, running: 0, failed: 1 },
-      { kind: "Stem separation", waiting: 0, running: 2, failed: 0 },
+      { kind: "Genre classification", waiting: 3, running: 0, failed: 1, earlier: 39 },
+      { kind: "Stem separation", waiting: 0, running: 2, failed: 0, earlier: 2 }, // two old failures are in the table but outside the window
     ]);
     expect(r.ok && r.data.unanalysed).toBe(900);
+  });
+  it("counts only failures from the last 30 days, by when they failed (else when they were created)", async () => {
+    setup();
+    const day = 86_400_000;
+    // a small fake table: the count answers by evaluating the where clause the page sends against these rows
+    const rows = [
+      { status: "failed", completedAt: new Date(now - 2 * day), createdAt: new Date(now - 90 * day) }, // failed recently, created long ago: counts
+      { status: "failed", completedAt: new Date(now - 45 * day), createdAt: new Date(now - 46 * day) }, // failed 45 days ago: history
+      { status: "failed", completedAt: null, createdAt: new Date(now - 5 * day) }, // no finish time, created recently: counts
+      { status: "failed", completedAt: null, createdAt: new Date(now - 60 * day) }, // no finish time, created long ago: history
+      { status: "ready", completedAt: new Date(now - day), createdAt: new Date(now - day) }, // not a failure
+    ];
+    type Clause = { completedAt?: { gte: Date } | null; createdAt?: { gte: Date } };
+    mocks.stemJobCount.mockImplementation(async ({ where }: { where: { status: string; OR: Clause[] } }) =>
+      rows.filter((r) => r.status === where.status && where.OR.some((c) => (c.completedAt === null ? r.completedAt === null : r.completedAt !== null && r.completedAt >= c.completedAt!.gte) && (!c.createdAt || r.createdAt >= c.createdAt.gte))).length
+    );
+    const r = await loadHealth(now);
+    expect(FAILED_JOB_WINDOW_DAYS).toBe(30);
+    expect(r.ok && r.data.queues.find((q) => q.kind === "Stem separation")?.failed).toBe(2);
+  });
+  it("asks the grouped queries only for the statuses it shows", async () => {
+    setup();
+    await loadHealth(now);
+    expect(mocks.genreJobGroup.mock.calls[0][0].where).toEqual({ status: { in: ["queued", "running", "failed"] } });
+    expect(mocks.stemJobGroup.mock.calls[0][0].where).toEqual({ status: { in: ["pending", "processing", "failed"] } });
+  });
+  it("shows the failed figure as unavailable (null), never 0, when its count could not be read", async () => {
+    setup();
+    mocks.stemJobCount.mockRejectedValue(new Error("timeout"));
+    const r = await loadHealth(now);
+    const stem = r.ok && r.data.queues.find((q) => q.kind === "Stem separation");
+    expect(stem).toEqual({ kind: "Stem separation", waiting: 0, running: 2, failed: null, earlier: 0 });
+    expect(r.ok && r.data.queues.find((q) => q.kind === "Genre classification")?.failed).toBe(1); // the other queue is unaffected
   });
   it("does not list the file store again within ten minutes", async () => {
     setup();
