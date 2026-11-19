@@ -6,6 +6,7 @@
 //    are capped at 4.5MB, well under typical audio file sizes), then a
 //    small JSON POST to /api/tracks just records the resulting URL.
 import type { Track } from "@/types/music";
+import { explainBlobFailure } from "@/lib/uploadFailure";
 
 interface UploadMetadata {
   title: string;
@@ -42,6 +43,8 @@ async function uploadToBlob(file: File, metadata: UploadMetadata): Promise<Respo
   const blob = await upload(file.name, file, {
     access: "public",
     handleUploadUrl: "/api/tracks/upload-token",
+  }).catch(async (err: unknown) => {
+    throw await explainBlobFailure(err);
   });
   return fetch("/api/tracks", {
     method: "POST",

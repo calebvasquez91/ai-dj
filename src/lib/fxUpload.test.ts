@@ -62,3 +62,13 @@ describe("uploadFx request bodies", () => {
     await expect(uploadFx(file, { name: "boo", category: "effect", durationSec: 3 })).rejects.toThrow("nope");
   });
 });
+
+describe("uploadFx when the storage token is refused", () => {
+  it("shows the server's daily-limit message instead of the storage client's generic token error", async () => {
+    vi.stubEnv("NEXT_PUBLIC_STORAGE_BACKEND", "blob");
+    blobUpload.mockRejectedValue(new Error("Vercel Blob: Failed to  retrieve the client token"));
+    const limit = "Upload limit reached: 300 files per 24 hours for this account. Try again later.";
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({ error: limit }), { status: 429 })));
+    await expect(uploadFx(file, { name: "boo", category: "effect", durationSec: 3 })).rejects.toThrow(limit);
+  });
+});

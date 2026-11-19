@@ -2,6 +2,7 @@
 // trackUpload.ts's NEXT_PUBLIC_STORAGE_BACKEND branch exactly — see that
 // file for the reasoning (4.5MB server body cap on the blob path, etc.).
 import type { FxCategory, FxSound } from "@/types/music";
+import { explainBlobFailure } from "@/lib/uploadFailure";
 
 interface FxUploadMetadata {
   name: string;
@@ -38,6 +39,8 @@ async function uploadToBlob(file: File, metadata: FxUploadMetadata): Promise<Res
   const blob = await upload(file.name, file, {
     access: "public",
     handleUploadUrl: "/api/fx/upload-token",
+  }).catch(async (err: unknown) => {
+    throw await explainBlobFailure(err);
   });
   return fetch("/api/fx", {
     method: "POST",
