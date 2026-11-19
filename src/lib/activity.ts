@@ -1,5 +1,45 @@
 // Pure helpers for the admin Activity page: the filter in its address, readable sizes and usage, and short device ids.
 import { isAuditEventType, parseDayParam, type AuditEventType } from "@/lib/telemetry";
+import { resolveGenreTags } from "@/lib/genre/combine";
+import type { GenreTag } from "@/types/music";
+
+/** One genre line on the Activity page: songs whose main genre it is, and songs that carry it among their tags (the cards' count). */
+export interface GenreCountRow {
+  genre: string;
+  main: number;
+  tagged: number;
+}
+
+function parseTags(json: string | null | undefined): GenreTag[] {
+  if (!json) return [];
+  try {
+    const v: unknown = JSON.parse(json);
+    return Array.isArray(v) ? (v as GenreTag[]) : [];
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Both genre counts from the stored classification rows. `main` is each song counted once under its best genre (the `genre` column); `tagged`
+ * counts a song under every genre it has, resolved the way the "Made by your DJ" cards resolve it (a record with a summary but no tags falls back
+ * to that summary). Biggest `main` first, ties by `tagged`, then A to Z.
+ */
+export function genreCountRows(rows: readonly { genre: string | null; tagsJson: string }[]): GenreCountRow[] {
+  const byGenre = new Map<string, GenreCountRow>();
+  const row = (genre: string) => {
+    let r = byGenre.get(genre);
+    if (!r) byGenre.set(genre, (r = { genre, main: 0, tagged: 0 }));
+    return r;
+  };
+  for (const r of rows) {
+    if (r.genre) row(r.genre).main++;
+    const resolved = resolveGenreTags(parseTags(r.tagsJson)).genres.map((g) => g.genre);
+    const genres = resolved.length > 0 ? resolved : r.genre ? [r.genre] : [];
+    for (const g of new Set(genres)) row(g).tagged++;
+  }
+  return [...byGenre.values()].sort((a, b) => b.main - a.main || b.tagged - a.tagged || a.genre.localeCompare(b.genre));
+}
 
 export interface ActivityFilter {
   /** Start of the first day, or null for no lower bound. */

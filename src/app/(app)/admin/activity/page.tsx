@@ -240,8 +240,15 @@ export default async function ActivityPage({ searchParams }: { searchParams: Pro
             <p className="text-sm">
               <span className="font-semibold">{g.needsReview}</span> waiting for review · <span className="font-semibold">{g.unclassified}</span> without a genre
             </p>
+            <p className="text-xs text-muted">
+              The bar and first number: songs whose main genre this is (each song counted once). The second number: songs that carry this genre among their tags, which
+              is what the song count on a &ldquo;Made by your DJ&rdquo; card shows (a song can be on several).
+            </p>
             <ol className="flex flex-col gap-2">
-              {g.genres.map((x) => <BarRow key={x.genre} label={x.genre} value={x.count} max={g.genres[0]?.count ?? 1} text={x.count.toLocaleString("en-US")} />)}
+              {g.genres.map((x) => {
+                const max = Math.max(1, ...g.genres.map((y) => y.main));
+                return <BarRow key={x.genre} label={x.genre} value={x.main} max={max} text={`${x.main.toLocaleString("en-US")} main · ${x.tagged.toLocaleString("en-US")} tagged`} />;
+              })}
             </ol>
           </>
         )}

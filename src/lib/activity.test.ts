@@ -1,5 +1,43 @@
 import { describe, expect, it } from "vitest";
-import { activityFilterParams, formatBytes, limitBytes, parseActivityFilter, shortDeviceId, usageLine } from "./activity";
+import { activityFilterParams, formatBytes, genreCountRows, limitBytes, parseActivityFilter, shortDeviceId, usageLine } from "./activity";
+
+const tag = (genre: string, confidence = 0.9) => ({ genre, source: "file-tags" as const, confidence, updatedAt: 0 });
+
+describe("genreCountRows: the main-genre count and the tagged-with count", () => {
+  it("counts a song once under its main genre, and under every genre it carries", () => {
+    const rows = [
+      { genre: "Hip-Hop", tagsJson: JSON.stringify([tag("Hip-Hop"), tag("R&B", 0.8)]) },
+      { genre: "Hip-Hop", tagsJson: JSON.stringify([tag("Hip-Hop")]) },
+      { genre: "R&B", tagsJson: JSON.stringify([tag("R&B")]) },
+    ];
+    expect(genreCountRows(rows)).toEqual([
+      { genre: "Hip-Hop", main: 2, tagged: 2 },
+      { genre: "R&B", main: 1, tagged: 2 },
+    ]);
+  });
+  it("lists a genre that is only ever a secondary tag, with no main songs, after the others", () => {
+    const rows = [
+      { genre: "Pop", tagsJson: JSON.stringify([tag("Pop"), tag("Soul", 0.8)]) },
+      { genre: "Pop", tagsJson: JSON.stringify([tag("Pop")]) },
+    ];
+    expect(genreCountRows(rows)).toEqual([
+      { genre: "Pop", main: 2, tagged: 2 },
+      { genre: "Soul", main: 0, tagged: 1 },
+    ]);
+  });
+  it("falls back to the summary genre for a record with no tags, and skips a song with neither", () => {
+    const rows = [
+      { genre: "Funk", tagsJson: "[]" },
+      { genre: null, tagsJson: "[]" },
+      { genre: null, tagsJson: "not json" },
+    ];
+    expect(genreCountRows(rows)).toEqual([{ genre: "Funk", main: 1, tagged: 1 }]);
+  });
+  it("counts a song once for a genre even if two sources name it", () => {
+    const rows = [{ genre: "Pop", tagsJson: JSON.stringify([tag("Pop"), { ...tag("Pop", 0.7), source: "llm" }]) }];
+    expect(genreCountRows(rows)).toEqual([{ genre: "Pop", main: 1, tagged: 1 }]);
+  });
+});
 
 describe("parseActivityFilter", () => {
   it("reads a date range and an event type from the address", () => {

@@ -4,7 +4,7 @@
 import { prisma } from "@/lib/prisma";
 import { isMissingTable } from "@/lib/missingTable";
 import { list } from "@vercel/blob";
-import { limitBytes, type ActivityFilter } from "@/lib/activity";
+import { genreCountRows, limitBytes, type ActivityFilter, type GenreCountRow } from "@/lib/activity";
 import { averageSessionSeconds, isActiveNow } from "@/lib/telemetry";
 
 export type Section<T> = { ok: true; data: T } | { ok: false; reason: "no-table" | "error" };
@@ -147,20 +147,20 @@ export function loadPlaytime(now = Date.now()): Promise<Section<PlaytimeReport>>
 }
 
 export interface GenreCounts {
-  genres: { genre: string; count: number }[];
+  genres: GenreCountRow[];
   needsReview: number;
   unclassified: number;
 }
 
 export function loadGenreCounts(): Promise<Section<GenreCounts>> {
   return section(async () => {
-    const [byGenre, needsReview, tracks, classified] = await Promise.all([
-      prisma.trackGenre.groupBy({ by: ["genre"], where: { genre: { not: null } }, _count: { _all: true }, orderBy: { _count: { genre: "desc" } } }),
+    const [rows, needsReview, tracks, classified] = await Promise.all([
+      prisma.trackGenre.findMany({ select: { genre: true, tagsJson: true } }),
       prisma.trackGenre.count({ where: { status: "needs-review" } }),
       prisma.track.count({ where: { source: "local" } }),
       prisma.trackGenre.count({ where: { genre: { not: null } } }),
     ]);
-    return { genres: byGenre.map((g) => ({ genre: g.genre ?? "", count: g._count._all })), needsReview, unclassified: Math.max(0, tracks - classified) };
+    return { genres: genreCountRows(rows), needsReview, unclassified: Math.max(0, tracks - classified) };
   });
 }
 
