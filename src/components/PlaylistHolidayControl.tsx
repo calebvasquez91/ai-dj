@@ -28,7 +28,9 @@ export function PlaylistHolidayControl({ playlist }: { playlist: Pick<Playlist, 
   const [busy, setBusy] = useState(false);
   // Which suggestion was just put away (so the banner goes at once, before storage is read again).
   const [putAway, setPutAway] = useState<string | null>(null);
-  const upcoming = upcomingHoliday();
+  // the person's own day (not the UTC one, which has moved on by the evening in the Americas)
+  // worked out once when the control appears, which is on the client only
+  const [upcoming] = useState(() => upcomingHoliday(Date.now(), undefined, new Date().getTimezoneOffset()));
   const suggestionKey = upcoming ? `${upcoming.id}:${upcoming.year}` : null;
   const showSuggestion = upcoming != null && !playlist.holidayTheme && suggestionKey !== putAway && !wasDismissed(suggestionKey!);
 

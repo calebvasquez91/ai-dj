@@ -109,6 +109,23 @@ describe("upcomingHoliday (the suggestion within three weeks)", () => {
   });
 });
 
+describe("upcomingHoliday uses the person's own day", () => {
+  const NEW_YORK = 300; // Date.getTimezoneOffset() in winter: UTC is five hours ahead
+  it("at 9 pm on Christmas Eve in New York (already Christmas in UTC) it is still tomorrow, not today", () => {
+    const eveningUtc = Date.UTC(2026, 11, 25, 2, 0); // 02:00 UTC on the 25th = 21:00 on the 24th in New York
+    expect(upcomingHoliday(eveningUtc, undefined, NEW_YORK)).toMatchObject({ id: "christmas", daysAway: 1 });
+    expect(upcomingHoliday(eveningUtc)).toMatchObject({ id: "christmas", daysAway: 0 }); // the UTC day, as before
+  });
+  it("on Christmas evening in New York the holiday is still today, not already gone", () => {
+    const eveningUtc = Date.UTC(2026, 11, 26, 2, 0);
+    expect(upcomingHoliday(eveningUtc, undefined, NEW_YORK)).toMatchObject({ id: "christmas", daysAway: 0 });
+  });
+  it("east of UTC the local day can be ahead of the UTC one", () => {
+    const lateUtc = Date.UTC(2026, 11, 24, 20, 0); // 05:00 on the 25th in Tokyo
+    expect(upcomingHoliday(lateUtc, undefined, -540)).toMatchObject({ id: "christmas", daysAway: 0 });
+  });
+});
+
 describe("holidayCountdown", () => {
   it("reads naturally", () => {
     expect(holidayCountdown("thanksgiving", 7)).toBe("Thanksgiving is 7 days away.");

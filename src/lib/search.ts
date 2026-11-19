@@ -313,6 +313,36 @@ export function searchAll(
 /** How many completions the search page offers under the box. */
 export const SUGGESTION_LIMIT = 5;
 
+interface Candidate {
+  text: string;
+  norm: string;
+  count: number;
+}
+
+const trackCandidateCache = new WeakMap<readonly Track[], Map<string, Candidate>>();
+
+/** Every title, artist and tag of the songs as keyword candidates, by normalised text, counted by how many songs carry them. Cached per library array. */
+function trackCandidates(tracks: readonly Track[]): Map<string, Candidate> {
+  const cached = trackCandidateCache.get(tracks);
+  if (cached) return cached;
+  const map = new Map<string, Candidate>();
+  const add = (text: string | undefined) => {
+    const trimmed = text?.trim();
+    if (!trimmed) return;
+    const norm = normalizeText(trimmed);
+    const seen = map.get(norm);
+    if (seen) seen.count++;
+    else map.set(norm, { text: trimmed, norm, count: 1 });
+  };
+  for (const t of tracks) {
+    add(t.title);
+    add(t.artist);
+    t.tags?.forEach(add);
+  }
+  trackCandidateCache.set(tracks, map);
+  return map;
+}
+
 /**
  * Keyword completions for a half-typed query, so the search box can finish the user's thought ("dau" -> "Daft Punk",
  * "Daughter"). The candidates are the words people search by: song titles, artists, tags, playlist and FX names. A
@@ -327,28 +357,33 @@ export function suggestKeywords(data: SearchData, query: string, limit = SUGGEST
   const last = tokens[tokens.length - 1];
   const earlier = tokens.slice(0, -1);
 
-  const candidates = new Map<string, { text: string; norm: string; count: number }>();
+  // The song candidates (every title, artist and tag) are worked out once per library and kept, so a keystroke only pays for the small
+  // playlist and FX lists and for matching, not for normalising thousands of strings again.
+  const fromSongs = trackCandidates(data.tracks);
+  const extra = new Map<string, Candidate>(); // playlist and FX names, a handful: counted on their own, then merged
   const add = (text: string | undefined) => {
     const trimmed = text?.trim();
     if (!trimmed) return;
     const norm = normalizeText(trimmed);
-    const seen = candidates.get(norm);
+    const seen = extra.get(norm);
     if (seen) seen.count++;
-    else candidates.set(norm, { text: trimmed, norm, count: 1 });
+    else extra.set(norm, { text: trimmed, norm, count: 1 });
   };
-  for (const t of data.tracks) {
-    add(t.title);
-    add(t.artist);
-    t.tags?.forEach(add);
-  }
   for (const p of data.playlists) add(p.name);
   for (const f of data.fx) {
     add(f.name);
     f.tags.forEach(add);
   }
+  function* everyCandidate(): Generator<Candidate> {
+    for (const c of fromSongs.values()) {
+      const more = extra.get(c.norm);
+      yield more ? { ...c, count: c.count + more.count } : c; // a copy: the cached entry is never changed
+    }
+    for (const c of extra.values()) if (!fromSongs.has(c.norm)) yield c;
+  }
 
   const ranked: { text: string; norm: string; count: number; startsWith: boolean }[] = [];
-  for (const c of candidates.values()) {
+  for (const c of everyCandidate()) {
     if (c.norm === typed) continue;
     if (c.norm.startsWith(typed)) {
       ranked.push({ ...c, startsWith: true });

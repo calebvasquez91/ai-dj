@@ -2,22 +2,18 @@
 // week, genre counts, and the system's health. Every section is read on its own, so a table that does not exist yet (prisma/telemetry.sql not
 // run) or a database hiccup blanks only that section. Admin only: the page and the export route check that first.
 import { prisma } from "@/lib/prisma";
+import { isMissingTable } from "@/lib/missingTable";
 import { list } from "@vercel/blob";
 import { limitBytes, type ActivityFilter } from "@/lib/activity";
-import { averageSessionSeconds, isActiveNow, playtimeSeries } from "@/lib/telemetry";
+import { averageSessionSeconds, isActiveNow } from "@/lib/telemetry";
 
 export type Section<T> = { ok: true; data: T } | { ok: false; reason: "no-table" | "error" };
-
-function isMissing(err: unknown): boolean {
-  const { code, message } = (err ?? {}) as { code?: unknown; message?: unknown };
-  return code === "P2021" || code === "P2022" || (typeof message === "string" && /does not exist/i.test(message));
-}
 
 async function section<T>(read: () => Promise<T>): Promise<Section<T>> {
   try {
     return { ok: true, data: await read() };
   } catch (err) {
-    if (isMissing(err)) return { ok: false, reason: "no-table" };
+    if (isMissingTable(err)) return { ok: false, reason: "no-table" };
     console.error("[activity] could not load a section:", err);
     return { ok: false, reason: "error" };
   }
@@ -126,18 +122,24 @@ export interface PlaytimeReport {
   sessions: number | null;
 }
 
-/** Playtime for the last 8 weeks by day (the last 14) and by week, and the average session length over the last 30 days. */
+/** Playtime for the last 8 weeks by day (the last 14) and by week, and the average session length over the last 30 days. Summed in the database, by UTC day and by week (Monday first), so no play row is read into memory. */
 export function loadPlaytime(now = Date.now()): Promise<Section<PlaytimeReport>> {
   return section(async () => {
     const since = new Date(now - 56 * 86_400_000);
-    const rows = await prisma.playEvent.findMany({ where: { createdAt: { gte: since } }, select: { createdAt: true, seconds: true } });
-    const series = rows.map((r) => ({ at: r.createdAt, seconds: r.seconds }));
+    const [perDay, perWeek] = await Promise.all([
+      prisma.$queryRaw<{ key: string; seconds: number }[]>`
+        SELECT to_char(date_trunc('day', "createdAt" AT TIME ZONE 'UTC'), 'YYYY-MM-DD') AS key, SUM("seconds")::float8 AS seconds
+        FROM "PlayEvent" WHERE "createdAt" >= ${since} GROUP BY 1 ORDER BY 1`,
+      prisma.$queryRaw<{ key: string; seconds: number }[]>`
+        SELECT to_char(date_trunc('week', "createdAt" AT TIME ZONE 'UTC'), 'YYYY-MM-DD') AS key, SUM("seconds")::float8 AS seconds
+        FROM "PlayEvent" WHERE "createdAt" >= ${since} GROUP BY 1 ORDER BY 1`,
+    ]);
     const sessions = await prisma.appSession
       .findMany({ where: { startedAt: { gte: new Date(now - 30 * 86_400_000) } }, select: { startedAt: true, lastBeatAt: true } })
       .catch(() => null);
     return {
-      perDay: playtimeSeries(series, "day").slice(-14),
-      perWeek: playtimeSeries(series, "week").slice(-8),
+      perDay: perDay.map((r) => ({ key: r.key, seconds: Number(r.seconds) })).slice(-14),
+      perWeek: perWeek.map((r) => ({ key: r.key, seconds: Number(r.seconds) })).slice(-8),
       averageSessionSeconds: sessions ? averageSessionSeconds(sessions) : null,
       sessions: sessions ? sessions.length : null,
     };
@@ -173,9 +175,25 @@ export interface Health {
   unanalysed: number | null;
 }
 
-/** The total size of the file store, listing it a page at a time (a few thousand files is a handful of requests). */
-async function blobBytes(): Promise<number | null> {
+/** The file store's total size is kept for this long: listing every file is a request per thousand files, which a page view should not repeat. */
+export const BLOB_SIZE_CACHE_MS = 10 * 60 * 1000;
+let blobSizeCache: { at: number; bytes: number } | null = null;
+
+/** Forgets the remembered file store size (for the tests). */
+export function resetBlobSizeCache() {
+  blobSizeCache = null;
+}
+
+/** The total size of the file store, listing it a page at a time (a few thousand files is a handful of requests), remembered for ten minutes. */
+async function blobBytes(now = Date.now()): Promise<number | null> {
   if (!process.env.BLOB_READ_WRITE_TOKEN) return null;
+  if (blobSizeCache && now - blobSizeCache.at < BLOB_SIZE_CACHE_MS) return blobSizeCache.bytes;
+  const bytes = await listBlobBytes();
+  blobSizeCache = { at: now, bytes };
+  return bytes;
+}
+
+async function listBlobBytes(): Promise<number> {
   let total = 0;
   let cursor: string | undefined;
   for (let page = 0; page < 30; page++) {

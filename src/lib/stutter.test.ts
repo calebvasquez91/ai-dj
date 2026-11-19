@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { manualStutter, noteForIntensity, planStutter, scheduleStutter, STUTTER_BEATS, STUTTER_MIN_GAP_BARS, stutterGapBars, type StutterContext } from "./stutter";
+import { manualStutter, noteForIntensity, STUTTER_END_GUARD_SEC, planStutter, scheduleStutter, STUTTER_BEATS, STUTTER_MIN_GAP_BARS, stutterGapBars, type StutterContext } from "./stutter";
 import { barsToSec, isOnBeat } from "./djMoves";
 import type { ParamLike } from "./djEq";
 import type { TrackAnalysis } from "./audio-analysis";
@@ -145,5 +145,18 @@ describe("manualStutter (the button on the DJ board)", () => {
   });
   it("does nothing without a usable tempo", () => {
     expect(manualStutter({ analysis: analysis({ fallback: true }), currentTimeSec: 10 })).toBeNull();
+  });
+});
+
+describe("no stutter near the end of a song, where the mix out begins", () => {
+  it("is refused in the last thirty seconds, allowed just before them", () => {
+    const a = analysis();
+    expect(planStutter(ctx({ analysis: a, currentTimeSec: 240 - STUTTER_END_GUARD_SEC + 1 }))).toBeNull();
+    expect(planStutter(ctx({ analysis: a, currentTimeSec: 240 - STUTTER_END_GUARD_SEC - 2 }))).not.toBeNull();
+  });
+  it("applies to the button too, when the song's length is known", () => {
+    const a = analysis();
+    expect(manualStutter({ analysis: a, currentTimeSec: 230, durationSec: 240 })).toBeNull();
+    expect(manualStutter({ analysis: a, currentTimeSec: 100, durationSec: 240 })).not.toBeNull();
   });
 });

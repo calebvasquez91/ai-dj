@@ -18,6 +18,10 @@ export const STUTTER_PEAK_ENERGY = 0.8;
 export const STUTTER_BPM_RANGE = { min: 70, max: 180 } as const;
 /** A stutter lasts this many beats in all, whatever the note. */
 export const STUTTER_BEATS = 2;
+/** No stutter starts in the last stretch of a song: the mix out of it (the transition engine fades this deck) may begin any moment, and a stutter must not be caught by it. */
+export const STUTTER_END_GUARD_SEC = 30;
+/** A deck whose fade level is below this is being mixed (in or out), so it is left alone. */
+export const STUTTER_MIN_DECK_LEVEL = 0.95;
 
 export type StutterNote = "1/4" | "1/8" | "1/16";
 const NOTE_BEATS: Record<StutterNote, number> = { "1/4": 1, "1/8": 0.5, "1/16": 0.25 };
@@ -65,6 +69,7 @@ export function planStutter(ctx: StutterContext): StutterMove | null {
   if (!gapElapsed(ctx.lastMoveAtSec, now, barsToSec(stutterGapBars(ctx.frequency, ctx.genre), bpm))) return null;
   const energy = energyAt(analysis, now, durationSec);
   if (energy == null) return null;
+  if (durationSec - now < STUTTER_END_GUARD_SEC) return null;
 
   const beat = beatLengthSec(bpm);
   const intensity = modeIntensity(ctx.mode) * genreMoveWeight(ctx.genre);
@@ -98,9 +103,10 @@ export function planStutter(ctx: StutterContext): StutterMove | null {
 }
 
 /** The stutter of the button on the DJ board: on the next beat, whatever the energy or the gap (a person pressed it), with the note the occasion calls for. */
-export function manualStutter(ctx: Pick<StutterContext, "analysis" | "currentTimeSec" | "genre" | "mode">): StutterMove | null {
+export function manualStutter(ctx: Pick<StutterContext, "analysis" | "currentTimeSec" | "genre" | "mode"> & { durationSec?: number }): StutterMove | null {
   const { analysis, currentTimeSec: now } = ctx;
   if (analysis.fallback || !(analysis.bpm > 0)) return null;
+  if (ctx.durationSec != null && ctx.durationSec - now < STUTTER_END_GUARD_SEC) return null;
   const start = nextBoundary(analysis, now, "beat");
   if (start == null) return null;
   const beat = beatLengthSec(analysis.bpm);

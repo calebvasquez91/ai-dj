@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { applyEqMove, EQ_HIGH_LIFT_DB, EQ_LOW_CUT_DB, EQ_MIN_GAP_BARS, planEqMove, rampBeatsFor, runDjEqTick, type EqContext, type ParamLike } from "./djEq";
+import { applyEqMove, EQ_HIGH_LIFT_DB, EQ_MAX_CUT_BARS, EQ_LOW_CUT_DB, EQ_MIN_GAP_BARS, planEqMove, rampBeatsFor, runDjEqTick, type EqContext, type ParamLike } from "./djEq";
 import { barsToSec, isOnBeat } from "./djMoves";
 import type { TrackAnalysis } from "./audio-analysis";
 
@@ -170,5 +170,40 @@ describe("applyEqMove and runDjEqTick: automation on the audio clock", () => {
     const move = runDjEqTick({ ...ctx({ analysis: a, currentTimeSec: 150 }), target: t, ctxNow: 50, playbackRate: 1, enabled: true })!;
     const expectedStart = 50 + (move.startSec - 150);
     expect(t.highShelfGain.calls[0]).toEqual(["cancel", Math.max(expectedStart, 50)]);
+  });
+});
+
+describe("a low cut is always undone", () => {
+  // build at 130 s, drop at 135 s (a short build: under the eight-bar gap), all in the loud second half
+  const a = analysis({ buildDropPairs: [{ buildAtSec: 130, dropAtSec: 135 }] });
+  const cutAt = 128;
+
+  it("brings the bass back on the drop even when it is less than eight bars after the cut", () => {
+    const move = planEqMove(ctx({ analysis: a, currentTimeSec: 132, lastMoveAtSec: cutAt, cutAtSec: cutAt }))!;
+    expect(move.kind).toBe("bass-return-on-drop");
+    expect(move.lowDb).toBe(0);
+    expect(isOnBeat(a, move.startSec)).toBe(true);
+    expect(Math.abs(move.startSec - 135)).toBeLessThan(BAR);
+  });
+  it("does it at once on the next bar when the drop has already gone by", () => {
+    const move = planEqMove(ctx({ analysis: a, currentTimeSec: 140, lastMoveAtSec: cutAt, cutAtSec: cutAt }))!;
+    expect(move.kind).toBe("bass-return-on-drop");
+    expect(move.reason).toMatch(/drop has landed/);
+    expect(move.startSec - 140).toBeLessThan(BAR + 1e-6);
+  });
+  it("does it after sixteen bars when no drop ever comes", () => {
+    const none = analysis({ buildDropPairs: [] });
+    const waiting = planEqMove(ctx({ analysis: none, currentTimeSec: cutAt + 3 * BAR, lastMoveAtSec: cutAt, cutAtSec: cutAt }));
+    expect(waiting).toBeNull();
+    const move = planEqMove(ctx({ analysis: none, currentTimeSec: cutAt + EQ_MAX_CUT_BARS * BAR, lastMoveAtSec: cutAt, cutAtSec: cutAt }))!;
+    expect(move.reason).toMatch(/build is over/);
+  });
+  it("does not need the energy or the tempo range: a cut is never left in place", () => {
+    const quiet = analysis({ buildDropPairs: [{ buildAtSec: 20, dropAtSec: 30 }], bpm: 60 });
+    expect(planEqMove(ctx({ analysis: quiet, currentTimeSec: 32, lastMoveAtSec: 18, cutAtSec: 18 }))?.kind).toBe("bass-return-on-drop");
+  });
+  it("plans nothing else while a cut is waiting to be undone", () => {
+    const peak = analysis({ buildDropPairs: [{ buildAtSec: 130, dropAtSec: 200 }] });
+    expect(planEqMove(ctx({ analysis: peak, currentTimeSec: 150, lastMoveAtSec: cutAt, cutAtSec: cutAt }))).toBeNull();
   });
 });

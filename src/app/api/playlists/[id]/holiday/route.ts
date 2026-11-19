@@ -7,7 +7,7 @@ import { canManagePlaylist } from "@/lib/playlistAccess";
 import { apiHandler, jsonError, notFound, unauthorized } from "@/lib/apiRoute";
 import { isHolidayId } from "@/lib/holidayThemes";
 import { setPlaylistHoliday } from "@/lib/playlistHolidayServer";
-import { isMissingTable } from "@/lib/playlistImageServer";
+import { isMissingTable } from "@/lib/missingTable";
 
 async function handlePUT(request: Request, { params }: { params: Promise<{ id: string }> }) {
   const session = await auth();

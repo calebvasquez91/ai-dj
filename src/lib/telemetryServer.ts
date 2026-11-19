@@ -58,6 +58,11 @@ export async function recordPlayDevice(playEventId: string, deviceId: string | n
   }
 }
 
+/** An account may bring this many new devices in a day, and a device may start this many sessions in a day: past that a heartbeat is refused, so a client cannot fill the tables. */
+export const MAX_NEW_DEVICES_PER_DAY = 10;
+export const MAX_SESSIONS_PER_DEVICE_PER_DAY = 200;
+const DAY_MS = 86_400_000;
+
 /** A heartbeat: the device is seen now (created on its first), and its session's last beat moves forward (created on its first). */
 export async function recordHeartbeat(args: {
   deviceId: string;
@@ -76,11 +81,16 @@ export async function recordHeartbeat(args: {
     appVersion: cleanInfo(args.appVersion, 24, "unknown"),
   };
   try {
+    const since = new Date(now.getTime() - DAY_MS);
+    const known = await prisma.device.findUnique({ where: { id: args.deviceId }, select: { id: true } });
+    if (!known && (await prisma.device.count({ where: { lastUserId: args.userId, firstSeenAt: { gte: since } } })) >= MAX_NEW_DEVICES_PER_DAY) return false;
     await prisma.device.upsert({
       where: { id: args.deviceId },
       create: { id: args.deviceId, lastUserId: args.userId, ...info, firstSeenAt: now, lastSeenAt: now },
       update: { lastUserId: args.userId, ...info, lastSeenAt: now },
     });
+    const knownSession = await prisma.appSession.findUnique({ where: { id: args.sessionId }, select: { id: true } });
+    if (!knownSession && (await prisma.appSession.count({ where: { deviceId: args.deviceId, startedAt: { gte: since } } })) >= MAX_SESSIONS_PER_DEVICE_PER_DAY) return true;
     await prisma.appSession.upsert({
       where: { id: args.sessionId },
       create: { id: args.sessionId, deviceId: args.deviceId, userId: args.userId, startedAt: now, lastBeatAt: now },

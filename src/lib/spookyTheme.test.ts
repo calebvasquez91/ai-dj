@@ -1,4 +1,3 @@
-import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
@@ -53,10 +52,12 @@ describe("Spooky Music theme", () => {
     expect(deck).toMatch(/spooky\s*\?\s*"spooky-bar-unplayed"/);
   });
 
-  it("leaves the Halloween components (the layers and the backdrop) untouched", () => {
-    const sha = (p: string) => createHash("sha256").update(read(p)).digest("hex");
-    expect(sha("components/HalloweenLayers.tsx")).toBe("68aa67952df62110f9415a089c5ef85b6343808a9d4a16386bff64fa8c72011f");
-    expect(sha("components/SpookyBackdrop.tsx")).toBe("10a2924852ec7904370a8f293ec665be69df696845a95797fe5fd0018e584c16");
+  it("keeps the colours, class names and animation names the Halloween components use", async () => {
+    // Not a hash of the files (any harmless edit would break that): the colours, rgba values, spooky-/music-wave class names and keyframe names they
+    // contain, which is what makes the look. Add to the components freely; changing one of these is changing Spooky Music.
+    const tokens = (p: string) => [...new Set(read(p).match(/#[0-9a-fA-F]{3,8}\b|rgba?\([^)]*\)|(?:spooky|halloween|music-wave)[\w-]*/g) ?? [])].sort();
+    const report = ["HalloweenLayers.tsx", "SpookyBackdrop.tsx"].map((f) => [f, ...tokens(`components/${f}`)].join("\n")).join("\n\n") + "\n";
+    await expect(report).toMatchFileSnapshot("./__snapshots__/spooky-components.txt");
   });
 
   it("finds a real set of Spooky rules to pin (the parser is not matching nothing)", () => {

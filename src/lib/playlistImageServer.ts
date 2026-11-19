@@ -5,12 +5,6 @@ import { prisma } from "@/lib/prisma";
 import { deleteBlobFile, getStorageBackend, uploadBlobFile } from "@/lib/storage";
 import { imageExtension, type ImageType } from "@/lib/playlistImage";
 
-/** Whether an error is the table (or a column) not existing yet (prisma/telemetry.sql not run). */
-export function isMissingTable(err: unknown): boolean {
-  const { code, message } = (err ?? {}) as { code?: unknown; message?: unknown };
-  return code === "P2021" || code === "P2022" || (typeof message === "string" && /does not exist/i.test(message));
-}
-
 /** The picture address for each playlist that has one. Empty (not an error) when the table does not exist yet. */
 export async function loadPlaylistImages(playlistIds: readonly string[]): Promise<Map<string, string>> {
   if (playlistIds.length === 0) return new Map();

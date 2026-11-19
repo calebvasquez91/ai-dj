@@ -9,11 +9,7 @@ const mocks = vi.hoisted(() => ({
 }));
 vi.mock("@/auth", () => ({ auth: vi.fn(async () => (mocks.user ? { user: { id: mocks.user } } : null)) }));
 vi.mock("@/lib/prisma", () => ({ prisma: { playlist: { findUnique: mocks.findPlaylist } } }));
-vi.mock("@/lib/playlistImageServer", () => ({
-  storePlaylistImage: mocks.store,
-  removePlaylistImage: mocks.remove,
-  isMissingTable: (e: unknown) => (e as { code?: string })?.code === "P2021",
-}));
+vi.mock("@/lib/playlistImageServer", () => ({ storePlaylistImage: mocks.store, removePlaylistImage: mocks.remove }));
 vi.mock("@/lib/telemetryServer", () => ({ recordAuditEvent: mocks.event, requestDeviceId: () => "dev-1" }));
 
 import { DELETE, POST } from "./route";
@@ -73,6 +69,13 @@ describe("POST /api/playlists/[id]/image", () => {
     const res = await upload(jpegBytes, "image/jpeg");
     expect(res.status).toBe(503);
     expect((await res.json()).error).toMatch(/not set up/);
+    expect(mocks.event).not.toHaveBeenCalled();
+  });
+
+  it("refuses a system playlist (Spooky Music), storing and logging nothing", async () => {
+    mocks.findPlaylist.mockResolvedValue({ id: "p1", userId: "u-owner", name: "Spooky Music", theme: "spooky" });
+    expect((await upload(jpegBytes, "image/jpeg")).status).toBe(400);
+    expect(mocks.store).not.toHaveBeenCalled();
     expect(mocks.event).not.toHaveBeenCalled();
   });
 

@@ -7,11 +7,12 @@ import { prisma } from "@/lib/prisma";
 import { canManagePlaylist } from "@/lib/playlistAccess";
 import { apiHandler, jsonError, notFound, unauthorized } from "@/lib/apiRoute";
 import { checkStoredImage } from "@/lib/playlistImage";
-import { isMissingTable, removePlaylistImage, storePlaylistImage } from "@/lib/playlistImageServer";
+import { removePlaylistImage, storePlaylistImage } from "@/lib/playlistImageServer";
+import { isMissingTable } from "@/lib/missingTable";
 import { recordAuditEvent, requestDeviceId } from "@/lib/telemetryServer";
 
 async function loadManageable(userId: string, id: string) {
-  const playlist = await prisma.playlist.findUnique({ where: { id }, select: { id: true, userId: true, name: true } });
+  const playlist = await prisma.playlist.findUnique({ where: { id }, select: { id: true, userId: true, name: true, theme: true } });
   return playlist && canManagePlaylist(playlist.userId, userId) ? playlist : null;
 }
 
@@ -21,6 +22,8 @@ async function handlePOST(request: Request, { params }: { params: Promise<{ id: 
   const { id } = await params;
   const playlist = await loadManageable(session.user.id, id);
   if (!playlist) return notFound();
+  // A system playlist (Spooky Music) keeps its own look and never shows a picture, so none is stored for it.
+  if (playlist.theme) return jsonError(400, "This playlist keeps its own look.");
 
   const form = await request.formData().catch(() => null);
   const file = form?.get("file");

@@ -449,3 +449,16 @@ describe("what a song is searched by", () => {
     expect(titles(searchTracks([rap, named], "trap"))[0]).toBe("Trap House"); // the title beats a subgenre
   });
 });
+
+describe("suggestKeywords keeps the song keywords between calls", () => {
+  it("does not let a playlist or FX name from one call leak into the next, or change the counts of the cached song keywords", () => {
+    const tracks = [track("Daft Song", "Daft Punk"), track("Other", "Daft Punk"), track("Daughter Song", "Someone")];
+    const withList = suggestKeywords({ tracks, playlists: [playlist("Dawn Patrol"), playlist("Daft Punk")], fx: [] }, "da");
+    expect(withList).toContain("Dawn Patrol");
+    const without = suggestKeywords({ tracks, playlists: [], fx: [] }, "da");
+    expect(without).not.toContain("Dawn Patrol");
+    // Daft Punk is on two songs (and one playlist in the first call): it still ranks first, and the second call is not skewed by the first
+    expect(without[0]).toBe("Daft Punk");
+    expect(suggestKeywords({ tracks, playlists: [], fx: [] }, "da")).toEqual(without);
+  });
+});

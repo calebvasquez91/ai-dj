@@ -197,8 +197,10 @@ export interface UpcomingHoliday {
 }
 
 /** The nearest holiday that is today or within the next three weeks, or null when there is none. Looks into next year too (New Year's Eve in December, Lunar New Year in January). */
-export function upcomingHoliday(now: number = Date.now(), withinDays = SUGGEST_WITHIN_DAYS): UpcomingHoliday | null {
-  const today = Date.UTC(new Date(now).getUTCFullYear(), new Date(now).getUTCMonth(), new Date(now).getUTCDate());
+export function upcomingHoliday(now: number = Date.now(), withinDays = SUGGEST_WITHIN_DAYS, tzOffsetMinutes = 0): UpcomingHoliday | null {
+  // "Today" is the person's own day: `tzOffsetMinutes` is Date.getTimezoneOffset() (minutes UTC is ahead of local time; 0 reads the UTC day).
+  const local = new Date(now - tzOffsetMinutes * 60_000);
+  const today = Date.UTC(local.getUTCFullYear(), local.getUTCMonth(), local.getUTCDate());
   const thisYear = new Date(today).getUTCFullYear();
   let best: UpcomingHoliday | null = null;
   for (const year of [thisYear, thisYear + 1]) {

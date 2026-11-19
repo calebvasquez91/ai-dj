@@ -49,9 +49,10 @@ import { withTimeout } from "@/lib/withTimeout";
 import { voiceCutoffSec, voiceMapFromStem } from "@/lib/voiceMap";
 import { DJ_EQ_ENABLED, SCRATCH_ENABLED, STUTTER_ENABLED, SONG_SYNC_ENABLED, STEM_FEATURES_ENABLED, VOCAL_MASHUP_ENABLED } from "@/lib/featureFlags";
 import { runDjEqTick } from "@/lib/djEq";
-import { manualStutter, planStutter, scheduleStutter, type StutterMove } from "@/lib/stutter";
+import { manualStutter, planStutter, scheduleStutter, STUTTER_MIN_DECK_LEVEL, type StutterMove } from "@/lib/stutter";
 import { planScratchOverSong } from "@/lib/scratch";
 import { playScratch } from "@/lib/scratchAudio";
+import { useDjMoveLoop } from "@/components/useDjMoveLoop";
 import { useDjMoves } from "@/lib/djMovesStore";
 import { isStuckMuted, looksMuted, rmsLevel, shouldResumeContext, wakeVerdict } from "@/lib/backgroundAudio";
 import { TRANSITION_FX_ENABLED, buildSyncReport } from "@/lib/syncEngine";
@@ -1010,161 +1011,116 @@ export function DualDeckStage() {
       });
   }, [queue, stemAvailability]);
 
-  // DJ EQ moves (lib/djEq.ts, DJ_EQ_ENABLED): every quarter second, while a song plays and no transition runs, ask the planner whether the song
-  // supports an EQ move now (energy, tempo, a beat or phrase boundary, and the eight-bar gap) and schedule it on the playing deck's low and high
-  // shelves on the audio clock. With the flag off this effect does nothing at all.
-  useEffect(() => {
-    if (!DJ_EQ_ENABLED) return;
-    useDjMoves.getState().load();
-    let lastMoveAtSec: number | null = null;
-    let lastTrackId: string | null = null;
-    const timer = setInterval(() => {
-      try {
-        const s = useStore.getState();
-        const moves = useDjMoves.getState();
-        const track = s.currentTrack;
-        if (!track || !s.isPlaying || s.isTransitioning || !moves.settings.djEq) return;
-        const analysis = s.trackAnalysis[track.id];
-        const ctx = audioCtxRef.current;
-        const deckId = activeDeckRef.current;
-        const nodes = deckNodesRef.current[deckId];
-        const el = deckEl(deckId);
-        if (!analysis || !ctx || !nodes || !el) return;
-        if (lastTrackId !== track.id) {
-          lastTrackId = track.id;
-          lastMoveAtSec = null;
-        }
-        const other = deckNodesRef.current[deckId === "A" ? "B" : "A"];
-        const move = runDjEqTick({
-          analysis,
-          durationSec: Number.isFinite(el.duration) && el.duration > 0 ? el.duration : track.durationSec,
-          currentTimeSec: el.currentTime,
-          lastMoveAtSec,
-          target: { lowShelfGain: nodes.lowShelf.gain, highShelfGain: nodes.eqHigh.gain, incomingLowShelfGain: other?.lowShelf.gain ?? null },
-          ctxNow: ctx.currentTime,
-          playbackRate: el.playbackRate || 1,
-          enabled: true,
-        });
-        if (move) {
-          lastMoveAtSec = move.startSec;
-          moves.setReadout("eq", `${move.kind.replace(/-/g, " ")} (${move.reason})`);
-        }
-      } catch {
-        // a hiccup in a move must never reach the music
-      }
-    }, 250);
-    return () => clearInterval(timer);
-  }, [deckEl]);
+  // The automatic DJ moves (all behind their own flags, all off by default). Each runs in the one shared loop (useDjMoveLoop): while a song plays
+  // with its analysis ready and no transition running, it plans a move from the song's grid, energy and tempo and schedules it on the audio clock.
+  // With a flag off its loop does nothing at all.
+  const djMoveRefs = { audioCtxRef, masterGainRef, deckNodesRef, activeDeckRef, deckEl };
 
-  // Stutter repeats (lib/stutter.ts, STUTTER_ENABLED): at an energy peak or a drop, no more than once every 16 bars (the frequency setting stretches
-  // that), the deck's own delay line repeats one slice of the song on the beat; the button on the DJ board does the same on the next beat. Done as
-  // parameter automation on the audio clock; skips transitions. With the flag off this effect does nothing at all.
-  useEffect(() => {
-    if (!STUTTER_ENABLED) return;
-    useDjMoves.getState().load();
-    let lastMoveAtSec: number | null = null;
-    let lastTrackId: string | null = null;
-    let handledManual = useDjMoves.getState().manualStutterRequestId;
-    const run = (move: StutterMove, ctx: AudioContext, el: HTMLAudioElement, nodes: DeckNodes) => {
-      const startCtx = ctx.currentTime + (move.startSec - el.currentTime) / Math.max(0.1, el.playbackRate || 1);
-      scheduleStutter(
-        { delaySendGain: nodes.delaySend.gain, delayTime: nodes.delay.delayTime, feedbackGain: nodes.delayFeedback.gain, dryGain: nodes.gain.gain },
-        move,
-        startCtx,
-        ctx.currentTime,
-        { delayTime: ECHO_DELAY_SEC, feedback: ECHO_FEEDBACK, send: 0, dry: nodes.gain.gain.value }
-      );
-      lastMoveAtSec = move.startSec;
-      useDjMoves.getState().setReadout("stutter", `${move.reason}`);
-    };
-    const timer = setInterval(() => {
-      try {
-        const s = useStore.getState();
-        const moves = useDjMoves.getState();
-        const track = s.currentTrack;
-        const analysis = track ? s.trackAnalysis[track.id] : undefined;
-        const ctx = audioCtxRef.current;
-        const deckId = activeDeckRef.current;
-        const nodes = deckNodesRef.current[deckId];
-        const el = deckEl(deckId);
-        const manual = moves.manualStutterRequestId !== handledManual;
-        handledManual = moves.manualStutterRequestId;
-        if (!track || !analysis || !ctx || !nodes || !el || !s.isPlaying || s.isTransitioning) return;
-        if (lastTrackId !== track.id) {
-          lastTrackId = track.id;
-          lastMoveAtSec = null;
-        }
-        const genre = track.source === "local" ? track.genre : null;
-        if (manual) {
-          const move = manualStutter({ analysis, currentTimeSec: el.currentTime, genre, mode: s.djMode });
-          if (move) run(move, ctx, el, nodes);
-          return;
-        }
-        if (!moves.settings.stutter) return;
-        const move = planStutter({
-          analysis,
-          durationSec: Number.isFinite(el.duration) && el.duration > 0 ? el.duration : track.durationSec,
-          currentTimeSec: el.currentTime,
-          lastMoveAtSec,
-          genre,
-          mode: s.djMode,
-          frequency: moves.settings.stutterFrequency,
-        });
-        if (move) run(move, ctx, el, nodes);
-      } catch {
-        // a hiccup in a move must never reach the music
-      }
-    }, 100);
-    return () => clearInterval(timer);
-  }, [deckEl]);
+  // DJ EQ (lib/djEq.ts): a low cut into a build, the bass back on the drop (always undone), a high lift in a peak. At most one move per eight bars.
+  const eqState = useRef<{ lastMoveAtSec: number | null; cutAtSec: number | null }>({ lastMoveAtSec: null, cutAtSec: null });
+  useDjMoveLoop<DeckNodes>({
+    enabled: DJ_EQ_ENABLED,
+    intervalMs: 250,
+    ...djMoveRefs,
+    onTick: ({ analysis, ctx, nodes, other, el, durationSec, newSong, moves }) => {
+      if (newSong) eqState.current = { lastMoveAtSec: null, cutAtSec: null };
+      if (!moves.settings.djEq) return;
+      const move = runDjEqTick({
+        analysis,
+        durationSec,
+        currentTimeSec: el.currentTime,
+        lastMoveAtSec: eqState.current.lastMoveAtSec,
+        cutAtSec: eqState.current.cutAtSec,
+        target: { lowShelfGain: nodes.lowShelf.gain, highShelfGain: nodes.eqHigh.gain, incomingLowShelfGain: other?.lowShelf.gain ?? null },
+        ctxNow: ctx.currentTime,
+        playbackRate: el.playbackRate || 1,
+        enabled: true,
+      });
+      if (!move) return;
+      // a low cut stays on the books until the bass is brought back
+      const cutAtSec = move.kind === "low-cut-into-build" ? move.startSec : move.kind === "bass-return-on-drop" ? null : eqState.current.cutAtSec;
+      eqState.current = { lastMoveAtSec: move.startSec, cutAtSec };
+      moves.setReadout("eq", `${move.kind.replace(/-/g, " ")} (${move.reason})`);
+    },
+  });
 
-  // Scratching over a song (lib/scratch.ts, SCRATCH_ENABLED): in hip-hop, rap and electronic, at an occasion that leans in, with the energy there,
-  // a one-bar scratch pattern of 1/4, 1/8 or 1/16 notes starts on the next phrase boundary, stretched to the tempo and pitched to the key of the
-  // song, no more often than the frequency setting allows. The scratch as a transition bridge between two songs that do not mix cleanly is planned
-  // and tested (shouldScratchBridge, planScratchBridge) but not yet handed to the transition engine. With the flag off this does nothing at all.
-  useEffect(() => {
-    if (!SCRATCH_ENABLED) return;
-    useDjMoves.getState().load();
-    let lastMoveAtSec: number | null = null;
-    let lastTrackId: string | null = null;
-    const timer = setInterval(() => {
-      try {
-        const s = useStore.getState();
-        const moves = useDjMoves.getState();
-        const track = s.currentTrack;
-        if (!track || !s.isPlaying || s.isTransitioning || !moves.settings.scratch) return;
-        const analysis = s.trackAnalysis[track.id];
-        const ctx = audioCtxRef.current;
-        const master = masterGainRef.current;
-        const deckId = activeDeckRef.current;
-        const el = deckEl(deckId);
-        if (!analysis || !ctx || !master || !el) return;
-        if (lastTrackId !== track.id) {
-          lastTrackId = track.id;
-          lastMoveAtSec = null;
-        }
-        const move = planScratchOverSong({
-          analysis,
-          durationSec: Number.isFinite(el.duration) && el.duration > 0 ? el.duration : track.durationSec,
-          currentTimeSec: el.currentTime,
-          lastMoveAtSec,
-          genre: track.source === "local" ? track.genre : null,
-          mode: s.djMode,
-          frequency: moves.settings.scratchFrequency,
-          volume: moves.settings.scratchVolume,
-          stems: { vocals: Boolean(s.stemAvailability[track.id]) },
-        });
-        if (!move) return;
+  // Stutter (lib/stutter.ts): at an energy peak or a drop, no more than once every 16 bars, never in the last 30 seconds of a song or on a deck that is
+  // being faded; the deck's own delay line repeats one slice on the beat. The "Stutter now" button does the same on the next beat.
+  const stutterState = useRef<{ lastMoveAtSec: number | null; handledManual: number }>({ lastMoveAtSec: null, handledManual: 0 });
+  useDjMoveLoop<DeckNodes>({
+    enabled: STUTTER_ENABLED,
+    intervalMs: 100,
+    ...djMoveRefs,
+    onSkip: () => {
+      stutterState.current.handledManual = useDjMoves.getState().manualStutterRequestId; // a press while nothing plays is dropped, not saved up
+    },
+    onTick: ({ track, analysis, ctx, nodes, el, durationSec, newSong, moves, store }) => {
+      if (newSong) stutterState.current.lastMoveAtSec = null;
+      const manual = moves.manualStutterRequestId !== stutterState.current.handledManual;
+      stutterState.current.handledManual = moves.manualStutterRequestId;
+      // a deck that is being faded (a mix in or out has begun) is left alone: the stutter writes this deck's fade level
+      if (nodes.gain.gain.value < STUTTER_MIN_DECK_LEVEL) return;
+      const genre = track.source === "local" ? track.genre : null;
+      const run = (move: StutterMove) => {
         const startCtx = ctx.currentTime + (move.startSec - el.currentTime) / Math.max(0.1, el.playbackRate || 1);
-        const played = playScratch(ctx, master, move, startCtx);
-        lastMoveAtSec = move.startSec;
-        moves.setReadout("scratch", `${move.reason} (${played.source})`);
-      } catch {
-        // a hiccup in a move must never reach the music
+        scheduleStutter(
+          { delaySendGain: nodes.delaySend.gain, delayTime: nodes.delay.delayTime, feedbackGain: nodes.delayFeedback.gain, dryGain: nodes.gain.gain },
+          move,
+          startCtx,
+          ctx.currentTime,
+          { delayTime: ECHO_DELAY_SEC, feedback: ECHO_FEEDBACK, send: 0, dry: nodes.gain.gain.value }
+        );
+        stutterState.current.lastMoveAtSec = move.startSec;
+        moves.setReadout("stutter", move.reason);
+      };
+      if (manual) {
+        const move = manualStutter({ analysis, currentTimeSec: el.currentTime, durationSec, genre, mode: store.djMode });
+        if (move) run(move);
+        return;
       }
-    }, 250);
-    return () => clearInterval(timer);
-  }, [deckEl]);
+      if (!moves.settings.stutter) return;
+      const move = planStutter({
+        analysis,
+        durationSec,
+        currentTimeSec: el.currentTime,
+        lastMoveAtSec: stutterState.current.lastMoveAtSec,
+        genre,
+        mode: store.djMode,
+        frequency: moves.settings.stutterFrequency,
+      });
+      if (move) run(move);
+    },
+  });
+
+  // Scratching over a song (lib/scratch.ts): in hip-hop, rap and electronic, at an occasion that leans in, with the energy there, a one-bar pattern of
+  // 1/4, 1/8 or 1/16 notes starts on the next phrase boundary, stretched to the tempo and pitched to the key of the song. The scratch as a transition
+  // bridge (shouldScratchBridge, planScratchBridge) is planned and tested but not yet handed to the transition engine.
+  const scratchState = useRef<{ lastMoveAtSec: number | null }>({ lastMoveAtSec: null });
+  useDjMoveLoop<DeckNodes>({
+    enabled: SCRATCH_ENABLED,
+    intervalMs: 250,
+    ...djMoveRefs,
+    onTick: ({ track, analysis, ctx, master, el, durationSec, newSong, moves, store }) => {
+      if (newSong) scratchState.current.lastMoveAtSec = null;
+      if (!master || !moves.settings.scratch) return;
+      const move = planScratchOverSong({
+        analysis,
+        durationSec,
+        currentTimeSec: el.currentTime,
+        lastMoveAtSec: scratchState.current.lastMoveAtSec,
+        genre: track.source === "local" ? track.genre : null,
+        mode: store.djMode,
+        frequency: moves.settings.scratchFrequency,
+        volume: moves.settings.scratchVolume,
+        stems: { vocals: Boolean(store.stemAvailability[track.id]) },
+      });
+      if (!move) return;
+      const startCtx = ctx.currentTime + (move.startSec - el.currentTime) / Math.max(0.1, el.playbackRate || 1);
+      const played = playScratch(ctx, master, move, startCtx);
+      scratchState.current.lastMoveAtSec = move.startSec;
+      moves.setReadout("scratch", `${move.reason} (${played.source})`);
+    },
+  });
 
   // AI-matched transition FX (lib/ai-fx.ts via store.ts's requestAiFxPick):
   // once per new (currentTrack, queue[0]) pairing, ask Claude to pick the

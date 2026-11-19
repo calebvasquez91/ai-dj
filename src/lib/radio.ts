@@ -44,11 +44,20 @@ export interface RadioOptions {
 const norm = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
 const artistKey = (t: Pick<Track, "artist">) => norm(t.artist);
 
-function genreSets(track: Track): { genres: Set<string>; subgenres: Set<string>; best: string | null } {
+type GenreSets = { genres: Set<string>; subgenres: Set<string>; best: string | null };
+// Resolving a song's genre tags means parsing them, and a top-up scores the whole library, so each song's sets are worked out once (a song
+// object is replaced, never changed, when its genre does, so the cache cannot go stale).
+const genreSetsCache = new WeakMap<Track, GenreSets>();
+
+function genreSets(track: Track): GenreSets {
+  const cached = genreSetsCache.get(track);
+  if (cached) return cached;
   const resolved = genresOfTrack(track);
   const genres = new Set(resolved.map((g) => g.genre));
   const subgenres = new Set([...resolved.flatMap((g) => g.subgenres.map((s) => s.subgenre)), ...(track.subgenres ?? [])]);
-  return { genres, subgenres, best: resolved[0]?.genre ?? track.genre ?? null };
+  const sets = { genres, subgenres, best: resolved[0]?.genre ?? track.genre ?? null };
+  genreSetsCache.set(track, sets);
+  return sets;
 }
 
 /** 0-1: how well `candidate` goes with `seed`. Unknown facts count for little, not against. */
@@ -80,6 +89,18 @@ export function radioScore(seed: Track, seedFacts: RadioFacts, candidate: Track,
   return Math.min(1, base + (sameArtist ? 0.15 : 0) + (similarArtist ? 0.1 : 0));
 }
 
+// Which songs a radio may use depends only on the library and the explicit policy, and working it out means checking every song for Halloween
+// music, so it is kept per library array (the store replaces the array when songs change) and policy.
+const eligibleCache = new WeakMap<readonly Track[], Map<ExplicitPolicy, Track[]>>();
+
+function eligibleCached(library: readonly Track[], policy: ExplicitPolicy): Track[] {
+  let byPolicy = eligibleCache.get(library);
+  if (!byPolicy) eligibleCache.set(library, (byPolicy = new Map()));
+  let tracks = byPolicy.get(policy);
+  if (!tracks) byPolicy.set(policy, (tracks = eligibleTracks(library, { explicitPolicy: policy, allowHalloween: false }).tracks));
+  return tracks;
+}
+
 export interface RadioCandidate {
   track: Track;
   score: number;
@@ -87,7 +108,7 @@ export interface RadioCandidate {
 
 /** Every allowed song that matches the seed well enough, best first. The seed itself is never a candidate. */
 export function radioCandidates(seed: Track, library: readonly Track[], options: RadioOptions): RadioCandidate[] {
-  const { tracks } = eligibleTracks(library, { explicitPolicy: options.explicitPolicy ?? "any", allowHalloween: false });
+  const tracks = eligibleCached(library, options.explicitPolicy ?? "any");
   const similar = new Set((options.similarArtists ?? []).map(norm));
   const seedFacts = options.factsOf(seed);
   const out: RadioCandidate[] = [];

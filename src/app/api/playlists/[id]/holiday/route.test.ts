@@ -4,7 +4,6 @@ const mocks = vi.hoisted(() => ({ user: "u-owner", findPlaylist: vi.fn(), setHol
 vi.mock("@/auth", () => ({ auth: vi.fn(async () => (mocks.user ? { user: { id: mocks.user } } : null)) }));
 vi.mock("@/lib/prisma", () => ({ prisma: { playlist: { findUnique: mocks.findPlaylist } } }));
 vi.mock("@/lib/playlistHolidayServer", () => ({ setPlaylistHoliday: mocks.setHoliday }));
-vi.mock("@/lib/playlistImageServer", () => ({ isMissingTable: (e: unknown) => (e as { code?: string })?.code === "P2021" }));
 
 import { PUT } from "./route";
 

@@ -50,7 +50,12 @@ export interface EqContext {
   handoff?: { atSec: number; bassStemReady: boolean } | null;
   bpmRange?: { min: number; max: number };
   minEnergy?: number;
+  /** Where in the song a low cut started that has not been undone yet, or null/undefined when the low end is in place. While it is set, the planner's only job is to bring the bass back. */
+  cutAtSec?: number | null;
 }
+
+/** A low cut that has lasted this many bars without a drop to bring the bass back is undone anyway (the build is over). */
+export const EQ_MAX_CUT_BARS = 16;
 
 /** Fewer beats of ramp at a higher tempo (a ramp is a fixed feel, not a fixed number of seconds). */
 export function rampBeatsFor(bpm: number, wanted = 4): number {
@@ -62,12 +67,44 @@ function reasonLine(energy: number, bpm: number, tail: string): string {
   return `energy ${energy.toFixed(2)}, ${Math.round(bpm)} BPM, ${tail}`;
 }
 
+/**
+ * Brings the bass back after a low cut. This is exempt from the one-move-per-eight-bars rule and from the energy gate: a cut must never be left
+ * in place, however short the build was. It returns on the drop's bar line when a drop is coming, at once (on the next bar) when the drop has
+ * already gone by, or once the cut has lasted EQ_MAX_CUT_BARS with no drop.
+ */
+function planBassReturn(ctx: EqContext): EqMove | null {
+  const { analysis, durationSec, currentTimeSec: now } = ctx;
+  const bpm = analysis.bpm;
+  const beat = beatLengthSec(bpm);
+  const horizon = now + barsToSec(EQ_LOOKAHEAD_BARS, bpm);
+  const energy = energyAt(analysis, now, durationSec) ?? 0;
+  const make = (start: number, tail: string): EqMove => {
+    const rampBeats = rampBeatsFor(bpm, 1);
+    return { kind: "bass-return-on-drop", startSec: start, rampBeats, rampSec: rampBeats * beat, lowDb: 0, usesBassStem: false, reason: reasonLine(energy, bpm, tail) };
+  };
+  const drops = analysis.buildDropPairs.map((p) => p.dropAtSec).filter((d) => d >= (ctx.cutAtSec ?? 0));
+  const upcoming = drops.filter((d) => d >= now && d <= horizon).sort((a, b) => a - b)[0];
+  if (upcoming !== undefined) {
+    const start = nextBoundary(analysis, upcoming - 1e-3, "bar");
+    if (start != null) return make(start, `drop in ${barsUntil(start, now, bpm)} bars`);
+  }
+  const passed = drops.some((d) => d < now);
+  const tooLong = now - (ctx.cutAtSec ?? now) >= barsToSec(EQ_MAX_CUT_BARS, bpm);
+  if (passed || tooLong) {
+    const start = nextBoundary(analysis, now, "bar");
+    if (start != null) return make(start, passed ? "the drop has landed" : "the build is over");
+  }
+  return null;
+}
+
 /** The next EQ move for the playing song, or null when none is supported right now (wrong tempo, too little energy, too soon after the last, or no grid). */
 export function planEqMove(ctx: EqContext): EqMove | null {
   const { analysis, durationSec, currentTimeSec: now } = ctx;
   const bpm = analysis.bpm;
   const range = ctx.bpmRange ?? EQ_BPM_RANGE;
-  if (analysis.fallback || !(bpm >= range.min && bpm <= range.max)) return null;
+  if (analysis.fallback || !(bpm > 0)) return null;
+  if (ctx.cutAtSec != null) return planBassReturn(ctx); // undo the cut first, whatever the tempo, gap or energy
+  if (!(bpm >= range.min && bpm <= range.max)) return null;
   if (!gapElapsed(ctx.lastMoveAtSec, now, barsToSec(EQ_MIN_GAP_BARS, bpm))) return null;
   const energy = energyAt(analysis, now, durationSec);
   const minEnergy = ctx.minEnergy ?? EQ_MIN_ENERGY;
