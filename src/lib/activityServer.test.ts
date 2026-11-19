@@ -14,6 +14,8 @@ const mocks = vi.hoisted(() => ({
   genreJobGroup: vi.fn(),
   stemJobGroup: vi.fn(),
   list: vi.fn(),
+  trackGenreFindMany: vi.fn(),
+  trackGenreCount: vi.fn(),
 }));
 
 vi.mock("@/lib/prisma", () => ({
@@ -26,6 +28,7 @@ vi.mock("@/lib/prisma", () => ({
     track: { count: mocks.trackCount },
     playlist: { count: mocks.playlistCount },
     playEvent: { aggregate: mocks.playAggregate },
+    trackGenre: { findMany: mocks.trackGenreFindMany, count: mocks.trackGenreCount },
     genreJob: { groupBy: mocks.genreJobGroup },
     stemSeparationJob: { groupBy: mocks.stemJobGroup },
     $queryRaw: mocks.queryRaw,
@@ -33,7 +36,7 @@ vi.mock("@/lib/prisma", () => ({
 }));
 vi.mock("@vercel/blob", () => ({ list: mocks.list }));
 
-import { BLOB_SIZE_CACHE_MS, exportRows, loadAuditLog, loadDevices, loadHealth, loadOverview, loadPlaytime, resetBlobSizeCache } from "./activityServer";
+import { BLOB_SIZE_CACHE_MS, exportRows, loadAuditLog, loadDevices, loadGenreCounts, loadHealth, loadOverview, loadPlaytime, resetBlobSizeCache } from "./activityServer";
 import type { ActivityFilter } from "./activity";
 
 const NO_FILTER: ActivityFilter = { from: null, to: null, type: null };
@@ -108,6 +111,31 @@ describe("loadPlaytime: summed in the database", () => {
     mocks.sessionFindMany.mockRejectedValue(new Error("no table"));
     const r = await loadPlaytime(now);
     expect(r.ok && r.data.averageSessionSeconds).toBeNull();
+  });
+});
+
+describe("loadGenreCounts: both counts per genre, from one read of the rows", () => {
+  const t = (genre: string) => ({ genre, source: "file-tags", confidence: 0.9, updatedAt: 0 });
+  it("returns main and tagged counts, and works out the review and unclassified totals from the same rows", async () => {
+    mocks.trackGenreFindMany.mockResolvedValue([
+      { genre: "Pop", status: "auto", tagsJson: JSON.stringify([t("Pop"), t("Soul")]) },
+      { genre: "Pop", status: "needs-review", tagsJson: JSON.stringify([t("Pop")]) },
+      { genre: null, status: "needs-review", tagsJson: "[]" },
+    ]);
+    mocks.trackCount.mockResolvedValue(10);
+    const r = await loadGenreCounts();
+    expect(mocks.trackGenreFindMany).toHaveBeenCalledTimes(1);
+    expect(mocks.trackGenreCount).not.toHaveBeenCalled(); // no extra count queries: the rows give them
+    expect(r.ok && r.data).toEqual({
+      genres: [{ genre: "Pop", main: 2, tagged: 2 }, { genre: "Soul", main: 0, tagged: 1 }],
+      needsReview: 2,
+      unclassified: 8, // 10 songs, 2 with a genre
+    });
+  });
+  it("says no-table when the genre table is missing", async () => {
+    mocks.trackGenreFindMany.mockRejectedValue(Object.assign(new Error("missing"), { code: "P2021" }));
+    mocks.trackCount.mockResolvedValue(0);
+    expect(await loadGenreCounts()).toEqual({ ok: false, reason: "no-table" });
   });
 });
 

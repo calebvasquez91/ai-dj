@@ -3,8 +3,10 @@
 // run) or a database hiccup blanks only that section. Admin only: the page and the export route check that first.
 import { prisma } from "@/lib/prisma";
 import { isMissingTable } from "@/lib/missingTable";
+import { parseArray } from "@/lib/genre/prismaStore";
+import type { GenreTag } from "@/types/music";
 import { list } from "@vercel/blob";
-import { limitBytes, type ActivityFilter } from "@/lib/activity";
+import { genreCountRows, limitBytes, type ActivityFilter, type GenreCountRow } from "@/lib/activity";
 import { averageSessionSeconds, isActiveNow } from "@/lib/telemetry";
 
 export type Section<T> = { ok: true; data: T } | { ok: false; reason: "no-table" | "error" };
@@ -147,20 +149,22 @@ export function loadPlaytime(now = Date.now()): Promise<Section<PlaytimeReport>>
 }
 
 export interface GenreCounts {
-  genres: { genre: string; count: number }[];
+  genres: GenreCountRow[];
   needsReview: number;
   unclassified: number;
 }
 
 export function loadGenreCounts(): Promise<Section<GenreCounts>> {
   return section(async () => {
-    const [byGenre, needsReview, tracks, classified] = await Promise.all([
-      prisma.trackGenre.groupBy({ by: ["genre"], where: { genre: { not: null } }, _count: { _all: true }, orderBy: { _count: { genre: "desc" } } }),
-      prisma.trackGenre.count({ where: { status: "needs-review" } }),
+    // One read of the classification rows gives the genre counts, the review queue and the classified total; only the library size is a second query.
+    const [rows, tracks] = await Promise.all([
+      prisma.trackGenre.findMany({ select: { genre: true, status: true, tagsJson: true } }),
       prisma.track.count({ where: { source: "local" } }),
-      prisma.trackGenre.count({ where: { genre: { not: null } } }),
     ]);
-    return { genres: byGenre.map((g) => ({ genre: g.genre ?? "", count: g._count._all })), needsReview, unclassified: Math.max(0, tracks - classified) };
+    const classified = rows.filter((r) => r.genre !== null).length;
+    const needsReview = rows.filter((r) => r.status === "needs-review").length;
+    const genres = genreCountRows(rows.map((r) => ({ genre: r.genre, tags: parseArray<GenreTag>(r.tagsJson) })));
+    return { genres, needsReview, unclassified: Math.max(0, tracks - classified) };
   });
 }
 

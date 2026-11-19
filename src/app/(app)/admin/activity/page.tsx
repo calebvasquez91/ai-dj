@@ -50,15 +50,18 @@ function Stat({ label, value }: { label: string; value: string }) {
   );
 }
 
-function BarRow({ label, value, max, text }: { label: string; value: number; max: number; text: string }) {
+function BarRow({ label, value, max, text, secondary }: { label: string; value: number; max: number; text: string; secondary?: number }) {
+  // a count of zero draws no bar; any other count draws at least a sliver
+  const pct = (n: number) => (n <= 0 ? 0 : Math.min(100, Math.max(2, Math.round((n / Math.max(1, max)) * 100))));
   return (
     <li className="flex flex-col gap-1">
       <div className="flex items-baseline justify-between gap-3 text-sm">
         <span className="min-w-0 break-words">{label}</span>
-        <span className="shrink-0 font-semibold">{text}</span>
+        <span className="shrink-0 text-right font-semibold">{text}</span>
       </div>
-      <div className="h-1.5 rounded-full bg-surface-hover" aria-hidden="true">
-        <div className="h-full rounded-full accent-gradient" style={{ width: `${Math.max(2, Math.round((value / Math.max(1, max)) * 100))}%` }} />
+      <div className="relative h-1.5 rounded-full bg-surface-hover" aria-hidden="true">
+        {secondary !== undefined && <div className="absolute inset-y-0 left-0 rounded-full bg-muted/40" style={{ width: `${pct(secondary)}%` }} />}
+        <div className="absolute inset-y-0 left-0 rounded-full accent-gradient" style={{ width: `${pct(value)}%` }} />
       </div>
     </li>
   );
@@ -235,16 +238,34 @@ export default async function ActivityPage({ searchParams }: { searchParams: Pro
       </Panel>
 
       <Panel title="Genres" what="Genre counts" result={genres}>
-        {(g) => (
+        {(g) => {
+          const maxTagged = Math.max(1, ...g.genres.map((x) => x.tagged));
+          return (
           <>
             <p className="text-sm">
               <span className="font-semibold">{g.needsReview}</span> waiting for review · <span className="font-semibold">{g.unclassified}</span> without a genre
             </p>
+            <p className="text-xs text-muted">
+              <span className="font-semibold">Main</span> (the solid bar): songs whose best genre this is, each song counted once.{" "}
+              <span className="font-semibold">Tagged</span> (the light bar): songs that carry this genre among their tags, so a song can count under several.{" "}
+              A &ldquo;Made by your DJ&rdquo; card starts from the tagged songs but leaves out songs the playlist rules skip (Halloween songs, for example) and only exists for
+              genres with enough songs, so its count can be a little lower.
+            </p>
             <ol className="flex flex-col gap-2">
-              {g.genres.map((x) => <BarRow key={x.genre} label={x.genre} value={x.count} max={g.genres[0]?.count ?? 1} text={x.count.toLocaleString("en-US")} />)}
+              {g.genres.map((x) => (
+                <BarRow
+                  key={x.genre}
+                  label={x.genre}
+                  value={x.main}
+                  secondary={x.tagged}
+                  max={maxTagged}
+                  text={`${x.main.toLocaleString("en-US")} main · ${x.tagged.toLocaleString("en-US")} tagged`}
+                />
+              ))}
             </ol>
           </>
-        )}
+          );
+        }}
       </Panel>
 
       <Panel title="System health" what="System health" result={health}>

@@ -1,5 +1,47 @@
 import { describe, expect, it } from "vitest";
-import { activityFilterParams, formatBytes, limitBytes, parseActivityFilter, shortDeviceId, usageLine } from "./activity";
+import { activityFilterParams, formatBytes, genreCountRows, limitBytes, parseActivityFilter, shortDeviceId, usageLine } from "./activity";
+
+const tag = (genre: string, confidence = 0.9, source: "file-tags" | "llm" | "manual" = "file-tags") => ({ genre, source, confidence, updatedAt: 0 });
+
+describe("genreCountRows: the main-genre count and the tagged-with count", () => {
+  it("counts a song once under its main genre, and under every genre it carries", () => {
+    const rows = [
+      { genre: "Hip-Hop", tags: [tag("Hip-Hop"), tag("R&B", 0.8)] },
+      { genre: "Hip-Hop", tags: [tag("Hip-Hop")] },
+      { genre: "R&B", tags: [tag("R&B")] },
+    ];
+    expect(genreCountRows(rows)).toEqual([
+      { genre: "Hip-Hop", main: 2, tagged: 2 },
+      { genre: "R&B", main: 1, tagged: 2 },
+    ]);
+  });
+  it("lists a genre that is only ever a secondary tag, with no main songs, after the others", () => {
+    const rows = [
+      { genre: "Pop", tags: [tag("Pop"), tag("Soul", 0.8)] },
+      { genre: "Pop", tags: [tag("Pop")] },
+    ];
+    expect(genreCountRows(rows)).toEqual([
+      { genre: "Pop", main: 2, tagged: 2 },
+      { genre: "Soul", main: 0, tagged: 1 },
+    ]);
+  });
+  it("falls back to the summary genre for a record with no tags, and skips a song with neither", () => {
+    expect(genreCountRows([{ genre: "Funk", tags: [] }, { genre: null, tags: [] }])).toEqual([{ genre: "Funk", main: 1, tagged: 1 }]);
+  });
+  it("counts a song once for a genre even if two sources name it", () => {
+    expect(genreCountRows([{ genre: "Pop", tags: [tag("Pop"), tag("Pop", 0.7, "llm")] }])).toEqual([{ genre: "Pop", main: 1, tagged: 1 }]);
+  });
+  it("never shows tagged below main: a stored main genre the tags no longer name still counts as tagged", () => {
+    expect(genreCountRows([{ genre: "Pop", tags: [tag("Rock")] }])).toEqual([
+      { genre: "Pop", main: 1, tagged: 1 },
+      { genre: "Rock", main: 0, tagged: 1 },
+    ]);
+  });
+  it("uses a person's own genres, not the old automatic ones, for a song they corrected", () => {
+    const rows = [{ genre: "Funk", tags: [tag("Pop", 0.9), tag("Funk", 1, "manual")] }];
+    expect(genreCountRows(rows)).toEqual([{ genre: "Funk", main: 1, tagged: 1 }]);
+  });
+});
 
 describe("parseActivityFilter", () => {
   it("reads a date range and an event type from the address", () => {
