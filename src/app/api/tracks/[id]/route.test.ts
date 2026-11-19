@@ -9,6 +9,7 @@ const mocks = vi.hoisted(() => ({
   loadOne: vi.fn(),
   deleteBlob: vi.fn(),
   audit: vi.fn(),
+  event: vi.fn(),
 }));
 
 vi.mock("@/auth", () => ({ auth: vi.fn(async () => ({ user: { id: mocks.user } })) }));
@@ -24,6 +25,7 @@ vi.mock("@/lib/storage", () => ({
   deleteBlobFile: mocks.deleteBlob,
 }));
 vi.mock("@/lib/adminAudit", () => ({ recordAdminLibraryDelete: mocks.audit }));
+vi.mock("@/lib/telemetryServer", () => ({ recordAuditEvent: mocks.event, requestDeviceId: () => "dev-1" }));
 vi.mock("@/lib/trackUserData", () => ({ saveUserTrackData: mocks.save, loadOneUserTrackData: mocks.loadOne }));
 
 import { DELETE, PATCH } from "./route";
@@ -56,7 +58,7 @@ beforeEach(() => {
   vi.stubEnv("ADMIN_USER_IDS", "u-admin");
   vi.stubEnv("FEEDBACK_ADMIN_USER_IDS", "");
   mocks.user = "u-other";
-  for (const m of [mocks.findUnique, mocks.update, mocks.deleteMany, mocks.save, mocks.loadOne, mocks.deleteBlob, mocks.audit]) m.mockReset();
+  for (const m of [mocks.findUnique, mocks.update, mocks.deleteMany, mocks.save, mocks.loadOne, mocks.deleteBlob, mocks.audit, mocks.event]) m.mockReset();
   mocks.findUnique.mockResolvedValue(song);
   mocks.update.mockImplementation(async ({ data }: { data: object }) => ({ ...song, ...data }));
   mocks.save.mockImplementation(async (_u: string, _t: string, p: object) => p);
@@ -92,6 +94,17 @@ describe("DELETE /api/tracks/[id]: only the admin takes a song out of the shared
     mocks.user = "u-admin";
     await DELETE(new Request("http://x", { method: "DELETE" }), ctx);
     expect(mocks.audit).toHaveBeenCalledWith({ actorId: "u-admin", track: expect.objectContaining({ id: "t1", title: "Song", artist: "Artist", userId: "u-uploader" }) });
+  });
+
+  it("writes a song_removed line in the audit log with the admin's role and device", async () => {
+    mocks.user = "u-admin";
+    await DELETE(new Request("http://x", { method: "DELETE" }), ctx);
+    expect(mocks.event).toHaveBeenCalledWith({ eventType: "song_removed", actorId: "u-admin", deviceId: "dev-1", targetId: "t1", targetLabel: "Artist - Song" });
+  });
+
+  it("writes no audit line when the request is refused", async () => {
+    await DELETE(new Request("http://x", { method: "DELETE" }), ctx);
+    expect(mocks.event).not.toHaveBeenCalled();
   });
 
   it("does not log a deletion that another request already made", async () => {

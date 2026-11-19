@@ -7,6 +7,7 @@ import { loadPlaylist, toPlaylistApiResponse } from "@/lib/playlistApi";
 import { loadUserTrackData } from "@/lib/trackUserData";
 import { apiHandler, notFound, unauthorized } from "@/lib/apiRoute";
 import { cleanText, MAX_NAME_LENGTH } from "@/lib/apiValidation";
+import { recordAuditEvent, requestDeviceId } from "@/lib/telemetryServer";
 
 async function handlePATCH(request: Request, { params }: { params: Promise<{ id: string }> }) {
   const session = await auth();
@@ -24,6 +25,7 @@ async function handlePATCH(request: Request, { params }: { params: Promise<{ id:
 
   await prisma.playlist.update({ where: { id }, data: { name } });
   await recordAdminPlaylistAction({ actorId: session.user.id, action: "playlist.rename", playlist: existing, detail: `${existing.name} -> ${name}` });
+  await recordAuditEvent({ eventType: "playlist_renamed", actorId: session.user.id, deviceId: requestDeviceId(request), targetId: id, targetLabel: `${existing.name} -> ${name}` });
   const playlist = await loadPlaylist(id);
   return NextResponse.json(toPlaylistApiResponse(playlist!, await loadUserTrackData(session.user.id)));
 }
@@ -45,6 +47,7 @@ async function handleDELETE(request: Request, { params }: { params: Promise<{ id
 
   await prisma.playlist.delete({ where: { id } });
   await recordAdminPlaylistAction({ actorId: session.user.id, action: "playlist.delete", playlist: existing });
+  await recordAuditEvent({ eventType: "playlist_deleted", actorId: session.user.id, deviceId: requestDeviceId(request), targetId: id, targetLabel: existing.name });
   return new NextResponse(null, { status: 204 });
 }
 

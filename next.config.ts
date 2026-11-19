@@ -1,12 +1,16 @@
 import type { NextConfig } from "next";
 import { fileURLToPath } from "url";
 import path from "path";
+import { readFileSync } from "node:fs";
 
 const projectRoot = path.dirname(fileURLToPath(import.meta.url));
+const appVersion = (JSON.parse(readFileSync(path.join(projectRoot, "package.json"), "utf-8")) as { version?: string }).version ?? "unknown";
 
 // Runs as a real Next.js server now (Route Handlers, Prisma, auth) — hosted
 // on Vercel at the domain root, so no more static export / basePath.
 const nextConfig: NextConfig = {
+  // The app version the heartbeat reports (components/TelemetryClient.tsx).
+  env: { NEXT_PUBLIC_APP_VERSION: appVersion },
   images: {
     remotePatterns: [
       // YouTube video thumbnails (TrackThumbnail.tsx renders these for imported tracks).

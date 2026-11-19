@@ -7,6 +7,7 @@ import { apiHandler, notFound, unauthorized } from "@/lib/apiRoute";
 import { cleanTags, cleanWaveformPeaks } from "@/lib/apiValidation";
 import { isAdmin } from "@/lib/feedbackAdmin";
 import { recordAdminLibraryDelete } from "@/lib/adminAudit";
+import { recordAuditEvent, requestDeviceId } from "@/lib/telemetryServer";
 import { loadOneUserTrackData, saveUserTrackData } from "@/lib/trackUserData";
 
 /** Any signed-in person can reach any song: the library is shared. (Who may change or delete one is decided per action below.) */
@@ -145,7 +146,10 @@ async function handleDELETE(request: Request, { params }: { params: Promise<{ id
   // click / second tab racing us is a no-op rather than a P2025 error.
   const { count } = await prisma.track.deleteMany({ where: { id } });
   // The admin's deletions are logged (best effort, and only when this request did the delete).
-  if (count > 0) await recordAdminLibraryDelete({ actorId: session.user.id, track: existing });
+  if (count > 0) {
+    await recordAdminLibraryDelete({ actorId: session.user.id, track: existing });
+    await recordAuditEvent({ eventType: "song_removed", actorId: session.user.id, deviceId: requestDeviceId(request), targetId: id, targetLabel: `${existing.artist} - ${existing.title}` });
+  }
 
   // Best-effort: a storage-side failure (already gone, transient network
   // error, etc.) must not make an already-deleted track look undeletable.

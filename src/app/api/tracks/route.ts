@@ -9,6 +9,7 @@ import { loadAllGenreFields, queueNewTracks } from "@/lib/genre/api";
 import { loadUserTrackData } from "@/lib/trackUserData";
 import { uploadLimitResponse } from "@/lib/uploadGuard";
 import { isAdmin } from "@/lib/feedbackAdmin";
+import { recordAuditEvent, recordUpload, requestDeviceId } from "@/lib/telemetryServer";
 
 async function handleGET() {
   const session = await auth();
@@ -34,6 +35,15 @@ async function handleGET() {
 
 function isUniqueViolation(err: unknown): boolean {
   return typeof err === "object" && err !== null && (err as { code?: unknown }).code === "P2002";
+}
+
+/** Which device added the song, and a line in the audit log (both best effort: they never fail the upload). */
+async function noteSongAdded(request: Request, userId: string, track: { id: string; title: string; artist: string }) {
+  const deviceId = requestDeviceId(request);
+  await Promise.all([
+    recordUpload({ userId, deviceId, trackId: track.id, trackTitle: track.title }),
+    recordAuditEvent({ eventType: "song_added", actorId: userId, deviceId, targetId: track.id, targetLabel: `${track.artist} - ${track.title}` }),
+  ]);
 }
 
 async function handlePOST(request: Request) {
@@ -76,6 +86,7 @@ async function handlePOST(request: Request) {
         },
       });
       await queueNewTracks([track.id]); // classify its genres in the background (never fails the upload)
+      await noteSongAdded(request, session.user.id, track);
       return NextResponse.json(toTrackApiResponse(track), { status: 201 });
     } catch (err) {
       await deleteLocalFile(storageKey).catch(() => {}); // don't orphan the file if the DB write fails
@@ -113,6 +124,7 @@ async function handlePOST(request: Request) {
       },
     });
     await queueNewTracks([track.id]);
+    await noteSongAdded(request, session.user.id, track);
     return NextResponse.json(toTrackApiResponse(track), { status: 201 });
   } catch (err) {
     if (isUniqueViolation(err)) return jsonError(409, "That file is already in your library.");

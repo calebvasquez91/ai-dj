@@ -23,6 +23,7 @@ import { Mixer } from "@/components/Mixer";
 import { KeyboardShortcuts } from "@/components/KeyboardShortcuts";
 import { BackgroundAudio } from "@/components/BackgroundAudio";
 import { PlayStatsReporter } from "@/components/PlayStatsReporter";
+import { TelemetryClient } from "@/components/TelemetryClient";
 import { FeedbackPrompt } from "@/components/FeedbackPrompt";
 import { FeedbackOwnerProvider } from "@/components/FeedbackOwnerProvider";
 import { isFeedbackAdmin } from "@/lib/feedbackAdmin";
@@ -37,6 +38,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
       <AppDataLoader />
       <GenreRunner />
       <PlayStatsReporter />
+      <TelemetryClient />
       <TrackGenreSheetHost />
       <CreateWithDjSheet />
       {STEM_FEATURES_ENABLED && <StemAutopilot />}

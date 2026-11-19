@@ -4,7 +4,9 @@ import { Suspense, useCallback, useEffect, useLayoutEffect, useRef, useState } f
 import { useRouter, useSearchParams } from "next/navigation";
 import { useStore } from "@/lib/store";
 import { formatTime, formatTotalDuration } from "@/lib/format";
-import { ConfirmSheet, CoverMosaic, IconButton, Text } from "@/ui";
+import { ConfirmSheet, IconButton, Text } from "@/ui";
+import { PlaylistCover } from "@/components/PlaylistCover";
+import { PlaylistImageControl } from "@/components/PlaylistImageControl";
 import { useIsAdmin } from "@/components/FeedbackOwnerProvider";
 import { confirmDeletePlaylist, confirmRemoveSongFromPlaylist, confirmRenamePlaylist, type ConfirmCopy } from "@/lib/confirmCopy";
 import { PlayIcon } from "@/components/Icons";
@@ -116,7 +118,7 @@ function PlaylistContent() {
     <div className="p-4 sm:p-6 flex flex-col gap-6">
       <div className="flex flex-col gap-4 sm:flex-row sm:items-end">
         <div className="h-40 w-40 shrink-0 sm:h-48 sm:w-48">
-          <CoverMosaic title={playlist.name} items={playlist.tracks.map((t) => ({ title: t.title, src: t.thumbnailUrl }))} />
+          <PlaylistCover playlist={playlist} />
         </div>
         <div className="flex min-w-0 flex-1 flex-col gap-3">
           <Text variant="caption">{playlist.theme === "spooky" ? "Playlist · Spooky Music" : "Playlist"}</Text>
@@ -130,6 +132,7 @@ function PlaylistContent() {
               else setPending({ kind: "rename", from: playlist.name, to: next });
             }}
           />
+          {!playlist.theme && <PlaylistImageControl playlist={playlist} />}
           <Text variant="secondary">
             {playlist.tracks.length} song{playlist.tracks.length === 1 ? "" : "s"}
             {playlist.tracks.length > 0 && ` · ${formatTotalDuration(playlist.tracks.reduce((sum, t) => sum + (t.durationSec || 0), 0))}`}
