@@ -279,7 +279,13 @@ export default async function ActivityPage({ searchParams }: { searchParams: Pro
               <div key={q.kind}>
                 <dt className="text-xs text-muted">{q.kind}</dt>
                 <dd>
-                  {q.waiting} waiting · {q.running} running · <span className={q.failed > 0 ? "text-accent-pink font-semibold" : ""}>{q.failed} failed in the last {FAILED_JOB_WINDOW_DAYS} days</span>
+                  {q.waiting} waiting · {q.running} running ·{" "}
+                  {q.failed == null ? (
+                    <span className="text-muted">failed count not available</span>
+                  ) : (
+                    <span className={q.failed > 0 ? "text-accent-pink font-semibold" : ""}>{q.failed} failed in the last {FAILED_JOB_WINDOW_DAYS} days</span>
+                  )}
+                  {q.earlier > 0 && <span className="text-xs text-muted"> · {q.earlier} earlier</span>}
                 </dd>
               </div>
             ))}

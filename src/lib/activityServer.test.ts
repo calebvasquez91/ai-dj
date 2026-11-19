@@ -157,7 +157,7 @@ describe("loadHealth: the file store is listed once per ten minutes", () => {
     vi.stubEnv("BLOB_READ_WRITE_TOKEN", "token");
     mocks.list.mockResolvedValue({ blobs: [{ size: 1000 }, { size: 500 }], hasMore: false });
     mocks.queryRaw.mockResolvedValue([{ bytes: BigInt(4096) }]);
-    // the grouped rows still hold every status, failed ones included: the failed figure must come from the recent-failure count instead
+    // the grouped rows hold the all-time failed total; the failed figure itself must come from the recent-failure count
     mocks.genreJobGroup.mockResolvedValue([{ status: "queued", _count: { _all: 3 } }, { status: "failed", _count: { _all: 40 } }]);
     mocks.stemJobGroup.mockResolvedValue([{ status: "processing", _count: { _all: 2 } }, { status: "failed", _count: { _all: 2 } }]);
     mocks.genreJobCount.mockResolvedValue(1);
@@ -171,18 +171,43 @@ describe("loadHealth: the file store is listed once per ten minutes", () => {
     expect(r.ok && r.data.storage).toEqual({ usedBytes: 1500, limitBytes: 1024 ** 3 });
     expect(r.ok && r.data.database).toEqual({ usedBytes: 4096, limitBytes: null });
     expect(r.ok && r.data.queues).toEqual([
-      { kind: "Genre classification", waiting: 3, running: 0, failed: 1 },
-      { kind: "Stem separation", waiting: 0, running: 2, failed: 0 }, // two old failures are in the table but outside the window
+      { kind: "Genre classification", waiting: 3, running: 0, failed: 1, earlier: 39 },
+      { kind: "Stem separation", waiting: 0, running: 2, failed: 0, earlier: 2 }, // two old failures are in the table but outside the window
     ]);
     expect(r.ok && r.data.unanalysed).toBe(900);
   });
   it("counts only failures from the last 30 days, by when they failed (else when they were created)", async () => {
     setup();
-    await loadHealth(now);
-    const since = new Date(now - FAILED_JOB_WINDOW_DAYS * 86_400_000);
+    const day = 86_400_000;
+    // a small fake table: the count answers by evaluating the where clause the page sends against these rows
+    const rows = [
+      { status: "failed", completedAt: new Date(now - 2 * day), createdAt: new Date(now - 90 * day) }, // failed recently, created long ago: counts
+      { status: "failed", completedAt: new Date(now - 45 * day), createdAt: new Date(now - 46 * day) }, // failed 45 days ago: history
+      { status: "failed", completedAt: null, createdAt: new Date(now - 5 * day) }, // no finish time, created recently: counts
+      { status: "failed", completedAt: null, createdAt: new Date(now - 60 * day) }, // no finish time, created long ago: history
+      { status: "ready", completedAt: new Date(now - day), createdAt: new Date(now - day) }, // not a failure
+    ];
+    type Clause = { completedAt?: { gte: Date } | null; createdAt?: { gte: Date } };
+    mocks.stemJobCount.mockImplementation(async ({ where }: { where: { status: string; OR: Clause[] } }) =>
+      rows.filter((r) => r.status === where.status && where.OR.some((c) => (c.completedAt === null ? r.completedAt === null : r.completedAt !== null && r.completedAt >= c.completedAt!.gte) && (!c.createdAt || r.createdAt >= c.createdAt.gte))).length
+    );
+    const r = await loadHealth(now);
     expect(FAILED_JOB_WINDOW_DAYS).toBe(30);
-    expect(mocks.stemJobCount).toHaveBeenCalledWith({ where: { status: "failed", OR: [{ completedAt: { gte: since } }, { completedAt: null, createdAt: { gte: since } }] } });
-    expect(mocks.genreJobCount).toHaveBeenCalledWith({ where: { status: "failed", OR: [{ finishedAt: { gte: since } }, { finishedAt: null, createdAt: { gte: since } }] } });
+    expect(r.ok && r.data.queues.find((q) => q.kind === "Stem separation")?.failed).toBe(2);
+  });
+  it("asks the grouped queries only for the statuses it shows", async () => {
+    setup();
+    await loadHealth(now);
+    expect(mocks.genreJobGroup.mock.calls[0][0].where).toEqual({ status: { in: ["queued", "running", "failed"] } });
+    expect(mocks.stemJobGroup.mock.calls[0][0].where).toEqual({ status: { in: ["pending", "processing", "failed"] } });
+  });
+  it("shows the failed figure as unavailable (null), never 0, when its count could not be read", async () => {
+    setup();
+    mocks.stemJobCount.mockRejectedValue(new Error("timeout"));
+    const r = await loadHealth(now);
+    const stem = r.ok && r.data.queues.find((q) => q.kind === "Stem separation");
+    expect(stem).toEqual({ kind: "Stem separation", waiting: 0, running: 2, failed: null, earlier: 0 });
+    expect(r.ok && r.data.queues.find((q) => q.kind === "Genre classification")?.failed).toBe(1); // the other queue is unaffected
   });
   it("does not list the file store again within ten minutes", async () => {
     setup();
