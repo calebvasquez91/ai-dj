@@ -33,6 +33,12 @@ export default async function AdminPage() {
       </div>
       <div className="grid gap-3 sm:grid-cols-2">
         <Card
+          href="/admin/activity"
+          title="Activity"
+          line="Devices, uploads, library changes, system health"
+          detail="Who is on now, which device added what, every library and playlist change (with CSV export), playtime by day and week, and the health of storage and jobs."
+        />
+        <Card
           href="/admin/feedback"
           title="Feedback inbox"
           line={o.feedbackCount == null ? "—" : `${o.feedbackCount.toLocaleString("en-US")} ${o.feedbackCount === 1 ? "message" : "messages"}`}

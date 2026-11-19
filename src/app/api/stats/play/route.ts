@@ -7,6 +7,7 @@ import { NextResponse } from "next/server";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { apiHandler, unauthorized } from "@/lib/apiRoute";
+import { recordPlayDevice, requestDeviceId } from "@/lib/telemetryServer";
 import { DAILY_CAP_SECONDS, fitToBudget, parsePlaySegments, reportBudgetSeconds } from "@/lib/playStats";
 
 /** Reports for the same song and playlist within this long of the previous one are added into the same row. */
@@ -65,7 +66,7 @@ async function handlePOST(request: Request) {
       if (recent) {
         await prisma.playEvent.update({ where: { id: recent.id }, data: { seconds: { increment: s.seconds } } });
       } else {
-        await prisma.playEvent.create({
+        const created = await prisma.playEvent.create({
           data: {
             userId,
             trackId: track.id,
@@ -77,6 +78,7 @@ async function handlePOST(request: Request) {
             seconds: s.seconds,
           },
         });
+        await recordPlayDevice(created.id, requestDeviceId(request));
       }
       recorded++;
     }

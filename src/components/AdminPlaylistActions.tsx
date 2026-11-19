@@ -2,6 +2,8 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
+import { ConfirmSheet } from "@/ui";
+import { confirmDeletePlaylist, confirmRemoveSongFromPlaylist, confirmRenamePlaylist } from "@/lib/confirmCopy";
 
 /**
  * The admin's controls on one playlist (any account's): rename it, delete it. Both go through the same playlist routes the owner
@@ -12,6 +14,8 @@ export function AdminPlaylistActions({ playlistId, name, isSystem }: { playlistI
   const [draft, setDraft] = useState(name);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
+  // Renaming and deleting ask first.
+  const [pending, setPending] = useState<"rename" | "delete" | null>(null);
 
   async function call(url: string, init: RequestInit, done: () => void) {
     setBusy(true);
@@ -39,7 +43,7 @@ export function AdminPlaylistActions({ playlistId, name, isSystem }: { playlistI
           e.preventDefault();
           const next = draft.trim();
           if (!next || next === name) return;
-          void call(`/api/playlists/${playlistId}`, { method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify({ name: next }) }, () => router.refresh());
+          setPending("rename");
         }}
       >
         <label className="sr-only" htmlFor="admin-playlist-name">Playlist name</label>
@@ -57,10 +61,7 @@ export function AdminPlaylistActions({ playlistId, name, isSystem }: { playlistI
           <button
             type="button"
             disabled={busy}
-            onClick={() => {
-              if (!window.confirm(`Delete the playlist "${name}" for good? Its songs stay in the library.`)) return;
-              void call(`/api/playlists/${playlistId}`, { method: "DELETE" }, () => router.push("/admin/playlists"));
-            }}
+            onClick={() => setPending("delete")}
             className="btn-outline !text-xs text-accent-pink"
           >
             Delete playlist
@@ -72,32 +73,56 @@ export function AdminPlaylistActions({ playlistId, name, isSystem }: { playlistI
           {message}
         </p>
       )}
+      <ConfirmSheet
+        busy={busy}
+        copy={pending === "rename" ? confirmRenamePlaylist(name, draft.trim()) : pending === "delete" ? confirmDeletePlaylist(name) : null}
+        onCancel={() => setPending(null)}
+        onConfirm={() => {
+          const action = pending;
+          setPending(null);
+          if (action === "rename") {
+            void call(`/api/playlists/${playlistId}`, { method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify({ name: draft.trim() }) }, () => router.refresh());
+          } else if (action === "delete") {
+            void call(`/api/playlists/${playlistId}`, { method: "DELETE" }, () => router.push("/admin/playlists"));
+          }
+        }}
+      />
     </div>
   );
 }
 
 /** One song's "take out of this playlist" button. The song stays in the library. */
-export function AdminRemoveFromPlaylist({ playlistId, trackId, title }: { playlistId: string; trackId: string; title: string }) {
+export function AdminRemoveFromPlaylist({ playlistId, trackId, title, playlistName }: { playlistId: string; trackId: string; title: string; playlistName: string }) {
   const router = useRouter();
   const [busy, setBusy] = useState(false);
+  const [asking, setAsking] = useState(false);
   return (
-    <button
-      type="button"
-      disabled={busy}
-      aria-label={`Take ${title} out of this playlist`}
-      title="Take out of this playlist (it stays in the library)"
-      onClick={async () => {
-        setBusy(true);
-        try {
-          const res = await fetch(`/api/playlists/${playlistId}/tracks/${trackId}`, { method: "DELETE" });
-          if (res.ok) router.refresh();
-        } finally {
-          setBusy(false);
-        }
-      }}
-      className="btn-icon text-muted hover:text-accent-pink shrink-0"
-    >
-      ✕
-    </button>
+    <>
+      <button
+        type="button"
+        disabled={busy}
+        aria-label={`Take ${title} out of this playlist`}
+        title="Take out of this playlist (it stays in the library)"
+        onClick={() => setAsking(true)}
+        className="btn-icon text-muted hover:text-accent-pink shrink-0"
+      >
+        ✕
+      </button>
+      <ConfirmSheet
+        busy={busy}
+        copy={asking ? confirmRemoveSongFromPlaylist(title, playlistName) : null}
+        onCancel={() => setAsking(false)}
+        onConfirm={async () => {
+          setBusy(true);
+          try {
+            const res = await fetch(`/api/playlists/${playlistId}/tracks/${trackId}`, { method: "DELETE" });
+            if (res.ok) router.refresh();
+          } finally {
+            setBusy(false);
+            setAsking(false);
+          }
+        }}
+      />
+    </>
   );
 }

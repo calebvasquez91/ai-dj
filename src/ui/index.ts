@@ -1,5 +1,6 @@
 export { Button, type ButtonVariant } from "./Button";
 export { Card } from "./Card";
+export { ConfirmSheet } from "./ConfirmSheet";
 export { Carousel } from "./Carousel";
 export { Chip, ChipRow } from "./Chip";
 export { CoverArt } from "./CoverArt";

@@ -6,7 +6,8 @@ import { pinnedFirst } from "@/lib/homeSections";
 import { PlusIcon, SparklesIcon } from "@/components/Icons";
 import { useCurateUi } from "@/lib/curateClient";
 import { SmartPlaylists } from "@/components/SmartPlaylists";
-import { Button, CoverMosaic, MediaCard, Skeleton, Text } from "@/ui";
+import { PlaylistCover } from "@/components/PlaylistCover";
+import { Button, MediaCard, Skeleton, Text } from "@/ui";
 
 export default function PlaylistsPage() {
   const router = useRouter();
@@ -71,7 +72,7 @@ export default function PlaylistsPage() {
               <li key={p.id}>
                 <MediaCard
                   href={`/playlist?id=${p.id}`}
-                  cover={<CoverMosaic title={p.name} items={p.tracks.map((t) => ({ title: t.title, src: t.thumbnailUrl }))} />}
+                  cover={<PlaylistCover playlist={p} />}
                   title={p.name}
                   subtitle={count(p.tracks.length)}
                 />

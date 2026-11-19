@@ -31,6 +31,8 @@ interface TrackBase {
   hotCueOverrides?: Record<number, number>;
   /** User-set free-text tags, e.g. ["halloween","spooky"] — drives the Spooky Music system playlist's auto-membership. Empty/absent means untagged. */
   tags?: string[];
+  /** An instrumental (no vocal): marked by the tag "instrumental" or "karaoke", by "(Instrumental)" in the title, or by the Audio Engineer's instrumentalness score (lib/instrumentalBridge.ts isInstrumentalTrack decides; this only records a decision made once). */
+  isInstrumental?: boolean;
   /** Every genre the track has, by source (src/lib/genreTags.ts resolves them). Absent until classified. */
   genreTags?: GenreTag[];
   genreStatus?: GenreStatus;
@@ -71,6 +73,10 @@ export interface Playlist {
   name: string;
   tracks: Track[];
   createdAt: number;
+  /** The playlist's own picture (an address, or a data address in local development); a playlist without one shows its songs' covers. */
+  imageUrl?: string;
+  /** The holiday theme the playlist plays with (an id from lib/holidayThemes.ts); undefined for none. Never set on a system playlist. */
+  holidayTheme?: string;
   /** Marks a system-curated playlist, e.g. "spooky" for the built-in Spooky Music playlist — undefined for a normal user-made playlist. */
   theme?: string;
   /** ids (a subset of `tracks`) present only because they matched a tag-based auto-membership rule (e.g. the Spooky Music playlist's halloween/spooky tag union) — they have no backing PlaylistTrack row, so "remove from playlist" can't actually remove them; the track's own tags would need to change instead. Undefined for a playlist with no such rule. */

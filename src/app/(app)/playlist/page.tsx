@@ -1,10 +1,15 @@
 "use client";
 
-import { Suspense, useCallback, useEffect, useLayoutEffect, useRef } from "react";
+import { Suspense, useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useStore } from "@/lib/store";
 import { formatTime, formatTotalDuration } from "@/lib/format";
-import { CoverMosaic, IconButton, Text } from "@/ui";
+import { ConfirmSheet, IconButton, Text } from "@/ui";
+import { PlaylistCover } from "@/components/PlaylistCover";
+import { PlaylistImageControl } from "@/components/PlaylistImageControl";
+import { PlaylistHolidayControl } from "@/components/PlaylistHolidayControl";
+import { useIsAdmin } from "@/components/FeedbackOwnerProvider";
+import { confirmDeletePlaylist, confirmRemoveSongFromPlaylist, confirmRenamePlaylist, type ConfirmCopy } from "@/lib/confirmCopy";
 import { PlayIcon } from "@/components/Icons";
 import { TrackThumbnail } from "@/components/TrackThumbnail";
 import { AddMusicBar } from "@/components/AddMusicBar";
@@ -62,6 +67,17 @@ function PlaylistTitleField({
   );
 }
 
+/** The words for whatever is waiting for a yes on this page. */
+function pendingCopy(
+  pending: { kind: "rename"; from: string; to: string } | { kind: "delete" } | { kind: "remove"; trackId: string; title: string } | null,
+  playlistName: string,
+): ConfirmCopy | null {
+  if (!pending) return null;
+  if (pending.kind === "rename") return confirmRenamePlaylist(pending.from, pending.to);
+  if (pending.kind === "delete") return confirmDeletePlaylist(playlistName);
+  return confirmRemoveSongFromPlaylist(pending.title, playlistName);
+}
+
 function PlaylistContent() {
   const id = useSearchParams().get("id") ?? "";
   const router = useRouter();
@@ -80,6 +96,14 @@ function PlaylistContent() {
   const currentTrack = useStore((s) => s.currentTrack);
   const setTrackPlayPreference = useStore((s) => s.setTrackPlayPreference);
   const analyzingTrackIds = useStore((s) => s.analyzingTrackIds);
+  // The do-not-play mark is the admin's alone now; everyone else no longer sees it.
+  const isAdmin = useIsAdmin();
+  // The name as it is being typed (null when it is not being edited): it is only saved once the change is confirmed.
+  const [draftName, setDraftName] = useState<string | null>(null);
+  // The change waiting for a yes: renaming this playlist, deleting it, or taking one song out of it.
+  const [pending, setPending] = useState<
+    { kind: "rename"; from: string; to: string } | { kind: "delete" } | { kind: "remove"; trackId: string; title: string } | null
+  >(null);
 
   if (!playlist) {
     return (
@@ -95,15 +119,22 @@ function PlaylistContent() {
     <div className="p-4 sm:p-6 flex flex-col gap-6">
       <div className="flex flex-col gap-4 sm:flex-row sm:items-end">
         <div className="h-40 w-40 shrink-0 sm:h-48 sm:w-48">
-          <CoverMosaic title={playlist.name} items={playlist.tracks.map((t) => ({ title: t.title, src: t.thumbnailUrl }))} />
+          <PlaylistCover playlist={playlist} />
         </div>
         <div className="flex min-w-0 flex-1 flex-col gap-3">
           <Text variant="caption">{playlist.theme === "spooky" ? "Playlist · Spooky Music" : "Playlist"}</Text>
           <PlaylistTitleField
-            value={playlist.name}
-            onChange={(name) => renamePlaylist(playlist.id, name)}
-            onCommit={() => persistPlaylistName(playlist.id)}
+            value={draftName ?? playlist.name}
+            onChange={setDraftName}
+            onCommit={() => {
+              if (draftName === null) return;
+              const next = draftName.trim();
+              if (!next || next === playlist.name) setDraftName(null);
+              else setPending({ kind: "rename", from: playlist.name, to: next });
+            }}
           />
+          {!playlist.theme && <PlaylistImageControl playlist={playlist} />}
+          {!playlist.theme && <PlaylistHolidayControl playlist={playlist} />}
           <Text variant="secondary">
             {playlist.tracks.length} song{playlist.tracks.length === 1 ? "" : "s"}
             {playlist.tracks.length > 0 && ` · ${formatTotalDuration(playlist.tracks.reduce((sum, t) => sum + (t.durationSec || 0), 0))}`}
@@ -148,10 +179,7 @@ function PlaylistContent() {
             {!playlist.theme && (
               <button
                 type="button"
-                onClick={() => {
-                  removePlaylist(playlist.id);
-                  router.push("/");
-                }}
+                onClick={() => setPending({ kind: "delete" })}
                 className="btn-outline !text-xs hover:!text-accent-pink shrink-0"
               >
                 Delete playlist
@@ -233,6 +261,7 @@ function PlaylistContent() {
                   >
                     ★
                   </button>
+                  {isAdmin && (
                   <button
                     type="button"
                     onClick={() =>
@@ -249,6 +278,7 @@ function PlaylistContent() {
                   >
                     🚫
                   </button>
+                  )}
                   {autoIncluded ? (
                     <span
                       className="text-[10px] text-muted px-1.5 shrink-0"
@@ -278,7 +308,7 @@ function PlaylistContent() {
                       </button>
                       <button
                         type="button"
-                        onClick={() => removeTrackFromPlaylist(playlist.id, track.id)}
+                        onClick={() => setPending({ kind: "remove", trackId: track.id, title: track.title })}
                         className="btn-icon text-muted hover:text-accent-pink"
                         title="Remove from playlist"
                       >
@@ -297,6 +327,28 @@ function PlaylistContent() {
 
       {/* On every playlist, Spooky Music and Same Beat included; pinned to the bottom of the visible page. */}
       <AddMusicBar key={playlist.id} playlist={playlist} />
+
+      <ConfirmSheet
+        copy={pendingCopy(pending, playlist.name)}
+        onCancel={() => {
+          setPending(null);
+          setDraftName(null);
+        }}
+        onConfirm={() => {
+          const action = pending;
+          setPending(null);
+          if (action?.kind === "rename") {
+            renamePlaylist(playlist.id, action.to);
+            persistPlaylistName(playlist.id);
+            setDraftName(null);
+          } else if (action?.kind === "delete") {
+            removePlaylist(playlist.id);
+            router.push("/");
+          } else if (action?.kind === "remove") {
+            removeTrackFromPlaylist(playlist.id, action.trackId);
+          }
+        }}
+      />
     </div>
   );
 }

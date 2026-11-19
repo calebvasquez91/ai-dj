@@ -392,3 +392,73 @@ describe("clampPopupToViewport", () => {
     expect(r.left).toBeGreaterThanOrEqual(0);
   });
 });
+
+describe("typo tolerance (typos, partial words, several words)", () => {
+  const lib = [
+    track("Bohemian Rhapsody", "Queen"),
+    track("Get Lucky", "Daft Punk"),
+    track("One More Time", "Daft Punk"),
+    track("Levitating", "Dua Lipa"),
+    track("Sicko Mode", "Travis Scott"),
+  ];
+
+  it("finds a song despite a typo in a word (a swap, a missing or an extra letter)", () => {
+    expect(titles(searchTracks(lib, "bohemain"))).toEqual(["Bohemian Rhapsody"]); // two letters swapped
+    expect(titles(searchTracks(lib, "levitatng"))).toEqual(["Levitating"]); // a letter missing
+    expect(titles(searchTracks(lib, "rhapsodyy"))).toEqual(["Bohemian Rhapsody"]); // an extra letter
+  });
+
+  it("finds an artist typed with a typo, and a several-word query where one word is off", () => {
+    expect(titles(searchTracks(lib, "dafft punk")).sort()).toEqual(["Get Lucky", "One More Time"]);
+    expect(titles(searchTracks(lib, "travis scot"))).toEqual(["Sicko Mode"]);
+  });
+
+  it("finds a song from part of a word, and from several words in any order", () => {
+    expect(titles(searchTracks(lib, "levit"))).toEqual(["Levitating"]);
+    expect(titles(searchTracks(lib, "punk daft")).sort()).toEqual(["Get Lucky", "One More Time"]);
+    expect(titles(searchTracks(lib, "more time"))).toEqual(["One More Time"]);
+  });
+
+  it("puts a real match ahead of a typo match", () => {
+    const both = [track("Queenie", "Someone"), track("Quean", "Someone Else"), track("Queen Song", "Queen")];
+    const ranked = titles(searchTracks(both, "queen"));
+    expect(ranked.indexOf("Queen Song")).toBeLessThan(ranked.indexOf("Quean"));
+  });
+
+  it("does not guess at short words, so a short query is not flooded with look-alikes", () => {
+    expect(titles(searchTracks([track("Cat", "a"), track("Cut", "b"), track("Cot", "c")], "cat"))).toEqual(["Cat"]);
+  });
+
+  it("only adds typo matches when a query finds few songs", () => {
+    const many = Array.from({ length: 8 }, (_, i) => track(`Moon ${i}`, "a"));
+    many.push(track("Mood", "b"));
+    expect(titles(searchTracks(many, "moon"))).not.toContain("Mood");
+  });
+});
+
+describe("what a song is searched by", () => {
+  const rap = { ...track("Plain Title", "Some Artist"), genre: "Hip-Hop", subgenres: ["Trap"], moods: ["late-night"], year: 1994 } as Track;
+  const other = track("Other", "Else");
+
+  it("matches the genre, a subgenre, a mood and the year, below the title and artist", () => {
+    expect(titles(searchTracks([rap, other], "hip-hop"))).toEqual(["Plain Title"]);
+    expect(titles(searchTracks([rap, other], "trap"))).toEqual(["Plain Title"]);
+    expect(titles(searchTracks([rap, other], "late-night"))).toEqual(["Plain Title"]);
+    expect(titles(searchTracks([rap, other], "1994"))).toEqual(["Plain Title"]);
+    const named = track("Trap House", "x");
+    expect(titles(searchTracks([rap, named], "trap"))[0]).toBe("Trap House"); // the title beats a subgenre
+  });
+});
+
+describe("suggestKeywords keeps the song keywords between calls", () => {
+  it("does not let a playlist or FX name from one call leak into the next, or change the counts of the cached song keywords", () => {
+    const tracks = [track("Daft Song", "Daft Punk"), track("Other", "Daft Punk"), track("Daughter Song", "Someone")];
+    const withList = suggestKeywords({ tracks, playlists: [playlist("Dawn Patrol"), playlist("Daft Punk")], fx: [] }, "da");
+    expect(withList).toContain("Dawn Patrol");
+    const without = suggestKeywords({ tracks, playlists: [], fx: [] }, "da");
+    expect(without).not.toContain("Dawn Patrol");
+    // Daft Punk is on two songs (and one playlist in the first call): it still ranks first, and the second call is not skewed by the first
+    expect(without[0]).toBe("Daft Punk");
+    expect(suggestKeywords({ tracks, playlists: [], fx: [] }, "da")).toEqual(without);
+  });
+});

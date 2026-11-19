@@ -41,6 +41,8 @@ import type { SongSyncStatus } from "@/lib/songSync";
 import type { StemJobState } from "@/lib/stemAutopilot";
 import type { StemCounts } from "@/lib/stemStatus";
 import { judgeStemCandidate } from "@/lib/stemPlanner";
+import { SEED_RADIO_ENABLED } from "@/lib/featureFlags";
+import { RADIO_BATCH, isLoneSongPlay, nextRadioBatch, radioNeedsMore, type RadioFacts } from "@/lib/radio";
 import { VOICE_CUT_DEFAULTS, loadVoiceCutSettings, saveVoiceCutSettings, type VoiceCutSettings } from "@/lib/voiceCutSettings";
 import type { VoiceMap } from "@/lib/voiceMap";
 
@@ -115,10 +117,29 @@ interface ShuffleSession {
   unplayedIds: string[];
 }
 
+/** A running seed radio (lib/radio.ts): the song it grew from, what has played, and the artists Last.fm calls similar. Null whenever the queue is not a radio. */
+export interface RadioSession {
+  seedId: string;
+  playedIds: string[];
+  similarArtists: string[];
+}
+
+/** Said to the person when a radio could not find enough that goes with its seed: the queue is left short rather than padded with weak matches. */
+export interface RadioNotice {
+  seedId: string;
+  seedArtist: string;
+  /** Artists worth looking for (metadata only; nothing here adds or fetches any audio). */
+  discover: string[];
+}
+
 interface PlayerState {
   queue: Track[];
   history: Track[];
   shuffleSession: ShuffleSession | null;
+  radioSession: RadioSession | null;
+  radioNotice: RadioNotice | null;
+  /** Starts a radio from a song: it plays, and songs that go with it queue behind it and keep coming. Does nothing while SEED_RADIO_ENABLED is off. */
+  startRadio: (seed: Track) => void;
   /** The previous shuffle session's opening batch ids — nudges a fresh session's very first pick away from repeating the same start, without hard-excluding it. */
   recentShuffleOpeningIds: string[];
   /** id of the track requestAiNextPick last moved to the front of the queue — null whenever no AI pick is active (shuffle off, or the pick hasn't resolved yet). Drives the "AI Pick" badge in QueuePanel. */
@@ -430,11 +451,61 @@ interface PlayerState {
  * in reverse), and every caller that adds several tracks at once (an upload, a bulk select) would need its own workaround.
  */
 const playlistAddQueues = new Map<string, Promise<unknown>>();
+
+/** Set while startRadio puts its own seed on, so that play does not start a second radio. */
+const radioStartGuard = { on: false };
+
+/** What the radio knows about a song besides its tags, from its analysis when it has one. */
+function radioFactsOf(analysis: Record<string, TrackAnalysis>) {
+  return (t: Track): RadioFacts => {
+    const a = analysis[t.id];
+    return { bpm: a?.bpm ?? (t.source === "local" ? t.bpm ?? null : null), camelot: a?.camelotKey ?? null, energy: a ? meanEnergy(a.waveformPeaks) : null };
+  };
+}
+
+/** Artists Last.fm calls similar to this one, from the server (cached there). Best effort: nothing comes back quickly or at all, and the radio just goes without. */
+async function fetchSimilarArtists(artist: string): Promise<string[]> {
+  try {
+    const res = await Promise.race([
+      fetch(`/api/radio/similar?artist=${encodeURIComponent(artist)}`),
+      new Promise<null>((resolve) => setTimeout(() => resolve(null), 1500)),
+    ]);
+    if (!res || !res.ok) return [];
+    const body = (await res.json()) as { artists?: unknown };
+    return Array.isArray(body.artists) ? body.artists.filter((a): a is string => typeof a === "string") : [];
+  } catch {
+    return [];
+  }
+}
+
+async function runRadio(seed: Track, get: () => PlayerState, set: (partial: Partial<PlayerState>) => void): Promise<void> {
+  // Put the seed on first (without starting a second radio), then queue what goes with it.
+  if (get().currentTrack?.id !== seed.id) {
+    radioStartGuard.on = true;
+    try {
+      get().playTrackList([seed], 0);
+    } finally {
+      radioStartGuard.on = false;
+    }
+  }
+  const similarArtists = await fetchSimilarArtists(seed.artist);
+  const s = get();
+  if (s.currentTrack?.id !== seed.id) return; // the person moved on while the artists were being looked up
+  const { tracks, enough } = nextRadioBatch(seed, s.localLibrary, { factsOf: radioFactsOf(s.trackAnalysis), similarArtists, exclude: new Set([seed.id]) }, [seed], RADIO_BATCH);
+  set({
+    queue: tracks,
+    radioSession: { seedId: seed.id, playedIds: [], similarArtists },
+    radioNotice: enough ? null : { seedId: seed.id, seedArtist: seed.artist, discover: similarArtists.slice(0, 5) },
+    shuffleSession: null,
+  });
+}
 export const useStore = create<PlayerState>()(
   (set, get) => ({
       queue: [],
       history: [],
       shuffleSession: null,
+      radioSession: null,
+      radioNotice: null,
       recentShuffleOpeningIds: [],
       aiNextPickTrackId: null,
       aiNextPickTransitionNote: null,
@@ -551,6 +622,8 @@ export const useStore = create<PlayerState>()(
           // manual click path already goes through, so nothing else needs
           // to know about shuffle mode to correctly leave it.
           shuffleSession: null,
+          radioSession: null,
+          radioNotice: null,
           aiNextPickTrackId: null,
           aiNextPickTransitionNote: null,
           aiNextPickRecommendedCrossfadeSec: null,
@@ -565,6 +638,13 @@ export const useStore = create<PlayerState>()(
           activePlaylistTheme: sourcePlaylistTheme,
           activePlaylistId: sourcePlaylistId,
         });
+        // One song played on its own, from no playlist or list: the DJ keeps going with songs that go with it (seed radio, when switched on).
+        if (SEED_RADIO_ENABLED && !radioStartGuard.on && isLoneSongPlay(tracks, sourcePlaylistId) && tracks[startIndex]) get().startRadio(tracks[startIndex]);
+      },
+
+      startRadio: (seed) => {
+        if (!SEED_RADIO_ENABLED) return;
+        void runRadio(seed, get, set);
       },
 
       startShuffle: (tracks, sourcePlaylistTheme = null, sourcePlaylistId = null) => {
@@ -1067,6 +1147,8 @@ export const useStore = create<PlayerState>()(
             currentTimeSec: 0,
             history: nextHistory,
             shuffleSession: null,
+            radioSession: null,
+            radioNotice: null,
             // Nothing left to play, so nothing left to theme — otherwise the Halloween backdrop, the mascot's costume and the ambient layer outlive the playlist.
             activePlaylistTheme: null,
             activePlaylistId: null,
@@ -1096,12 +1178,26 @@ export const useStore = create<PlayerState>()(
           nextSession = { ...shuffleSession, unplayedIds };
         }
 
+        // A radio keeps at least ten songs queued: when it runs below, add the next best matches (never a repeat, spaced by artist).
+        let nextRadio = get().radioSession;
+        if (SEED_RADIO_ENABLED && nextRadio) {
+          nextRadio = { ...nextRadio, playedIds: [...nextRadio.playedIds, ...(currentTrack ? [currentTrack.id] : [])] };
+          if (radioNeedsMore(rest.length)) {
+            const s = get();
+            const seed = s.localLibrary.find((t) => t.id === nextRadio!.seedId) ?? nextTrack;
+            const exclude = new Set([...nextRadio.playedIds, nextTrack.id, ...rest.map((t) => t.id)]);
+            const { tracks: more } = nextRadioBatch(seed, s.localLibrary, { factsOf: radioFactsOf(s.trackAnalysis), similarArtists: nextRadio.similarArtists, exclude }, [nextTrack, ...rest], RADIO_BATCH);
+            extendedQueue = [...extendedQueue, ...more];
+          }
+        }
+
         set({
           currentTrack: nextTrack,
           queue: extendedQueue,
           history: nextHistory,
           currentTimeSec: 0,
           shuffleSession: nextSession,
+          ...(nextRadio !== get().radioSession ? { radioSession: nextRadio } : {}),
         });
       },
 

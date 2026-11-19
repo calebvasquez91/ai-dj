@@ -6,6 +6,8 @@ import { toTrackApiResponse } from "@/lib/trackApi";
 import { apiHandler, notFound, unauthorized } from "@/lib/apiRoute";
 import { cleanTags, cleanWaveformPeaks } from "@/lib/apiValidation";
 import { isAdmin } from "@/lib/feedbackAdmin";
+import { recordAdminLibraryDelete } from "@/lib/adminAudit";
+import { recordAuditEvent, requestDeviceId } from "@/lib/telemetryServer";
 import { loadOneUserTrackData, saveUserTrackData } from "@/lib/trackUserData";
 
 /** Any signed-in person can reach any song: the library is shared. (Who may change or delete one is decided per action below.) */
@@ -35,6 +37,10 @@ async function handlePATCH(request: Request, { params }: { params: Promise<{ id:
   const data: Record<string, unknown> = {};
   // Each person's own: their must / do-not-play mark and hot cues live in TrackUserData, not on the shared song.
   const mine: { playPreference?: "must" | "do-not" | null; hotCueOverridesJson?: string | null } = {};
+  if (body.playPreference === "do-not" && !isAdmin(session.user.id)) {
+    // Do-not-play is the admin's alone: the button is not shown to anyone else, and the server says no too.
+    return forbidden();
+  }
   if (body.playPreference === "must" || body.playPreference === "do-not" || body.playPreference === null) {
     mine.playPreference = body.playPreference;
   }
@@ -138,7 +144,12 @@ async function handleDELETE(request: Request, { params }: { params: Promise<{ id
   // fully playable (nothing was removed); the other order left a "ghost"
   // track whose audio was already gone. deleteMany (not delete) so a double
   // click / second tab racing us is a no-op rather than a P2025 error.
-  await prisma.track.deleteMany({ where: { id } });
+  const { count } = await prisma.track.deleteMany({ where: { id } });
+  // The admin's deletions are logged (best effort, and only when this request did the delete).
+  if (count > 0) {
+    await recordAdminLibraryDelete({ actorId: session.user.id, track: existing });
+    await recordAuditEvent({ eventType: "song_removed", actorId: session.user.id, deviceId: requestDeviceId(request), targetId: id, targetLabel: `${existing.artist} - ${existing.title}` });
+  }
 
   // Best-effort: a storage-side failure (already gone, transient network
   // error, etc.) must not make an already-deleted track look undeletable.

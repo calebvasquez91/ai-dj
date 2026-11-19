@@ -3,6 +3,7 @@
 import { prisma } from "@/lib/prisma";
 
 export type AdminPlaylistAction = "playlist.rename" | "playlist.delete" | "playlist.add-song" | "playlist.remove-song" | "playlist.reorder";
+export type AdminLibraryAction = "library.delete-song";
 
 /** Records the change when `actorId` is not the playlist's owner (the admin working on their own playlists is not worth a line). */
 export async function recordAdminPlaylistAction(args: {
@@ -28,5 +29,32 @@ export async function recordAdminPlaylistAction(args: {
     });
   } catch (err) {
     console.warn("Could not log an admin change to a playlist (has prisma/admin-actions.sql been run?):", err);
+  }
+}
+
+/**
+ * Records that the admin deleted a song from the music library (for every account, for good). Always recorded, whoever added the song.
+ * The log's playlist columns hold the song instead: playlistName is "Artist - Title", ownerId/ownerEmail are the account that added it.
+ */
+export async function recordAdminLibraryDelete(args: {
+  actorId: string;
+  track: { id: string; title: string; artist: string; userId: string };
+}): Promise<void> {
+  const { actorId, track } = args;
+  try {
+    const owner = await prisma.user.findUnique({ where: { id: track.userId }, select: { email: true } });
+    await prisma.adminAction.create({
+      data: {
+        adminId: actorId,
+        action: "library.delete-song" satisfies AdminLibraryAction,
+        playlistId: null,
+        playlistName: `${track.artist} - ${track.title}`.slice(0, 300),
+        ownerId: track.userId,
+        ownerEmail: owner?.email ?? null,
+        detail: `track ${track.id}`,
+      },
+    });
+  } catch (err) {
+    console.warn("Could not log a song deleted from the library (has prisma/admin-actions.sql been run?):", err);
   }
 }

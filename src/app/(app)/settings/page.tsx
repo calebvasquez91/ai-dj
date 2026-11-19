@@ -1,5 +1,7 @@
 "use client";
 
+import Link from "next/link";
+import { DjMoveSettingsSection } from "@/components/DjMoveSettingsSection";
 import { useSession } from "next-auth/react";
 import { THEME_PREFERENCES, useTheme, type ThemePreference } from "@/lib/theme";
 
@@ -48,6 +50,8 @@ export default function SettingsPage() {
         <p className="text-sm text-muted">{HINT[preference]}</p>
       </section>
 
+      <DjMoveSettingsSection />
+
       {accountId && (
         <section className="flex flex-col gap-2" aria-labelledby="account-heading">
           <h2 id="account-heading" className="text-sm font-semibold text-muted">
@@ -59,6 +63,10 @@ export default function SettingsPage() {
           <code className="block w-fit max-w-full select-all break-all rounded-lg bg-surface-hover px-3 py-2 text-xs">{accountId}</code>
         </section>
       )}
+
+      <p className="text-sm text-muted">
+        <Link href="/about" className="text-accent underline">About, and photo credits</Link>
+      </p>
     </div>
   );
 }

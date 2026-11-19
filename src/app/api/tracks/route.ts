@@ -8,6 +8,8 @@ import { cleanText, isAcceptableStorageUrl, isValidDuration, normalizeAudioMime 
 import { loadAllGenreFields, queueNewTracks } from "@/lib/genre/api";
 import { loadUserTrackData } from "@/lib/trackUserData";
 import { uploadLimitResponse } from "@/lib/uploadGuard";
+import { isAdmin } from "@/lib/feedbackAdmin";
+import { recordAuditEvent, recordUpload, requestDeviceId } from "@/lib/telemetryServer";
 
 async function handleGET() {
   const session = await auth();
@@ -21,11 +23,27 @@ async function handleGET() {
     loadUserTrackData(session.user.id),
     loadAllGenreFields(),
   ]);
-  return NextResponse.json(tracks.map((t) => ({ ...toTrackApiResponse(t, userData.get(t.id)), ...(genres.get(t.id) ?? {}) })));
+  // The do-not-play mark is the admin's alone now. A mark an account made before that is not applied for them (shuffle, Home and the
+  // curators all read it from here), and it comes back if that account is ever the admin.
+  const admin = isAdmin(session.user.id);
+  const mineFor = (id: string) => {
+    const data = userData.get(id);
+    return !admin && data?.playPreference === "do-not" ? { ...data, playPreference: null } : data;
+  };
+  return NextResponse.json(tracks.map((t) => ({ ...toTrackApiResponse(t, mineFor(t.id)), ...(genres.get(t.id) ?? {}) })));
 }
 
 function isUniqueViolation(err: unknown): boolean {
   return typeof err === "object" && err !== null && (err as { code?: unknown }).code === "P2002";
+}
+
+/** Which device added the song, and a line in the audit log (both best effort: they never fail the upload). */
+async function noteSongAdded(request: Request, userId: string, track: { id: string; title: string; artist: string }) {
+  const deviceId = requestDeviceId(request);
+  await Promise.all([
+    recordUpload({ userId, deviceId, trackId: track.id, trackTitle: track.title }),
+    recordAuditEvent({ eventType: "song_added", actorId: userId, deviceId, targetId: track.id, targetLabel: `${track.artist} - ${track.title}` }),
+  ]);
 }
 
 async function handlePOST(request: Request) {
@@ -68,6 +86,7 @@ async function handlePOST(request: Request) {
         },
       });
       await queueNewTracks([track.id]); // classify its genres in the background (never fails the upload)
+      await noteSongAdded(request, session.user.id, track);
       return NextResponse.json(toTrackApiResponse(track), { status: 201 });
     } catch (err) {
       await deleteLocalFile(storageKey).catch(() => {}); // don't orphan the file if the DB write fails
@@ -105,6 +124,7 @@ async function handlePOST(request: Request) {
       },
     });
     await queueNewTracks([track.id]);
+    await noteSongAdded(request, session.user.id, track);
     return NextResponse.json(toTrackApiResponse(track), { status: 201 });
   } catch (err) {
     if (isUniqueViolation(err)) return jsonError(409, "That file is already in your library.");

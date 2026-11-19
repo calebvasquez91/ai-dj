@@ -13,7 +13,7 @@ export default function PrivacyPage() {
         <div className="flex flex-col gap-2">
           <span className="text-2xl wordmark">Que DJ</span>
           <h1 className="text-2xl heading">Privacy Policy</h1>
-          <p className="text-xs text-muted">Last updated November 18, 2026</p>
+          <p className="text-xs text-muted">Last updated November 19, 2026</p>
         </div>
 
         <section className="flex flex-col gap-2">
@@ -76,6 +76,24 @@ export default function PrivacyPage() {
             seconds, about every 30 seconds. The administrator uses this to see how the app is being
             used: hours played per account, per genre, per playlist and per song. It is not shared
             with anyone else, and it is deleted with your account.
+          </p>
+        </section>
+
+        <section className="flex flex-col gap-2">
+          <h2 className="text-lg font-semibold text-accent-purple">Device and activity data</h2>
+          <p className="text-sm">
+            Each browser that opens the app gets a random, anonymous device ID, kept in a cookie for
+            two years. While the app is open and showing, it tells the server about every 30 seconds
+            that the device is active, with the device&apos;s ID, its type of system (for example
+            Windows or iOS), and the app version. The device ID is also kept with the songs played
+            and uploaded from that device. The app keeps a log of changes to the library and to
+            playlists: a song added or removed, a playlist created, renamed or deleted, and a
+            playlist image added or removed, with whether an administrator or another account did it
+            and from which device.
+          </p>
+          <p className="text-sm">
+            The device ID has no name or email in it. The administrator uses all of this to see which
+            devices are in use and how the app is used, and no one else can read it.
           </p>
         </section>
 

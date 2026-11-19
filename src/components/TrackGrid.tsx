@@ -8,6 +8,9 @@ import { AddToPlaylistButton } from "@/components/AddToPlaylistButton";
 import { useIsAdmin } from "@/components/FeedbackOwnerProvider";
 import { LikeButton } from "@/components/LikeButton";
 import { SeparateStemsButton } from "@/components/SeparateStemsButton";
+import { SEED_RADIO_ENABLED, SHOW_STEM_BUTTON_ON_SONGS } from "@/lib/featureFlags";
+import { confirmDeleteFromLibrary } from "@/lib/confirmCopy";
+import { ConfirmSheet } from "@/ui";
 import { GenreBadge } from "@/components/GenreBadge";
 import { TrackThumbnail } from "@/components/TrackThumbnail";
 import { CloseIcon, NoEntryIcon, PauseIcon, PlayIcon, StarIcon } from "@/components/Icons";
@@ -98,8 +101,10 @@ const TrackCard = memo(function TrackCard({
   onRemove?: (trackId: string) => void;
 }) {
   const setTrackPlayPreference = useStore((s) => s.setTrackPlayPreference);
+  const startRadio = useStore((s) => s.startRadio);
   const setTrackTags = useStore((s) => s.setTrackTags);
   const [editingTags, setEditingTags] = useState(false);
+  const [confirmingDelete, setConfirmingDelete] = useState(false);
   // Tags are part of the shared song, so only the admin edits them.
   const isAdmin = useIsAdmin();
   const [tagsDraft, setTagsDraft] = useState("");
@@ -183,6 +188,7 @@ const TrackCard = memo(function TrackCard({
           >
             <StarIcon size={14} filled={track.playPreference === "must"} />
           </button>
+          {isAdmin && (
           <button
             type="button"
             onClick={(e) => {
@@ -200,6 +206,7 @@ const TrackCard = memo(function TrackCard({
           >
             <NoEntryIcon size={14} />
           </button>
+          )}
           {isAdmin && (
             <button
               type="button"
@@ -216,15 +223,29 @@ const TrackCard = memo(function TrackCard({
               #
             </button>
           )}
+          {SEED_RADIO_ENABLED && (
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                startRadio(track);
+              }}
+              className="btn-icon text-muted hover:text-accent-purple text-[11px] font-semibold"
+              title="Start radio: songs that go with this one"
+              aria-label={`Start radio from ${track.title}`}
+            >
+              Radio
+            </button>
+          )}
           <AddToPlaylistButton track={track} />
-          <SeparateStemsButton track={track} />
+          {SHOW_STEM_BUTTON_ON_SONGS && <SeparateStemsButton track={track} />}
           {onRemove && (
             <button
               type="button"
               onClick={(e) => {
                 e.stopPropagation();
-                // Admin only, and for good: it takes the song out of the app for every account.
-                if (window.confirm(`Delete "${track.title}" from the music library for everyone? This can't be undone.`)) onRemove(track.id);
+                // Admin only, and for good: it takes the song out of the app for every account, so it asks first.
+                setConfirmingDelete(true);
               }}
               className="btn-icon text-muted hover:text-accent-pink ml-auto"
               title="Delete from the library (admin)"
@@ -258,6 +279,17 @@ const TrackCard = memo(function TrackCard({
           className="mt-1 w-full text-[10px] rounded bg-surface-hover border border-border/10 px-1.5 py-1 outline-none"
         />
       )}
+      {/* The sheet is portaled to the page, but React still bubbles its clicks and keys up through this card (which plays the song). */}
+      <div onClick={(e) => e.stopPropagation()} onKeyDown={(e) => e.stopPropagation()}>
+        <ConfirmSheet
+          copy={confirmingDelete ? confirmDeleteFromLibrary(track.title) : null}
+          onCancel={() => setConfirmingDelete(false)}
+          onConfirm={() => {
+            setConfirmingDelete(false);
+            onRemove?.(track.id);
+          }}
+        />
+      </div>
     </div>
   );
 });

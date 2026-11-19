@@ -1,10 +1,15 @@
 "use client";
 
+import { useState } from "react";
 import { useStore } from "@/lib/store";
 import { formatTime, formatRelativeTime, isRecentlyAdded } from "@/lib/format";
 import { useNow } from "@/lib/useNow";
 import { AddToPlaylistButton } from "@/components/AddToPlaylistButton";
 import { SeparateStemsButton } from "@/components/SeparateStemsButton";
+import { useIsAdmin } from "@/components/FeedbackOwnerProvider";
+import { SEED_RADIO_ENABLED, SHOW_STEM_BUTTON_ON_SONGS } from "@/lib/featureFlags";
+import { confirmDeleteFromLibrary } from "@/lib/confirmCopy";
+import { ConfirmSheet } from "@/ui";
 import { GenreBadge } from "@/components/GenreBadge";
 import { useGenreClient } from "@/lib/genreClient";
 import { TrackThumbnail } from "@/components/TrackThumbnail";
@@ -24,6 +29,7 @@ export function TrackList({
   onToggleSelect?: (trackId: string) => void;
 }) {
   const playTrackList = useStore((s) => s.playTrackList);
+  const startRadio = useStore((s) => s.startRadio);
   const currentTrack = useStore((s) => s.currentTrack);
   const isPlaying = useStore((s) => s.isPlaying);
   const togglePlay = useStore((s) => s.togglePlay);
@@ -31,6 +37,9 @@ export function TrackList({
   const reclassify = useGenreClient((s) => s.reclassify);
   const now = useNow();
   const selectMode = Boolean(onToggleSelect);
+  const isAdmin = useIsAdmin();
+  // The song the admin is about to delete from the library (asks first: it goes for everyone, for good).
+  const [deleting, setDeleting] = useState<Track | null>(null);
 
   return (
     <div className="flex flex-col gap-1">
@@ -124,6 +133,7 @@ export function TrackList({
               >
                 <StarIcon size={14} filled={track.playPreference === "must"} />
               </button>
+              {isAdmin && (
               <button
                 type="button"
                 onClick={(e) => {
@@ -143,6 +153,7 @@ export function TrackList({
               >
                 <NoEntryIcon size={14} />
               </button>
+              )}
               <button
                 type="button"
                 onClick={(e) => {
@@ -155,14 +166,28 @@ export function TrackList({
               >
                 <SparklesIcon size={14} />
               </button>
+              {SEED_RADIO_ENABLED && (
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    startRadio(track);
+                  }}
+                  className="btn-icon text-muted hover:text-accent-purple text-[11px] font-semibold"
+                  title="Start radio: songs that go with this one"
+                  aria-label={`Start radio from ${track.title}`}
+                >
+                  Radio
+                </button>
+              )}
               <AddToPlaylistButton track={track} />
-              <SeparateStemsButton track={track} />
+              {SHOW_STEM_BUTTON_ON_SONGS && <SeparateStemsButton track={track} />}
               {onRemove && (
                 <button
                   type="button"
                   onClick={(e) => {
                     e.stopPropagation();
-                    onRemove(track.id);
+                    setDeleting(track);
                   }}
                   className="btn-icon text-muted hover:text-accent-pink opacity-100 md:opacity-0 md:group-hover:opacity-100 focus:opacity-100 transition-opacity"
                   title="Remove from library"
@@ -175,6 +200,15 @@ export function TrackList({
         </div>
         );
       })}
+      <ConfirmSheet
+        copy={deleting ? confirmDeleteFromLibrary(deleting.title) : null}
+        onCancel={() => setDeleting(null)}
+        onConfirm={() => {
+          const id = deleting?.id;
+          setDeleting(null);
+          if (id) onRemove?.(id);
+        }}
+      />
     </div>
   );
 }

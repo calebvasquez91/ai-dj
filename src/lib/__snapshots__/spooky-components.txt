@@ -1,0 +1,14 @@
+HalloweenLayers.tsx
+#ff8a3d
+spooky
+
+SpookyBackdrop.tsx
+#bfe9ff
+#d9b8ff
+#ffe9a8
+#fff3d6
+#ffffff
+spooky
+spooky-sparkle
+spooky-sparkles
+spooky-sparkles-page

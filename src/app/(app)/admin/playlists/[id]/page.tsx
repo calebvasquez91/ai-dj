@@ -74,7 +74,7 @@ export default async function AdminPlaylistPage({ params }: { params: Promise<{ 
                   <span className="text-muted"> · {track.artist}</span>
                 </span>
                 <span className="shrink-0 text-xs text-muted">{clock(track.durationSec)}</span>
-                <AdminRemoveFromPlaylist playlistId={playlist.id} trackId={track.id} title={track.title} />
+                <AdminRemoveFromPlaylist playlistId={playlist.id} trackId={track.id} title={track.title} playlistName={playlist.name} />
               </li>
             ))}
           </ol>

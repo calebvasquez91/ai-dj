@@ -392,3 +392,88 @@ model AdminAction {
 
   @@index([createdAt])
 }
+
+// ---- Telemetry, audit and playlist images (prisma/telemetry.sql). All new tables, none touches an existing one, so the app keeps working
+// ---- (and every call here is best effort) until the SQL has been run.
+
+/// One install of the app, told apart by an anonymous id the browser makes for itself (a cookie). No name, no email: only the platform, the
+/// OS and the app version, and when it was first and last seen. The heartbeat (every 30 seconds while the app is open) keeps lastSeenAt fresh.
+model Device {
+  id          String   @id
+  /// The account that last used it (an id only; the account can be deleted without this table caring).
+  lastUserId  String?
+  platform    String   @default("web")
+  os          String   @default("unknown")
+  appVersion  String   @default("unknown")
+  firstSeenAt DateTime @default(now())
+  lastSeenAt  DateTime @default(now())
+
+  @@index([lastSeenAt])
+}
+
+/// One stretch of the app being open on a device: it starts at the first heartbeat and lastBeatAt moves forward with each one, so the length of
+/// a session is lastBeatAt - startedAt.
+model AppSession {
+  id         String   @id
+  deviceId   String
+  userId     String?
+  startedAt  DateTime @default(now())
+  lastBeatAt DateTime @default(now())
+
+  @@index([deviceId, lastBeatAt])
+  @@index([startedAt])
+}
+
+/// A line for each change to the library or a playlist: who (role), from which device, and what. Titles and names are copied in so the line still reads after the thing is gone.
+model AuditEvent {
+  id          String   @id @default(cuid())
+  /// "song_added" | "song_removed" | "playlist_created" | "playlist_renamed" | "playlist_deleted" | "image_added" | "image_removed"
+  eventType   String
+  /// "user" | "admin"
+  actorRole   String
+  actorId     String?
+  deviceId    String?
+  targetId    String?
+  targetLabel String?
+  createdAt   DateTime @default(now())
+
+  @@index([createdAt])
+  @@index([eventType, createdAt])
+}
+
+/// Which device uploaded which song, and when.
+model UploadRecord {
+  id         String   @id @default(cuid())
+  deviceId   String?
+  userId     String
+  trackId    String?
+  trackTitle String
+  createdAt  DateTime @default(now())
+
+  @@index([createdAt])
+  @@index([deviceId])
+}
+
+/// The device a listening row (PlayEvent) was played on, kept beside it so PlayEvent itself is not changed.
+model PlayEventDevice {
+  playEventId String @id
+  deviceId    String
+
+  @@index([deviceId])
+}
+
+/// A playlist's own picture (a playlist without a row shows its song covers). Kept beside Playlist so Playlist itself is not changed.
+model PlaylistImage {
+  playlistId String   @id
+  url        String
+  updatedAt  DateTime @default(now()) @updatedAt
+}
+
+/// A playlist's holiday theme (waveform colours, accent tint and light particles while it plays; lib/holidayThemes.ts). Kept beside Playlist so
+/// Playlist itself is not changed (prisma/holiday-themes.sql). A playlist without a row has none.
+model PlaylistHoliday {
+  playlistId String   @id
+  /// One of the ten holiday ids in lib/holidayThemes.ts - enforced in app code, not a DB enum.
+  holiday    String
+  updatedAt  DateTime @default(now()) @updatedAt
+}

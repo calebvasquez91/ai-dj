@@ -23,6 +23,9 @@ import { SongSyncPanel } from "@/components/SongSyncPanel";
 import { SyncTestPanel } from "@/components/SyncTestPanel";
 import { describeSongSyncPlanLine, planSongSync, songSyncMixOutSec } from "@/lib/songSync";
 import { StemsPanel } from "@/components/StemsPanel";
+import { useWaveformColors } from "@/components/useWaveformColors";
+import { DjMovesReadout } from "@/components/DjMovesReadout";
+import type { WaveformColors } from "@/lib/waveformColors";
 import { SONG_SYNC_ENABLED, STEM_FEATURES_ENABLED, SYNC_TEST_ENABLED } from "@/lib/featureFlags";
 import { voiceCutoffSec } from "@/lib/voiceMap";
 import { EnergyGraph } from "@/components/EnergyGraph";
@@ -46,10 +49,13 @@ function Waveform({
   progressRatio,
   markerRatio,
   spooky = false,
+  colors,
 }: {
   peaks: number[];
   progressRatio?: number;
   markerRatio?: number;
+  /** The played bars' colours (lib/waveformColors.ts): the app's accent tokens, a cover's colours, or a holiday theme's. Not used while spooky. */
+  colors?: WaveformColors;
   /** Halloween waveform theme (spec #10) — true while the Spooky Music playlist is active (store.activePlaylistTheme === "spooky"). */
   spooky?: boolean;
 }) {
@@ -79,7 +85,11 @@ function Waveform({
     );
   }
   return (
-    <div ref={containerRef} className="relative h-12 flex items-center gap-px overflow-hidden rounded-md bg-surface-hover px-1">
+    <div
+      ref={containerRef}
+      className="relative h-12 flex items-center gap-px overflow-hidden rounded-md bg-surface-hover px-1"
+      style={colors ? ({ "--wf-from": colors.from, "--wf-to": colors.to } as React.CSSProperties) : undefined}
+    >
       {bars.map((p, i) => {
         const barProgress = i / Math.max(1, bars.length - 1);
         const played = progressRatio != null && barProgress <= progressRatio;
@@ -90,7 +100,7 @@ function Waveform({
               played
                 ? spooky
                   ? "spooky-bar-played"
-                  : "bg-gradient-to-t from-accent-teal to-accent-purple"
+                  : "bg-[linear-gradient(to_top,var(--wf-from,var(--accent-teal)),var(--wf-to,var(--accent-purple)))]"
                 : spooky
                   ? "spooky-bar-unplayed"
                   : "bg-border/40"
@@ -138,6 +148,7 @@ function DeckCard({
   currentTimeSec?: number;
 }) {
   const spooky = useStore((s) => s.activePlaylistTheme === "spooky");
+  const waveColors = useWaveformColors(track);
 
   if (!track) {
     return (
@@ -181,7 +192,7 @@ function DeckCard({
       </div>
       {track.source === "youtube" && <TapTempoControl key={track.id} trackId={track.id} />}
       <EnergyGraph peaks={analysis?.waveformPeaks ?? []} progressRatio={progressRatio} />
-      <Waveform peaks={analysis?.waveformPeaks ?? []} progressRatio={progressRatio} markerRatio={markerRatio} spooky={spooky} />
+      <Waveform peaks={analysis?.waveformPeaks ?? []} progressRatio={progressRatio} markerRatio={markerRatio} spooky={spooky} colors={waveColors} />
       {hotCues && currentTimeSec != null && (
         <HotCuePads trackId={track.id} slots={hotCues} currentTimeSec={currentTimeSec} />
       )}
@@ -630,6 +641,7 @@ export function DeckView({ embedded = false }: { embedded?: boolean } = {}) {
         {SONG_SYNC_ENABLED && SYNC_TEST_ENABLED && <SyncTestPanel />}
 
         {STEM_FEATURES_ENABLED && <StemsPanel />}
+        <DjMovesReadout />
 
         <div className="flex flex-wrap items-center gap-2">
           <select
