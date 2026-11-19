@@ -4,9 +4,12 @@
 //   - case- and accent-insensitive ("bjork" finds "Björk")
 //   - multi-word queries AND together (every word must match *something*)
 //   - ranking: exact/prefix > whole-word/word-start > substring, with the
-//     title weighted above artist above tags.
+//     title weighted above artist above tags, genre, mood and year.
+//   - typo tolerance: when a query finds few songs, words one or two letters off
+//     ("bohemain", "dafft punk") match too, after the exact matches.
 import type { FxSound, Playlist, Track } from "@/types/music";
 import { genreHits, mergeHits } from "@/lib/genreSearch";
+import { genresOfTrack } from "@/lib/genreLibrary";
 
 /** Lowercases and strips diacritics. Output length can differ from the input's — see normalizeWithMap for position-preserving use. */
 export function normalizeText(text: string): string {
@@ -65,7 +68,55 @@ export const MATCH_SCORE = {
   wordExact: 65,
   wordStart: 60,
   substring: 30,
+  /** A word that is one or two letters off the typed one (a typo); always below a real match. */
+  fuzzy: 22,
 } as const;
+
+/** The shortest typed word that is allowed to be a typo (a shorter one is too likely to be a different word). */
+const FUZZY_MIN_LENGTH = 4;
+/** A query that finds fewer songs than this also gets the typo matches. */
+const FUZZY_BELOW_HITS = 6;
+
+/** Letters that may be wrong: one for a short word, two for a long one. */
+function allowedTypos(length: number): number {
+  return length >= 7 ? 2 : 1;
+}
+
+/** Whether two strings are within `max` edits (insert, delete, replace, or swapping two neighbours). Stops early once it cannot be. */
+export function withinEdits(a: string, b: string, max: number): boolean {
+  if (a === b) return true;
+  if (Math.abs(a.length - b.length) > max) return false;
+  const n = a.length;
+  const m = b.length;
+  let prev2: number[] = [];
+  let prev: number[] = Array.from({ length: m + 1 }, (_, j) => j);
+  for (let i = 1; i <= n; i++) {
+    const row: number[] = [i];
+    let rowMin = i;
+    for (let j = 1; j <= m; j++) {
+      const cost = a[i - 1] === b[j - 1] ? 0 : 1;
+      let v = Math.min(prev[j] + 1, row[j - 1] + 1, prev[j - 1] + cost);
+      if (i > 1 && j > 1 && a[i - 1] === b[j - 2] && a[i - 2] === b[j - 1]) v = Math.min(v, prev2[j - 2] + 1);
+      row.push(v);
+      if (v < rowMin) rowMin = v;
+    }
+    if (rowMin > max) return false;
+    prev2 = prev;
+    prev = row;
+  }
+  return prev[m] <= max;
+}
+
+/** The typo score of one (already-normalized) token against a normalized field: it matches a word of the field, or the start of one (a half-typed word with a typo), within the allowed edits. 0 when it does not. */
+export function fuzzyScoreToken(field: string, token: string): number {
+  if (token.length < FUZZY_MIN_LENGTH || !field) return 0;
+  const max = allowedTypos(token.length);
+  for (const word of field.split(/[^\p{L}\p{N}]+/u)) {
+    if (!word) continue;
+    if (withinEdits(token, word, max) || (word.length > token.length && withinEdits(token, word.slice(0, token.length), max))) return MATCH_SCORE.fuzzy;
+  }
+  return 0;
+}
 
 /** Best base score of one (already-normalized) token against one (already-normalized) field, or 0 for no match. */
 export function scoreToken(field: string, token: string): number {
@@ -95,12 +146,13 @@ interface IndexedField {
 const PHRASE_PREFIX_BONUS = 40;
 const PHRASE_SUBSTRING_BONUS = 15;
 
-function scoreFields(fields: readonly IndexedField[], tokens: readonly string[], phrase: string): number {
+function scoreFields(fields: readonly IndexedField[], tokens: readonly string[], phrase: string, fuzzy = false): number {
   let total = 0;
   for (const token of tokens) {
     let best = 0;
     for (const f of fields) {
-      const s = scoreToken(f.text, token);
+      let s = scoreToken(f.text, token);
+      if (s === 0 && fuzzy) s = fuzzyScoreToken(f.text, token);
       if (s > 0) best = Math.max(best, s * f.weight);
     }
     if (best === 0) return 0; // AND semantics: every token must land somewhere
@@ -151,6 +203,7 @@ function createSearcher<T extends object>(getFields: (item: T) => { text: string
     if (tokens.length === 0) return [];
     const phrase = tokens.join(" ");
     const hits: (SearchHit<T> & { len: number })[] = [];
+    const sortHits = (list: (SearchHit<T> & { len: number })[]) => list.sort((a, b) => b.score - a.score || a.len - b.len || a.index - b.index);
     for (let index = 0; index < items.length; index++) {
       const item = items[index];
       const fields = indexOf(item);
@@ -159,7 +212,19 @@ function createSearcher<T extends object>(getFields: (item: T) => { text: string
     }
     // Best score first; among equals prefer the shorter primary field (a
     // closer-to-exact match), then keep the library's own order.
-    hits.sort((a, b) => b.score - a.score || a.len - b.len || a.index - b.index);
+    sortHits(hits);
+    // Too few matches: the query may have a typo. Add the songs whose words are a letter or two off, after every real match.
+    if (hits.length < FUZZY_BELOW_HITS && tokens.some((t) => t.length >= FUZZY_MIN_LENGTH)) {
+      const found = new Set(hits.map((h) => h.index));
+      const near: (SearchHit<T> & { len: number })[] = [];
+      for (let index = 0; index < items.length; index++) {
+        if (found.has(index)) continue;
+        const fields = indexOf(items[index]);
+        const score = scoreFields(fields, tokens, phrase, true);
+        if (score > 0) near.push({ item: items[index], score, index, len: fields[0]?.text.length ?? 0 });
+      }
+      hits.push(...sortHits(near));
+    }
     const top = hits.length > limit ? hits.slice(0, limit) : hits;
     return top.map(({ item, score, index }) => ({ item, score, index }));
   };
@@ -168,11 +233,19 @@ function createSearcher<T extends object>(getFields: (item: T) => { text: string
 const TITLE_WEIGHT = 1;
 const ARTIST_WEIGHT = 0.6;
 const TAG_WEIGHT = 0.5;
+/** Genre, subgenre and mood: what the song is, below its name and artist. */
+const KIND_WEIGHT = 0.4;
+const YEAR_WEIGHT = 0.3;
 
+/** Everything a song can be found by: title and artist first, then tags, its genres, subgenres and moods, and the year. (There is no album on a song here, so none is searched.) */
 export const searchTracks = createSearcher<Track>((t) => [
   { text: t.title, weight: TITLE_WEIGHT },
   { text: t.artist, weight: ARTIST_WEIGHT },
   ...(t.tags ?? []).map((tag) => ({ text: tag, weight: TAG_WEIGHT })),
+  ...genresOfTrack(t).flatMap((g) => [{ text: g.genre, weight: KIND_WEIGHT }, ...g.subgenres.map((s) => ({ text: s.subgenre, weight: KIND_WEIGHT }))]),
+  ...(t.subgenres ?? []).map((s) => ({ text: s, weight: KIND_WEIGHT })),
+  ...(t.moods ?? []).map((m) => ({ text: m, weight: KIND_WEIGHT })),
+  ...(t.year != null ? [{ text: String(t.year), weight: YEAR_WEIGHT }] : []),
 ]);
 
 /**

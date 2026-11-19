@@ -19,6 +19,7 @@ import { useIsDesktop, useIsPhone } from "@/lib/useMediaQuery";
 import { sidebarShowing, toggledSidebarChoice } from "@/lib/viewport";
 import { TrackThumbnail } from "@/components/TrackThumbnail";
 import { getEligibleFX } from "@/lib/fxAffinity";
+import { addRecentSearch, loadRecentSearches, removeRecentSearch, saveRecentSearches } from "@/lib/recentSearches";
 import type { FxSound, Playlist, Track } from "@/types/music";
 
 /**
@@ -30,7 +31,6 @@ const URL_SYNC_DEBOUNCE_MS = 300;
 const FX_PREVIEW_MAX_SEC = 5;
 
 type Row =
-  | { key: string; kind: "suggestion"; text: string }
   | { key: string; kind: "track"; track: Track; tracks: Track[]; index: number }
   | { key: string; kind: "playlist"; playlist: Playlist }
   | { key: string; kind: "fx"; fx: FxSound }
@@ -38,14 +38,10 @@ type Row =
 
 const GROUP_LABEL: Record<SearchGroup["kind"], string> = { tracks: "Songs", playlists: "Playlists", fx: "FX" };
 
-/** Flattens ranked groups into the keyboard-navigable row list (group headers aren't rows), the keyword suggestions first. Also returns where each group starts, for rendering headers. */
-function buildRows(groups: SearchGroup[], suggestions: string[]): { rows: Row[]; headerAt: Map<number, string> } {
+/** Flattens ranked groups into the keyboard-navigable row list (group headers aren't rows). Also returns where each group starts, for rendering headers. The keyword suggestions are chips above the list, not rows. */
+function buildRows(groups: SearchGroup[]): { rows: Row[]; headerAt: Map<number, string> } {
   const rows: Row[] = [];
   const headerAt = new Map<number, string>();
-  if (suggestions.length > 0) {
-    headerAt.set(0, "Suggestions");
-    for (const text of suggestions) rows.push({ key: `s:${text}`, kind: "suggestion", text });
-  }
   for (const g of groups) {
     headerAt.set(rows.length, GROUP_LABEL[g.kind]);
     if (g.kind === "tracks") {
@@ -118,14 +114,7 @@ const ResultRow = memo(function ResultRow({
   let icon: React.ReactNode;
   let primary: React.ReactNode;
   let secondary: React.ReactNode = null;
-  if (row.kind === "suggestion") {
-    icon = (
-      <span className="w-9 h-9 rounded-lg bg-surface-hover flex items-center justify-center text-accent-purple shrink-0">
-        <SearchIcon size={16} />
-      </span>
-    );
-    primary = <Highlighted text={row.text} query={query} />;
-  } else if (row.kind === "track") {
+  if (row.kind === "track") {
     icon = <TrackThumbnail thumbnailUrl={row.track.thumbnailUrl} title={row.track.title} size={36} />;
     primary = <Highlighted text={row.track.title} query={query} />;
     secondary = <Highlighted text={row.track.artist || "Unknown artist"} query={query} />;
@@ -225,6 +214,12 @@ export function TopBar() {
   const listId = useId();
   const [open, setOpen] = useState(false);
   const [activeIndex, setActiveIndex] = useState(0);
+  // The text that was submitted (Enter or the magnifying glass): while the box still holds exactly it, no suggestions or quick results show.
+  // Editing the text brings them back.
+  const [submitted, setSubmitted] = useState<string | null>(null);
+  // Set once an arrow key has picked a row, so Enter opens that row; without it Enter submits the search.
+  const arrowedRef = useRef(false);
+  const [recents, setRecents] = useState<string[]>([]);
   const [rect, setRect] = useState<PopupRect | null>(null);
   const [mounted, setMounted] = useState(false);
   // The phone's Search page: the box lives here (and only here on a phone), its results stay up while the page is
@@ -243,7 +238,8 @@ export function TopBar() {
   const urlTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
-    const target = pathname === "/library" ? urlQuery : "";
+    // /library mirrors the box as it is typed; /search only holds the query that was submitted (its URL is written on submit).
+    const target = pathname === "/library" || pathname === "/search" ? urlQuery : "";
     const at = pathname === "/library" ? pendingWrites.current.indexOf(target) : -1;
     if (at >= 0) {
       pendingWrites.current.splice(0, at + 1);
@@ -292,12 +288,15 @@ export function TopBar() {
     [localLibrary, playlists, eligibleFx, deferredQuery]
   );
   const suggestions = useMemo(
-    () => (onSearchPage ? suggestKeywords({ tracks: localLibrary, playlists, fx: eligibleFx }, deferredQuery) : []),
-    [onSearchPage, localLibrary, playlists, eligibleFx, deferredQuery]
+    () => suggestKeywords({ tracks: localLibrary, playlists, fx: eligibleFx }, deferredQuery),
+    [localLibrary, playlists, eligibleFx, deferredQuery]
   );
-  const { rows, headerAt } = useMemo(() => buildRows(groups, suggestions), [groups, suggestions]);
+  const { rows, headerAt } = useMemo(() => buildRows(groups), [groups]);
   const hasQuery = deferredQuery.trim().length > 0;
-  const showPanel = (open || resultsStayOpen) && query.trim().length > 0 && mounted;
+  const submittedNow = submitted !== null && submitted === query;
+  // An empty box that has focus offers the searches made before; any text offers suggestions and quick results, until it is submitted.
+  const showRecents = open && query.trim().length === 0 && recents.length > 0;
+  const showPanel = !submittedNow && mounted && (showRecents || ((open || resultsStayOpen) && query.trim().length > 0));
 
   // Reset the highlighted row to the top hit whenever the result set changes.
   const [prevGroups, setPrevGroups] = useState(groups);
@@ -327,6 +326,8 @@ export function TopBar() {
     // Portals can't render during SSR; flag that we're on the client.
     // eslint-disable-next-line react-hooks/set-state-in-effect
     setMounted(true);
+    // The searches made before live in this browser only; read after mount so the server and first client render agree.
+    setRecents(loadRecentSearches(window.localStorage));
   }, []);
 
   useLayoutEffect(() => {
@@ -391,21 +392,35 @@ export function TopBar() {
   function handleChange(value: string) {
     setQuery(value);
     setOpen(true);
+    setSubmitted(null); // editing the text brings the suggestions back
+    arrowedRef.current = false;
     scheduleUrlWrite(value);
   }
 
   function clear() {
     setQuery("");
+    setSubmitted(null);
     scheduleUrlWrite("");
     setOpen(false);
     inputRef.current?.focus();
   }
 
+  /** Enter or the magnifying glass: hide the suggestions and show the full list of songs that match, remembering the search. */
+  function submit(text: string = query) {
+    const trimmed = text.trim();
+    if (!trimmed) return;
+    if (text !== query) setQuery(text);
+    const next = addRecentSearch(recents, trimmed);
+    setRecents(next);
+    saveRecentSearches(window.localStorage, next);
+    setSubmitted(text);
+    setOpen(false);
+    inputRef.current?.blur();
+    router.push(`/search?q=${encodeURIComponent(trimmed)}`);
+  }
+
   function selectRow(row: Row) {
     switch (row.kind) {
-      case "suggestion":
-        handleChange(row.text); // finishes the user's query; the results below follow it
-        break;
       case "track":
         playTrackList(row.tracks, row.tracks.indexOf(row.track));
         setOpen(false);
@@ -437,14 +452,17 @@ export function TopBar() {
         }
         if (rows.length === 0) return;
         const delta = e.key === "ArrowDown" ? 1 : -1;
+        arrowedRef.current = true;
         setActiveIndex((safeActive + delta + rows.length) % rows.length);
         break;
       }
       case "Enter": {
-        const row = rows[safeActive];
-        if (!row || !open || hasQuery === false) return;
+        if (query.trim().length === 0) return;
         e.preventDefault();
-        selectRow(row);
+        // A row picked with the arrow keys opens; otherwise Enter is a search.
+        const row = rows[safeActive];
+        if (row && open && arrowedRef.current && !submittedNow) selectRow(row);
+        else submit();
         break;
       }
       case "Escape":
@@ -484,9 +502,16 @@ export function TopBar() {
           at the right on every page (Log out and Dark mode live there now that there is no side panel). */}
       {!onSearchPage && <span className="tablet:hidden flex-1 min-w-0 text-xl wordmark">Que DJ</span>}
       <div ref={wrapRef} className={`flex-1 min-w-0 max-w-xl mx-auto relative ${onSearchPage ? "" : "max-tablet:hidden"}`}>
-        <span className="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 text-muted text-sm">
+        <button
+          type="button"
+          onMouseDown={(e) => e.preventDefault()}
+          onClick={() => submit()}
+          aria-label="Search"
+          title="Search"
+          className="absolute left-1.5 top-1/2 flex h-9 w-9 -translate-y-1/2 items-center justify-center rounded-full text-sm text-muted hover:text-accent-purple"
+        >
           🔍
-        </span>
+        </button>
         <input
           ref={inputRef}
           value={query}
@@ -532,12 +557,61 @@ export function TopBar() {
         createPortal(
           <div
             ref={panelRef}
-            id={listId}
-            role="listbox"
-            aria-label="Search results"
             style={{ position: "fixed", left: rect.left, top: rect.top, width: rect.width, maxHeight: rect.maxHeight }}
             className="z-[70] overflow-y-auto overflow-x-hidden overscroll-contain rounded-2xl bg-surface shadow-elevate-md border border-border/10 p-1.5"
           >
+            {showRecents ? (
+              <div role="group" aria-label="Recent searches">
+                <p className="px-3 pt-2 pb-1 text-[11px] font-semibold uppercase tracking-wide text-muted">Recent searches</p>
+                {recents.map((text) => (
+                  <div key={text} className="flex items-center gap-1 rounded-lg hover:bg-surface-hover">
+                    <button
+                      type="button"
+                      onMouseDown={(e) => e.preventDefault()}
+                      onClick={() => submit(text)}
+                      className="flex min-w-0 flex-1 items-center gap-3 px-3 py-2 text-left text-sm"
+                    >
+                      <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-surface-hover text-accent-purple">
+                        <SearchIcon size={16} />
+                      </span>
+                      <span className="truncate">{text}</span>
+                    </button>
+                    <button
+                      type="button"
+                      onMouseDown={(e) => e.preventDefault()}
+                      onClick={() => {
+                        const next = removeRecentSearch(recents, text);
+                        setRecents(next);
+                        saveRecentSearches(window.localStorage, next);
+                      }}
+                      aria-label={`Forget ${text}`}
+                      title="Forget this search"
+                      className="btn-icon text-muted hover:text-accent-pink"
+                    >
+                      <CloseIcon size={12} />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <>
+                {suggestions.length > 0 && (
+                  <div role="group" aria-label="Suggestions" className="flex flex-wrap gap-1.5 px-2 pb-2 pt-1">
+                    {suggestions.map((text) => (
+                      <button
+                        key={text}
+                        type="button"
+                        // mousedown + preventDefault keeps focus in the box, like the rows below
+                        onMouseDown={(e) => e.preventDefault()}
+                        onClick={() => handleChange(text)}
+                        className="max-w-full truncate rounded-full border border-border-subtle bg-surface-hover px-3 py-1.5 text-xs font-semibold text-foreground hover:border-accent"
+                      >
+                        {text}
+                      </button>
+                    ))}
+                  </div>
+                )}
+            <div id={listId} role="listbox" aria-label="Search results">
             {rows.length === 0 ? (
               <p className="px-3 py-4 text-sm text-muted break-words">
                 {!libraryLoaded
@@ -564,6 +638,9 @@ export function TopBar() {
                   />
                 </div>
               ))
+            )}
+            </div>
+              </>
             )}
           </div>,
           document.body
