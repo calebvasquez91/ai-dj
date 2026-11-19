@@ -9,7 +9,7 @@ import type { ClaimedJob, ClassificationLog, GenreStore, JobState, JobStore } fr
 import type { StoredGenre } from "@/lib/genre/stored";
 import type { GenreStatus, GenreTag } from "@/types/music";
 
-function parseArray<T>(json: string | null | undefined): T[] {
+export function parseArray<T>(json: string | null | undefined): T[] {
   if (!json) return [];
   try {
     const v: unknown = JSON.parse(json);

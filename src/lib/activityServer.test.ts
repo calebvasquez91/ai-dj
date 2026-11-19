@@ -114,26 +114,26 @@ describe("loadPlaytime: summed in the database", () => {
   });
 });
 
-describe("loadGenreCounts: both counts per genre", () => {
-  it("reads each song's genre and tags once, and returns main and tagged counts with the review and unclassified totals", async () => {
-    const t = (genre: string) => ({ genre, source: "file-tags", confidence: 0.9, updatedAt: 0 });
+describe("loadGenreCounts: both counts per genre, from one read of the rows", () => {
+  const t = (genre: string) => ({ genre, source: "file-tags", confidence: 0.9, updatedAt: 0 });
+  it("returns main and tagged counts, and works out the review and unclassified totals from the same rows", async () => {
     mocks.trackGenreFindMany.mockResolvedValue([
-      { genre: "Pop", tagsJson: JSON.stringify([t("Pop"), t("Soul")]) },
-      { genre: "Pop", tagsJson: JSON.stringify([t("Pop")]) },
+      { genre: "Pop", status: "auto", tagsJson: JSON.stringify([t("Pop"), t("Soul")]) },
+      { genre: "Pop", status: "needs-review", tagsJson: JSON.stringify([t("Pop")]) },
+      { genre: null, status: "needs-review", tagsJson: "[]" },
     ]);
-    mocks.trackGenreCount.mockResolvedValueOnce(4).mockResolvedValueOnce(2); // needs review, classified
     mocks.trackCount.mockResolvedValue(10);
     const r = await loadGenreCounts();
     expect(mocks.trackGenreFindMany).toHaveBeenCalledTimes(1);
+    expect(mocks.trackGenreCount).not.toHaveBeenCalled(); // no extra count queries: the rows give them
     expect(r.ok && r.data).toEqual({
       genres: [{ genre: "Pop", main: 2, tagged: 2 }, { genre: "Soul", main: 0, tagged: 1 }],
-      needsReview: 4,
-      unclassified: 8,
+      needsReview: 2,
+      unclassified: 8, // 10 songs, 2 with a genre
     });
   });
   it("says no-table when the genre table is missing", async () => {
     mocks.trackGenreFindMany.mockRejectedValue(Object.assign(new Error("missing"), { code: "P2021" }));
-    mocks.trackGenreCount.mockResolvedValue(0);
     mocks.trackCount.mockResolvedValue(0);
     expect(await loadGenreCounts()).toEqual({ ok: false, reason: "no-table" });
   });

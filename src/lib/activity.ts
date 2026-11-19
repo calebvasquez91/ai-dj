@@ -1,31 +1,22 @@
 // Pure helpers for the admin Activity page: the filter in its address, readable sizes and usage, and short device ids.
 import { isAuditEventType, parseDayParam, type AuditEventType } from "@/lib/telemetry";
-import { resolveGenreTags } from "@/lib/genre/combine";
+import { genresOfTrack } from "@/lib/genreLibrary";
 import type { GenreTag } from "@/types/music";
 
-/** One genre line on the Activity page: songs whose main genre it is, and songs that carry it among their tags (the cards' count). */
+/** One genre line on the Activity page: songs whose main genre it is, and songs that carry it among their tags (what the cards count, before their own exclusions). */
 export interface GenreCountRow {
   genre: string;
   main: number;
   tagged: number;
 }
 
-function parseTags(json: string | null | undefined): GenreTag[] {
-  if (!json) return [];
-  try {
-    const v: unknown = JSON.parse(json);
-    return Array.isArray(v) ? (v as GenreTag[]) : [];
-  } catch {
-    return [];
-  }
-}
-
 /**
- * Both genre counts from the stored classification rows. `main` is each song counted once under its best genre (the `genre` column); `tagged`
- * counts a song under every genre it has, resolved the way the "Made by your DJ" cards resolve it (a record with a summary but no tags falls back
- * to that summary). Biggest `main` first, ties by `tagged`, then A to Z.
+ * Both genre counts from the stored classification rows (tags already parsed). `main` is each song counted once under its best genre (the `genre`
+ * column). `tagged` counts a song under every genre it has, resolved by the same function the "Made by your DJ" cards use (genresOfTrack), and always
+ * includes the song's main genre, so tagged is never below main even when the stored summary is out of step with the tags. Biggest `main` first,
+ * ties by `tagged`, then A to Z.
  */
-export function genreCountRows(rows: readonly { genre: string | null; tagsJson: string }[]): GenreCountRow[] {
+export function genreCountRows(rows: readonly { genre: string | null; tags: readonly GenreTag[] }[]): GenreCountRow[] {
   const byGenre = new Map<string, GenreCountRow>();
   const row = (genre: string) => {
     let r = byGenre.get(genre);
@@ -33,10 +24,12 @@ export function genreCountRows(rows: readonly { genre: string | null; tagsJson: 
     return r;
   };
   for (const r of rows) {
-    if (r.genre) row(r.genre).main++;
-    const resolved = resolveGenreTags(parseTags(r.tagsJson)).genres.map((g) => g.genre);
-    const genres = resolved.length > 0 ? resolved : r.genre ? [r.genre] : [];
-    for (const g of new Set(genres)) row(g).tagged++;
+    const genres = new Set(genresOfTrack({ genreTags: [...r.tags], genre: r.genre ?? undefined, subgenres: [] }).map((g) => g.genre));
+    if (r.genre) {
+      row(r.genre).main++;
+      genres.add(r.genre);
+    }
+    for (const g of genres) row(g).tagged++;
   }
   return [...byGenre.values()].sort((a, b) => b.main - a.main || b.tagged - a.tagged || a.genre.localeCompare(b.genre));
 }
