@@ -47,7 +47,9 @@ import { ANALYSIS_JOB_TIMEOUT_MS, pickNextAnalysisJob, tempoChanged } from "@/li
 import { LOOKUP_LOOKAHEAD, reachableTracks } from "@/lib/lookahead";
 import { withTimeout } from "@/lib/withTimeout";
 import { voiceCutoffSec, voiceMapFromStem } from "@/lib/voiceMap";
-import { SONG_SYNC_ENABLED, STEM_FEATURES_ENABLED, VOCAL_MASHUP_ENABLED } from "@/lib/featureFlags";
+import { DJ_EQ_ENABLED, SONG_SYNC_ENABLED, STEM_FEATURES_ENABLED, VOCAL_MASHUP_ENABLED } from "@/lib/featureFlags";
+import { runDjEqTick } from "@/lib/djEq";
+import { useDjMoves } from "@/lib/djMovesStore";
 import { isStuckMuted, looksMuted, rmsLevel, shouldResumeContext, wakeVerdict } from "@/lib/backgroundAudio";
 import { TRANSITION_FX_ENABLED, buildSyncReport } from "@/lib/syncEngine";
 import {
@@ -1004,6 +1006,52 @@ export function DualDeckStage() {
         // Left uncached — startTransition's cache read just comes up empty and skips the overlay.
       });
   }, [queue, stemAvailability]);
+
+  // DJ EQ moves (lib/djEq.ts, DJ_EQ_ENABLED): every quarter second, while a song plays and no transition runs, ask the planner whether the song
+  // supports an EQ move now (energy, tempo, a beat or phrase boundary, and the eight-bar gap) and schedule it on the playing deck's low and high
+  // shelves on the audio clock. With the flag off this effect does nothing at all.
+  useEffect(() => {
+    if (!DJ_EQ_ENABLED) return;
+    useDjMoves.getState().load();
+    let lastMoveAtSec: number | null = null;
+    let lastTrackId: string | null = null;
+    const timer = setInterval(() => {
+      try {
+        const s = useStore.getState();
+        const moves = useDjMoves.getState();
+        const track = s.currentTrack;
+        if (!track || !s.isPlaying || s.isTransitioning || !moves.settings.djEq) return;
+        const analysis = s.trackAnalysis[track.id];
+        const ctx = audioCtxRef.current;
+        const deckId = activeDeckRef.current;
+        const nodes = deckNodesRef.current[deckId];
+        const el = deckEl(deckId);
+        if (!analysis || !ctx || !nodes || !el) return;
+        if (lastTrackId !== track.id) {
+          lastTrackId = track.id;
+          lastMoveAtSec = null;
+        }
+        const other = deckNodesRef.current[deckId === "A" ? "B" : "A"];
+        const move = runDjEqTick({
+          analysis,
+          durationSec: Number.isFinite(el.duration) && el.duration > 0 ? el.duration : track.durationSec,
+          currentTimeSec: el.currentTime,
+          lastMoveAtSec,
+          target: { lowShelfGain: nodes.lowShelf.gain, highShelfGain: nodes.eqHigh.gain, incomingLowShelfGain: other?.lowShelf.gain ?? null },
+          ctxNow: ctx.currentTime,
+          playbackRate: el.playbackRate || 1,
+          enabled: true,
+        });
+        if (move) {
+          lastMoveAtSec = move.startSec;
+          moves.setReadout("eq", `${move.kind.replace(/-/g, " ")} (${move.reason})`);
+        }
+      } catch {
+        // a hiccup in a move must never reach the music
+      }
+    }, 250);
+    return () => clearInterval(timer);
+  }, [deckEl]);
 
   // AI-matched transition FX (lib/ai-fx.ts via store.ts's requestAiFxPick):
   // once per new (currentTrack, queue[0]) pairing, ask Claude to pick the

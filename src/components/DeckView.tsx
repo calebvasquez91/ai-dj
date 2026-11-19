@@ -24,6 +24,7 @@ import { SyncTestPanel } from "@/components/SyncTestPanel";
 import { describeSongSyncPlanLine, planSongSync, songSyncMixOutSec } from "@/lib/songSync";
 import { StemsPanel } from "@/components/StemsPanel";
 import { useWaveformColors } from "@/components/useWaveformColors";
+import { DjMovesReadout } from "@/components/DjMovesReadout";
 import type { WaveformColors } from "@/lib/waveformColors";
 import { SONG_SYNC_ENABLED, STEM_FEATURES_ENABLED, SYNC_TEST_ENABLED } from "@/lib/featureFlags";
 import { voiceCutoffSec } from "@/lib/voiceMap";
@@ -640,6 +641,7 @@ export function DeckView({ embedded = false }: { embedded?: boolean } = {}) {
         {SONG_SYNC_ENABLED && SYNC_TEST_ENABLED && <SyncTestPanel />}
 
         {STEM_FEATURES_ENABLED && <StemsPanel />}
+        <DjMovesReadout />
 
         <div className="flex flex-wrap items-center gap-2">
           <select
