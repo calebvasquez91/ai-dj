@@ -31,6 +31,8 @@ interface TrackBase {
   hotCueOverrides?: Record<number, number>;
   /** User-set free-text tags, e.g. ["halloween","spooky"] — drives the Spooky Music system playlist's auto-membership. Empty/absent means untagged. */
   tags?: string[];
+  /** An instrumental (no vocal): marked by the tag "instrumental" or "karaoke", by "(Instrumental)" in the title, or by the Audio Engineer's instrumentalness score (lib/instrumentalBridge.ts isInstrumentalTrack decides; this only records a decision made once). */
+  isInstrumental?: boolean;
   /** Every genre the track has, by source (src/lib/genreTags.ts resolves them). Absent until classified. */
   genreTags?: GenreTag[];
   genreStatus?: GenreStatus;
