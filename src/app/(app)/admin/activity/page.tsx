@@ -3,6 +3,7 @@ import { notFound } from "next/navigation";
 import { feedbackOwnerSession } from "@/lib/feedbackOwner";
 import { activityFilterParams, formatBytes, parseActivityFilter, shortDeviceId, usageLine } from "@/lib/activity";
 import {
+  FAILED_JOB_WINDOW_DAYS,
   loadAuditLog,
   loadDevices,
   loadGenreCounts,
@@ -278,7 +279,7 @@ export default async function ActivityPage({ searchParams }: { searchParams: Pro
               <div key={q.kind}>
                 <dt className="text-xs text-muted">{q.kind}</dt>
                 <dd>
-                  {q.waiting} waiting · {q.running} running · <span className={q.failed > 0 ? "text-accent-pink font-semibold" : ""}>{q.failed} failed</span>
+                  {q.waiting} waiting · {q.running} running · <span className={q.failed > 0 ? "text-accent-pink font-semibold" : ""}>{q.failed} failed in the last {FAILED_JOB_WINDOW_DAYS} days</span>
                 </dd>
               </div>
             ))}

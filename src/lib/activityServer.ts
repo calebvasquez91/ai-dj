@@ -173,7 +173,7 @@ export interface Health {
   storage: { usedBytes: number; limitBytes: number | null } | null;
   /** Bytes the database holds, and the limit when ADMIN_DB_LIMIT_MB is set. */
   database: { usedBytes: number; limitBytes: number | null } | null;
-  /** Jobs waiting or running, by kind, and how many of each have failed. */
+  /** Jobs waiting or running, by kind, and how many of each failed in the last FAILED_JOB_WINDOW_DAYS days (an old failure is history, not a current problem). */
   queues: { kind: string; waiting: number; running: number; failed: number }[];
   /** Songs the player has not analysed yet (analysis happens the first time a song plays). */
   unanalysed: number | null;
@@ -209,21 +209,33 @@ async function listBlobBytes(): Promise<number> {
   return total; // more than 30,000 files: the figure is a floor
 }
 
-export function loadHealth(): Promise<Section<Health>> {
+/** A failed job counts toward the health figure for this many days after it failed. */
+export const FAILED_JOB_WINDOW_DAYS = 30;
+
+/** Jobs that failed since `since`: by the time the failure was recorded, else (a job with no finish time) by when it was created. */
+const failedSince = (finishedField: "completedAt" | "finishedAt", since: Date) => ({
+  status: "failed",
+  OR: [{ [finishedField]: { gte: since } }, { [finishedField]: null, createdAt: { gte: since } }],
+});
+
+export function loadHealth(now = Date.now()): Promise<Section<Health>> {
   return section(async () => {
     const orNull = async <T>(read: () => Promise<T>): Promise<T | null> => read().catch(() => null);
-    const [blob, dbRows, genreJobs, stemJobs, unanalysed] = await Promise.all([
+    const since = new Date(now - FAILED_JOB_WINDOW_DAYS * 86_400_000);
+    const [blob, dbRows, genreJobs, stemJobs, genreFailed, stemFailed, unanalysed] = await Promise.all([
       orNull(blobBytes),
       orNull(() => prisma.$queryRaw<{ bytes: bigint }[]>`SELECT pg_database_size(current_database()) AS bytes`),
       orNull(() => prisma.genreJob.groupBy({ by: ["status"], _count: { _all: true } })),
       orNull(() => prisma.stemSeparationJob.groupBy({ by: ["status"], _count: { _all: true } })),
+      orNull(() => prisma.genreJob.count({ where: failedSince("finishedAt", since) })),
+      orNull(() => prisma.stemSeparationJob.count({ where: failedSince("completedAt", since) })),
       orNull(() => prisma.track.count({ where: { source: "local", bpm: null } })),
     ]);
     const count = (rows: { status: string; _count: { _all: number } }[] | null, ...statuses: string[]) =>
       rows ? rows.filter((r) => statuses.includes(r.status)).reduce((n, r) => n + r._count._all, 0) : 0;
     const queues: Health["queues"] = [];
-    if (genreJobs) queues.push({ kind: "Genre classification", waiting: count(genreJobs, "queued"), running: count(genreJobs, "running"), failed: count(genreJobs, "failed") });
-    if (stemJobs) queues.push({ kind: "Stem separation", waiting: count(stemJobs, "pending"), running: count(stemJobs, "processing"), failed: count(stemJobs, "failed") });
+    if (genreJobs) queues.push({ kind: "Genre classification", waiting: count(genreJobs, "queued"), running: count(genreJobs, "running"), failed: genreFailed ?? 0 });
+    if (stemJobs) queues.push({ kind: "Stem separation", waiting: count(stemJobs, "pending"), running: count(stemJobs, "processing"), failed: stemFailed ?? 0 });
     return {
       storage: blob == null ? null : { usedBytes: blob, limitBytes: limitBytes(process.env.ADMIN_BLOB_LIMIT_GB, 1024 ** 3) },
       database: dbRows?.[0] ? { usedBytes: Number(dbRows[0].bytes), limitBytes: limitBytes(process.env.ADMIN_DB_LIMIT_MB, 1024 ** 2) } : null,

@@ -13,6 +13,8 @@ const mocks = vi.hoisted(() => ({
   playAggregate: vi.fn(),
   genreJobGroup: vi.fn(),
   stemJobGroup: vi.fn(),
+  genreJobCount: vi.fn(),
+  stemJobCount: vi.fn(),
   list: vi.fn(),
   trackGenreFindMany: vi.fn(),
   trackGenreCount: vi.fn(),
@@ -29,14 +31,14 @@ vi.mock("@/lib/prisma", () => ({
     playlist: { count: mocks.playlistCount },
     playEvent: { aggregate: mocks.playAggregate },
     trackGenre: { findMany: mocks.trackGenreFindMany, count: mocks.trackGenreCount },
-    genreJob: { groupBy: mocks.genreJobGroup },
-    stemSeparationJob: { groupBy: mocks.stemJobGroup },
+    genreJob: { groupBy: mocks.genreJobGroup, count: mocks.genreJobCount },
+    stemSeparationJob: { groupBy: mocks.stemJobGroup, count: mocks.stemJobCount },
     $queryRaw: mocks.queryRaw,
   },
 }));
 vi.mock("@vercel/blob", () => ({ list: mocks.list }));
 
-import { BLOB_SIZE_CACHE_MS, exportRows, loadAuditLog, loadDevices, loadGenreCounts, loadHealth, loadOverview, loadPlaytime, resetBlobSizeCache } from "./activityServer";
+import { BLOB_SIZE_CACHE_MS, FAILED_JOB_WINDOW_DAYS, exportRows, loadAuditLog, loadDevices, loadGenreCounts, loadHealth, loadOverview, loadPlaytime, resetBlobSizeCache } from "./activityServer";
 import type { ActivityFilter } from "./activity";
 
 const NO_FILTER: ActivityFilter = { from: null, to: null, type: null };
@@ -155,8 +157,11 @@ describe("loadHealth: the file store is listed once per ten minutes", () => {
     vi.stubEnv("BLOB_READ_WRITE_TOKEN", "token");
     mocks.list.mockResolvedValue({ blobs: [{ size: 1000 }, { size: 500 }], hasMore: false });
     mocks.queryRaw.mockResolvedValue([{ bytes: BigInt(4096) }]);
-    mocks.genreJobGroup.mockResolvedValue([{ status: "queued", _count: { _all: 3 } }, { status: "failed", _count: { _all: 1 } }]);
-    mocks.stemJobGroup.mockResolvedValue([{ status: "processing", _count: { _all: 2 } }]);
+    // the grouped rows still hold every status, failed ones included: the failed figure must come from the recent-failure count instead
+    mocks.genreJobGroup.mockResolvedValue([{ status: "queued", _count: { _all: 3 } }, { status: "failed", _count: { _all: 40 } }]);
+    mocks.stemJobGroup.mockResolvedValue([{ status: "processing", _count: { _all: 2 } }, { status: "failed", _count: { _all: 2 } }]);
+    mocks.genreJobCount.mockResolvedValue(1);
+    mocks.stemJobCount.mockResolvedValue(0);
     mocks.trackCount.mockResolvedValue(900);
   }
   it("adds up every file, reports the queues and the failures, and uses the limits in the settings", async () => {
@@ -167,9 +172,17 @@ describe("loadHealth: the file store is listed once per ten minutes", () => {
     expect(r.ok && r.data.database).toEqual({ usedBytes: 4096, limitBytes: null });
     expect(r.ok && r.data.queues).toEqual([
       { kind: "Genre classification", waiting: 3, running: 0, failed: 1 },
-      { kind: "Stem separation", waiting: 0, running: 2, failed: 0 },
+      { kind: "Stem separation", waiting: 0, running: 2, failed: 0 }, // two old failures are in the table but outside the window
     ]);
     expect(r.ok && r.data.unanalysed).toBe(900);
+  });
+  it("counts only failures from the last 30 days, by when they failed (else when they were created)", async () => {
+    setup();
+    await loadHealth(now);
+    const since = new Date(now - FAILED_JOB_WINDOW_DAYS * 86_400_000);
+    expect(FAILED_JOB_WINDOW_DAYS).toBe(30);
+    expect(mocks.stemJobCount).toHaveBeenCalledWith({ where: { status: "failed", OR: [{ completedAt: { gte: since } }, { completedAt: null, createdAt: { gte: since } }] } });
+    expect(mocks.genreJobCount).toHaveBeenCalledWith({ where: { status: "failed", OR: [{ finishedAt: { gte: since } }, { finishedAt: null, createdAt: { gte: since } }] } });
   });
   it("does not list the file store again within ten minutes", async () => {
     setup();
