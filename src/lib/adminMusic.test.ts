@@ -7,6 +7,9 @@ import {
   missingFields,
   musicOrderBy,
   orderByCamelot,
+  orderByTempo,
+  shownBpm,
+  shownCamelot,
   sortsInMemory,
   musicWhere,
   parseKeyInput,
@@ -82,6 +85,15 @@ describe("musicWhere", () => {
     expect(JSON.stringify(musicWhere("spooky", false))).toContain('"tagsJson":{"contains":"spooky"');
   });
 
+  it("matches BPM and key as the table shows them: the app's own value, or the file's tag when the app has none", () => {
+    const text = JSON.stringify(musicWhere("128", false));
+    expect(text).toContain('{"bpm":{"gte":127.5,"lte":128.5}}');
+    expect(text).toContain('{"AND":[{"bpm":null},{"tagBpm":{"gte":127.5,"lte":128.5}}]}');
+    const key = JSON.stringify(musicWhere("8A", false));
+    expect(key).toContain('{"AND":[{"key":null},{"tagKey":{"contains":"8A"');
+    expect(key).toContain('{"AND":[{"camelotKey":null},{"tagCamelotKey":{"equals":"8A"');
+  });
+
   it("adds the missing-info filter on top of the search", () => {
     const where = musicWhere("selena", true) as { AND: unknown[] };
     expect(where.AND).toHaveLength(2);
@@ -101,14 +113,15 @@ describe("musicOrderBy", () => {
     }
   });
 
-  it("leaves the key sort to the route (the database only has text order, which puts 10A before 2A)", () => {
+  it("leaves the BPM and key sorts to the route (a tag value cannot be ordered with a measured one by the database, and text order puts 10A before 2A)", () => {
     expect(sortsInMemory("key")).toBe(true);
-    expect(sortsInMemory("bpm")).toBe(false);
-    expect(JSON.stringify(musicOrderBy("key", "asc"))).not.toContain("camelotKey");
+    expect(sortsInMemory("bpm")).toBe(true);
+    expect(sortsInMemory("artist")).toBe(false);
+    for (const sort of ["bpm", "key"] as const) expect(JSON.stringify(musicOrderBy(sort, "asc"))).not.toMatch(/bpm|camelot/i);
   });
 
-  it("puts songs with no BPM last, whichever way it sorts", () => {
-    expect(musicOrderBy("bpm", "desc")[0]).toEqual({ bpm: { sort: "desc", nulls: "last" } });
+  it("orders the other columns in the database", () => {
+    expect(musicOrderBy("genre", "asc")[0]).toEqual({ genreInfo: { genre: { sort: "asc", nulls: "last" } } });
     expect(musicOrderBy("plays", "desc")[0]).toEqual({ playEvents: { _count: "desc" } });
   });
 });
@@ -130,6 +143,28 @@ describe("orderByCamelot", () => {
   });
 });
 
+describe("the BPM and key the table shows", () => {
+  it("is the app's own value, else the file's tag", () => {
+    expect(shownBpm({ bpm: 120, tagBpm: 128 })).toBe(120);
+    expect(shownBpm({ bpm: null, tagBpm: 128 })).toBe(128);
+    expect(shownBpm({ bpm: null, tagBpm: null })).toBeNull();
+    expect(shownCamelot({ camelotKey: "8A", tagCamelotKey: "5B" })).toBe("8A");
+    expect(shownCamelot({ camelotKey: null, tagCamelotKey: "5B" })).toBe("5B");
+  });
+
+  it("orders by tempo with the shown value, songs with none last in both directions, ties in incoming order", () => {
+    const rows = [
+      { id: "a", bpm: null, tagBpm: null },
+      { id: "b", bpm: null, tagBpm: 128 },
+      { id: "c", bpm: 95, tagBpm: 140 },
+      { id: "d", bpm: null, tagBpm: 95 },
+      { id: "e", bpm: 100, tagBpm: null },
+    ];
+    expect(orderByTempo(rows, "asc").map((r) => r.id)).toEqual(["c", "d", "e", "b", "a"]);
+    expect(orderByTempo(rows, "desc").map((r) => r.id)).toEqual(["b", "e", "c", "d", "a"]);
+  });
+});
+
 describe("toMusicRow", () => {
   const song = (over: Partial<MusicSongRow> = {}): MusicSongRow => ({
     id: "t1",
@@ -138,6 +173,9 @@ describe("toMusicRow", () => {
     bpm: 98.4,
     key: "A minor",
     camelotKey: "8A",
+    tagBpm: null,
+    tagKey: null,
+    tagCamelotKey: null,
     tagsJson: '["latin","throwback"]',
     durationSec: 200,
     createdAt: new Date("2026-11-19T12:00:00Z"),
@@ -148,6 +186,14 @@ describe("toMusicRow", () => {
 
   it("shapes a song for the table", () => {
     expect(toMusicRow(song())).toMatchObject({ id: "t1", genre: "Latin", subgenres: ["Cumbia"], genreStatus: "needs-review", plays: 3, tags: ["latin", "throwback"], camelot: "8A", analysed: true, missing: [] });
+  });
+
+  it("shows the file's tag BPM and key for a song the app has not measured, marked as from the tag, and the measured value when there is one", () => {
+    const tagged = toMusicRow(song({ bpm: null, key: null, camelotKey: null, tagBpm: 128, tagKey: "A minor", tagCamelotKey: "8A" }));
+    expect(tagged).toMatchObject({ analysed: false, bpm: 128, bpmFromTag: true, key: "A minor", camelot: "8A", keyFromTag: true });
+    const measured = toMusicRow(song({ bpm: 98.4, key: "C major", camelotKey: "8B", tagBpm: 128, tagKey: "A minor", tagCamelotKey: "8A" }));
+    expect(measured).toMatchObject({ analysed: true, bpm: 98.4, bpmFromTag: false, key: "C major", camelot: "8B", keyFromTag: false });
+    expect(toMusicRow(song({ bpm: null, key: null, camelotKey: null })).bpm).toBeNull();
   });
 
   it("calls a song analysed only when it has a tempo", () => {

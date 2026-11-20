@@ -74,7 +74,8 @@ export const missingAnyWhere: Prisma.TrackWhereInput = { OR: [missingArtistWhere
 
 /**
  * The database filter for the search box. Every word has to match something about the song (so "daddy yankee 95" narrows rather than widens):
- * its artist, name, genre or subgenre, a tag, its key, or, for a number, its BPM to within half a beat.
+ * its artist, name, genre or subgenre, a tag, its key, or, for a number, its BPM to within half a beat. BPM and key are matched as the table shows them:
+ * the app's own measurement, or the file's tag for a song it has not measured yet.
  */
 export function musicWhere(q: string, missing: boolean): Prisma.TrackWhereInput {
   const words = q.split(/\s+/).filter(Boolean).slice(0, MAX_SEARCH_WORDS);
@@ -84,12 +85,17 @@ export function musicWhere(q: string, missing: boolean): Prisma.TrackWhereInput 
       { artist: { contains: word, mode: insensitive } },
       { title: { contains: word, mode: insensitive } },
       { key: { contains: word, mode: insensitive } },
+      { AND: [{ key: null }, { tagKey: { contains: word, mode: insensitive } }] },
       { camelotKey: { equals: word, mode: insensitive } },
+      { AND: [{ camelotKey: null }, { tagCamelotKey: { equals: word, mode: insensitive } }] },
       { genreInfo: { is: { OR: [{ genre: { contains: word, mode: insensitive } }, { subgenresJson: { contains: word, mode: insensitive } }] } } },
     ];
     // Tags are stored as JSON text (["halloween","spooky"]), so a word holding the JSON's own punctuation would match every tagged song: leave tags out for it.
     if (!JSON_PUNCTUATION.test(word)) options.push({ tagsJson: { contains: word, mode: insensitive } });
-    if (Number.isFinite(n) && n >= MIN_BPM && n <= MAX_BPM) options.push({ bpm: { gte: n - 0.5, lte: n + 0.5 } });
+    if (Number.isFinite(n) && n >= MIN_BPM && n <= MAX_BPM) {
+      const near = { gte: n - 0.5, lte: n + 0.5 };
+      options.push({ bpm: near }, { AND: [{ bpm: null }, { tagBpm: near }] });
+    }
     return { OR: options };
   });
   if (missing) and.push(missingAnyWhere);
@@ -109,18 +115,40 @@ export function musicOrderBy(sort: SortKey, dir: SortDir): Prisma.TrackOrderByWi
     case "plays":
       return [{ playEvents: { _count: dir } }, { artist: "asc" }, tie];
     case "bpm":
-      return [{ bpm: { sort: dir, nulls: "last" } }, { artist: "asc" }, tie];
     case "key":
-      // The wheel order (…2A, 3A … 10A) is not text order, which is all the database has, so the route sorts this one itself (`orderByCamelot`).
+      // A BPM or key shown from the file's tag when the app has not measured one cannot be ordered with the measured one by the database, and the wheel
+      // order (…2A, 3A … 10A) is not text order, so the route sorts these two itself (`orderByTempo`, `orderByCamelot`).
       return [{ artist: "asc" }, tie];
     case "added":
       return [{ createdAt: dir }, tie];
   }
 }
 
-/** True when the database cannot give this sort order itself and the route must order the songs with `orderByCamelot`. */
+/** True when the database cannot give this sort order itself and the route must order the songs with `orderByTempo` / `orderByCamelot`. */
 export function sortsInMemory(sort: SortKey): boolean {
-  return sort === "key";
+  return sort === "bpm" || sort === "key";
+}
+
+/** The tempo the table shows for a song: the app's own measurement, else the file tag's. */
+export function shownBpm(song: { bpm: number | null; tagBpm: number | null }): number | null {
+  return song.bpm ?? song.tagBpm;
+}
+
+/** The Camelot code the table shows for a song: the app's own, else the file tag's. */
+export function shownCamelot(song: { camelotKey: string | null; tagCamelotKey: string | null }): string | null {
+  return song.camelotKey ?? song.tagCamelotKey;
+}
+
+/** Puts rows in tempo order by the BPM the table shows, songs with none last whichever way it runs; ties keep their incoming order (artist, then id). */
+export function orderByTempo<T extends { bpm: number | null; tagBpm: number | null }>(rows: readonly T[], dir: SortDir): T[] {
+  const sign = dir === "desc" ? -1 : 1;
+  return rows
+    .map((row, index) => ({ row, index, bpm: shownBpm(row) }))
+    .sort((a, b) => {
+      if (a.bpm == null || b.bpm == null) return a.bpm == null && b.bpm == null ? a.index - b.index : a.bpm == null ? 1 : -1;
+      return (a.bpm - b.bpm) * sign || a.index - b.index;
+    })
+    .map((x) => x.row);
 }
 
 /** Puts rows in Camelot wheel order (1A, 1B, 2A … 12B), songs with no key last whichever way it runs; ties keep their incoming order (artist, then id). */
@@ -143,6 +171,9 @@ export const MUSIC_SELECT = {
   bpm: true,
   key: true,
   camelotKey: true,
+  tagBpm: true,
+  tagKey: true,
+  tagCamelotKey: true,
   tagsJson: true,
   durationSec: true,
   createdAt: true,
@@ -164,9 +195,13 @@ export type MusicRow = {
   plays: number;
   /** True once the app has analysed the song (it has a tempo); only then do a BPM and key mean anything to the app, so only then are they editable. */
   analysed: boolean;
+  /** The BPM shown: the app's own measurement, or (for a song it has not measured yet) the file's tag. */
   bpm: number | null;
+  /** True when `bpm` is the file's tag, not a measurement (such a BPM cannot be edited here: the app measures its own the first time the song plays). */
+  bpmFromTag: boolean;
   key: string | null;
   camelot: string | null;
+  keyFromTag: boolean;
   tags: string[];
   durationSec: number;
   addedAt: string;
@@ -194,9 +229,11 @@ export function toMusicRow(song: MusicSongRow): MusicRow {
     genreStatus: song.genreInfo?.status ?? null,
     plays: song._count.playEvents,
     analysed: song.bpm != null,
-    bpm: song.bpm,
-    key: song.key,
-    camelot: song.camelotKey,
+    bpm: shownBpm(song),
+    bpmFromTag: song.bpm == null && song.tagBpm != null,
+    key: song.key ?? song.tagKey,
+    camelot: shownCamelot(song),
+    keyFromTag: song.key == null && song.tagKey != null,
     tags: parseStringArray(song.tagsJson),
     durationSec: song.durationSec,
     addedAt: song.createdAt.toISOString(),

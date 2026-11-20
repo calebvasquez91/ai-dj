@@ -14,6 +14,8 @@ import {
   musicOrderBy,
   musicWhere,
   orderByCamelot,
+  orderByTempo,
+  shownCamelot,
   parseMusicQuery,
   sortsInMemory,
   toMusicRow,
@@ -31,14 +33,19 @@ async function loadCounts() {
   return { library, missingArtist, missingTitle, missingGenre, missingAny };
 }
 
-/** The songs of one page, in order. Key order is the Camelot wheel's, which the database cannot produce, so that sort orders every match by id first and reads just the page's rows after. */
+/** The songs of one page, in order. BPM and key order use the value the table shows (a measurement, else the file's tag) and key order is the Camelot wheel's, which the database cannot produce, so those sorts order every match here first and read just the page's rows after. */
 async function loadPage(query: MusicQuery, where: ReturnType<typeof musicWhere>, page: number) {
   const skip = (page - 1) * query.pageSize;
   if (!sortsInMemory(query.sort)) {
     return prisma.track.findMany({ where, orderBy: musicOrderBy(query.sort, query.dir), skip, take: query.pageSize, select: MUSIC_SELECT });
   }
-  const all = await prisma.track.findMany({ where, orderBy: musicOrderBy(query.sort, query.dir), select: { id: true, camelotKey: true } });
-  const ids = orderByCamelot(all, query.dir).slice(skip, skip + query.pageSize).map((r) => r.id);
+  const all = await prisma.track.findMany({
+    where,
+    orderBy: musicOrderBy(query.sort, query.dir),
+    select: { id: true, bpm: true, tagBpm: true, camelotKey: true, tagCamelotKey: true },
+  });
+  const ordered = query.sort === "bpm" ? orderByTempo(all, query.dir) : orderByCamelot(all.map((r) => ({ id: r.id, camelotKey: shownCamelot(r) })), query.dir);
+  const ids = ordered.slice(skip, skip + query.pageSize).map((r) => r.id);
   const found = await prisma.track.findMany({ where: { id: { in: ids } }, select: MUSIC_SELECT });
   const byId = new Map(found.map((s) => [s.id, s]));
   return ids.flatMap((id) => byId.get(id) ?? []);

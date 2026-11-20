@@ -11,13 +11,17 @@ vi.mock("@/lib/prisma", () => ({ prisma: { track: { count: mocks.count, findMany
 import { GET } from "./route";
 
 const get = (qs = "") => GET(new Request(`http://x/api/admin/music?${qs}`));
-const song = (id: string, camelotKey: string | null = null) => ({
+const song = (id: string, camelotKey: string | null = null, extra: Record<string, unknown> = {}) => ({
   id,
   artist: "Selena",
   title: `Bidi ${id}`,
   bpm: null,
   key: null,
   camelotKey,
+  tagBpm: null,
+  tagKey: null,
+  tagCamelotKey: null,
+  ...extra,
   tagsJson: null,
   durationSec: 100,
   createdAt: new Date("2026-11-19T00:00:00Z"),
@@ -68,18 +72,43 @@ describe("GET /api/admin/music", () => {
     mocks.count.mockResolvedValue(5);
     const keys: Record<string, string | null> = { a: "10A", b: "2A", c: null, d: "1B", e: "12B" };
     mocks.findMany
-      .mockResolvedValueOnce(Object.entries(keys).map(([id, camelotKey]) => ({ id, camelotKey })))
+      .mockResolvedValueOnce(Object.entries(keys).map(([id, camelotKey]) => ({ id, bpm: null, tagBpm: null, camelotKey, tagCamelotKey: null })))
       .mockImplementationOnce(async (args: { where: { id: { in: string[] } } }) => args.where.id.in.map((id) => song(id, keys[id])));
     const body = await (await get("sort=key&dir=asc&pageSize=25")).json();
     expect(body.rows.map((r: { id: string }) => r.id)).toEqual(["d", "b", "a", "e", "c"]);
-    // The first read is every match (id and key only); the second is the page.
-    expect(mocks.findMany.mock.calls[0][0].select).toEqual({ id: true, camelotKey: true });
+    // The first read is every match (the columns the order needs); the second is the page.
+    expect(mocks.findMany.mock.calls[0][0].select).toEqual({ id: true, bpm: true, tagBpm: true, camelotKey: true, tagCamelotKey: true });
     expect(mocks.findMany.mock.calls[1][0].where).toEqual({ id: { in: ["d", "b", "a", "e", "c"] } });
+  });
+
+  it("sorts by key using the file's tag key for a song with no measured key", async () => {
+    mocks.count.mockResolvedValue(3);
+    const rows = [
+      { id: "m", bpm: 100, tagBpm: null, camelotKey: "9A", tagCamelotKey: "1A" },
+      { id: "t", bpm: null, tagBpm: null, camelotKey: null, tagCamelotKey: "2B" },
+      { id: "n", bpm: null, tagBpm: null, camelotKey: null, tagCamelotKey: null },
+    ];
+    mocks.findMany.mockResolvedValueOnce(rows).mockImplementationOnce(async (args: { where: { id: { in: string[] } } }) => args.where.id.in.map((id) => song(id)));
+    const body = await (await get("sort=key&dir=asc")).json();
+    expect(body.rows.map((r: { id: string }) => r.id)).toEqual(["t", "m", "n"]);
+  });
+
+  it("sorts by BPM using the file's tag BPM for a song the app has not measured, songs with none last", async () => {
+    mocks.count.mockResolvedValue(4);
+    const rows = [
+      { id: "a", bpm: null, tagBpm: null, camelotKey: null, tagCamelotKey: null },
+      { id: "b", bpm: null, tagBpm: 128, camelotKey: null, tagCamelotKey: null },
+      { id: "c", bpm: 95, tagBpm: 140, camelotKey: null, tagCamelotKey: null },
+      { id: "d", bpm: null, tagBpm: 100, camelotKey: null, tagCamelotKey: null },
+    ];
+    mocks.findMany.mockResolvedValueOnce(rows).mockImplementationOnce(async (args: { where: { id: { in: string[] } } }) => args.where.id.in.map((id) => song(id)));
+    const asc = await (await get("sort=bpm&dir=asc")).json();
+    expect(asc.rows.map((r: { id: string }) => r.id)).toEqual(["c", "d", "b", "a"]);
   });
 
   it("pages the key sort: page 2 is the next slice of the wheel order", async () => {
     mocks.count.mockResolvedValue(30);
-    const all = Array.from({ length: 30 }, (_, i) => ({ id: `s${i}`, camelotKey: `${(i % 12) + 1}A` }));
+    const all = Array.from({ length: 30 }, (_, i) => ({ id: `s${i}`, bpm: null, tagBpm: null, camelotKey: `${(i % 12) + 1}A`, tagCamelotKey: null }));
     mocks.findMany
       .mockResolvedValueOnce(all)
       .mockImplementationOnce(async (args: { where: { id: { in: string[] } } }) => args.where.id.in.map((id) => song(id)));
