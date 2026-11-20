@@ -1,8 +1,13 @@
 import { describe, expect, it } from "vitest";
 import {
+  MANUAL_BPM_SOURCE,
+  editsTempoOrKey,
   isMissingText,
+  missingAnyWhere,
   missingFields,
   musicOrderBy,
+  orderByCamelot,
+  sortsInMemory,
   musicWhere,
   parseKeyInput,
   parseMusicEdit,
@@ -27,15 +32,27 @@ describe("parseMusicQuery", () => {
 
 describe("missing info", () => {
   it("counts blanks and placeholder names as missing", () => {
-    for (const v of ["", "   ", "Unknown", "unknown artist", "Untitled", null, undefined]) expect(isMissingText(v), String(v)).toBe(true);
+    for (const v of ["", "Unknown", "unknown artist", "Unknown Artist", "Untitled", null, undefined]) expect(isMissingText(v), String(v)).toBe(true);
     expect(isMissingText("Selena")).toBe(false);
     expect(isMissingText("Unknown Mortal Orchestra")).toBe(false);
+    // A real name that merely looks short is not a placeholder.
+    expect(isMissingText("NA")).toBe(false);
+  });
+
+  it("is the same test the database filter makes, so the marks, the counts and the filter agree", () => {
+    const text = JSON.stringify(missingAnyWhere);
+    for (const placeholder of ["unknown", "unknown artist", "untitled", "untitled track", "n/a", "-"]) {
+      expect(text, placeholder).toContain('"equals":"' + placeholder + '"');
+      expect(isMissingText(placeholder)).toBe(true);
+    }
+    expect(text).not.toContain('"equals":"na"');
   });
 
   it("lists which of artist, name and genre a song lacks", () => {
     expect(missingFields({ artist: "Selena", title: "Bidi Bidi", genre: "Latin" })).toEqual([]);
     expect(missingFields({ artist: "", title: "Bidi Bidi", genre: null })).toEqual(["artist", "genre"]);
     expect(missingFields({ artist: "Selena", title: "Untitled", genre: "  " })).toEqual(["title", "genre"]);
+    expect(missingFields({ artist: "Unknown Artist", title: "Bidi", genre: "Latin" })).toEqual(["artist"]);
   });
 });
 
@@ -60,6 +77,11 @@ describe("musicWhere", () => {
     expect(JSON.stringify(musicWhere("5", false))).not.toContain('"bpm"');
   });
 
+  it("leaves tags out of a word made of the JSON's own punctuation, so it cannot match every tagged song", () => {
+    for (const word of ["[", "]", '"', ",", "\\"]) expect(JSON.stringify(musicWhere(word, false)), word).not.toContain('"tagsJson"');
+    expect(JSON.stringify(musicWhere("spooky", false))).toContain('"tagsJson":{"contains":"spooky"');
+  });
+
   it("adds the missing-info filter on top of the search", () => {
     const where = musicWhere("selena", true) as { AND: unknown[] };
     expect(where.AND).toHaveLength(2);
@@ -79,9 +101,32 @@ describe("musicOrderBy", () => {
     }
   });
 
+  it("leaves the key sort to the route (the database only has text order, which puts 10A before 2A)", () => {
+    expect(sortsInMemory("key")).toBe(true);
+    expect(sortsInMemory("bpm")).toBe(false);
+    expect(JSON.stringify(musicOrderBy("key", "asc"))).not.toContain("camelotKey");
+  });
+
   it("puts songs with no BPM last, whichever way it sorts", () => {
     expect(musicOrderBy("bpm", "desc")[0]).toEqual({ bpm: { sort: "desc", nulls: "last" } });
     expect(musicOrderBy("plays", "desc")[0]).toEqual({ playEvents: { _count: "desc" } });
+  });
+});
+
+describe("orderByCamelot", () => {
+  const rows = (codes: (string | null)[]) => codes.map((camelotKey, i) => ({ id: "r" + i, camelotKey }));
+  const codes = (list: { camelotKey: string | null }[]) => list.map((r) => r.camelotKey);
+
+  it("orders by the wheel, not as text", () => {
+    expect(codes(orderByCamelot(rows(["10A", "2B", "1A", "12B", "2A", "10B", "9A"]), "asc"))).toEqual(["1A", "2A", "2B", "9A", "10A", "10B", "12B"]);
+    expect(codes(orderByCamelot(rows(["10A", "2B", "1A"]), "desc"))).toEqual(["10A", "2B", "1A"]);
+  });
+
+  it("puts songs with no key last in both directions, and keeps the incoming order for ties", () => {
+    const input = rows([null, "3A", "3A", null, "1B"]);
+    expect(orderByCamelot(input, "asc").map((r) => r.id)).toEqual(["r4", "r1", "r2", "r0", "r3"]);
+    expect(orderByCamelot(input, "desc").map((r) => r.id)).toEqual(["r1", "r2", "r4", "r0", "r3"]);
+    expect(orderByCamelot(rows(["bogus", "2A"]), "asc").map((r) => r.camelotKey)).toEqual(["2A", "bogus"]);
   });
 });
 
@@ -102,7 +147,11 @@ describe("toMusicRow", () => {
   });
 
   it("shapes a song for the table", () => {
-    expect(toMusicRow(song())).toMatchObject({ id: "t1", genre: "Latin", subgenres: ["Cumbia"], genreStatus: "needs-review", plays: 3, tags: ["latin", "throwback"], camelot: "8A", missing: [] });
+    expect(toMusicRow(song())).toMatchObject({ id: "t1", genre: "Latin", subgenres: ["Cumbia"], genreStatus: "needs-review", plays: 3, tags: ["latin", "throwback"], camelot: "8A", analysed: true, missing: [] });
+  });
+
+  it("calls a song analysed only when it has a tempo", () => {
+    expect(toMusicRow(song({ bpm: null })).analysed).toBe(false);
   });
 
   it("marks a song with no classification and no artist as missing both, and survives bad JSON", () => {
@@ -144,8 +193,16 @@ describe("parseMusicEdit", () => {
     });
   });
 
-  it("clears BPM, key and tags with null / empty", () => {
-    expect(parseMusicEdit({ bpm: null, key: "", tags: [] })).toEqual({ ok: true, data: { bpm: null, key: null, camelotKey: null, tagsJson: null } });
+  it("clears the key and the tags with null / empty, but never the BPM", () => {
+    expect(parseMusicEdit({ key: "", tags: [] })).toEqual({ ok: true, data: { key: null, camelotKey: null, tagsJson: null } });
+    expect(parseMusicEdit({ bpm: null })).toMatchObject({ ok: false });
+  });
+
+  it("knows which edits touch the tempo or key (they mark the song as set by hand)", () => {
+    expect(editsTempoOrKey({ bpm: 120 })).toBe(true);
+    expect(editsTempoOrKey({ key: null, camelotKey: null })).toBe(true);
+    expect(editsTempoOrKey({ artist: "A", tagsJson: null })).toBe(false);
+    expect(MANUAL_BPM_SOURCE).toBe("manual");
   });
 
   it("refuses a blank artist or name, a bad BPM, a bad key and a non-list of tags", () => {

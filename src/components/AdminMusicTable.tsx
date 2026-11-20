@@ -5,7 +5,8 @@ import { GenrePicker } from "@/components/GenrePicker";
 import { PAGE_SIZES, splitTagInput, type MissingField, type MusicRow, type SortDir, type SortKey } from "@/lib/adminMusic";
 
 type Counts = { library: number; missingArtist: number; missingTitle: number; missingGenre: number; missingAny: number };
-type Page = { rows: MusicRow[]; total: number; page: number; pages: number; pageSize: number; counts: Counts };
+/** `counts` is null unless the request asked for them (they do not depend on the search). */
+type Page = { rows: MusicRow[]; total: number; page: number; pages: number; pageSize: number; counts: Counts | null };
 
 // The first two columns stay pinned while the rest scroll sideways, so the song is always named. On a phone they are narrower so some of the
 // other columns still fit beside them.
@@ -143,6 +144,9 @@ export function AdminMusicTable() {
   const [pageSize, setPageSize] = useState<number>(50);
   const [missingOnly, setMissingOnly] = useState(false);
   const [data, setData] = useState<Page | null>(null);
+  const [counts, setCounts] = useState<Counts | null>(null);
+  // The reload number the counts were last fetched for: they are asked for again after an edit or Refresh, not on every search.
+  const countsFor = useRef(-1);
   // Which request the rows on screen answer; while it is not the current one, a load is in flight.
   const [loadedFor, setLoadedFor] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -165,12 +169,17 @@ export function AdminMusicTable() {
 
   useEffect(() => {
     const controller = new AbortController();
-    fetch(`/api/admin/music?${requestQuery}`, { signal: controller.signal })
+    const withCounts = countsFor.current !== reload;
+    fetch(`/api/admin/music?${requestQuery}${withCounts ? "&counts=1" : ""}`, { signal: controller.signal })
       .then(async (res) => {
         if (!res.ok) throw new Error(((await res.json().catch(() => null)) as { error?: string } | null)?.error ?? `The catalog could not be loaded (${res.status}).`);
         return (await res.json()) as Page;
       })
       .then((next) => {
+        if (next.counts) {
+          countsFor.current = reload;
+          setCounts(next.counts);
+        }
         setData(next);
         setError(null);
         setPage(next.page);
@@ -182,7 +191,7 @@ export function AdminMusicTable() {
         if (!controller.signal.aborted) setLoadedFor(requestKey);
       });
     return () => controller.abort();
-  }, [requestQuery, requestKey]);
+  }, [requestQuery, requestKey, reload]);
 
   useEffect(() => {
     if (!notice) return;
@@ -246,7 +255,6 @@ export function AdminMusicTable() {
     }
   }
 
-  const counts = data?.counts;
   const first = data && data.total > 0 ? (data.page - 1) * data.pageSize + 1 : 0;
   const last = data ? Math.min(data.page * data.pageSize, data.total) : 0;
 
@@ -426,23 +434,35 @@ export function AdminMusicTable() {
                     />
                   </td>
                   <td className="px-3 py-2 align-top tabular-nums border-b border-border-subtle group-hover:bg-surface-hover">
-                    <EditableCell
-                      label={`BPM for ${name}`}
-                      initial={row.bpm == null ? "" : String(Math.round(row.bpm * 100) / 100)}
-                      inputMode="decimal"
-                      placeholder="e.g. 128"
-                      display={row.bpm == null ? <span className="text-faint">—</span> : Math.round(row.bpm * 10) / 10}
-                      onSave={(text) => saveEdit(row, { bpm: text.trim() === "" ? null : Number(text) }, "BPM")}
-                    />
+                    {row.analysed && row.bpm != null ? (
+                      <EditableCell
+                        label={`BPM for ${name}`}
+                        initial={String(Math.round(row.bpm * 100) / 100)}
+                        inputMode="decimal"
+                        placeholder="e.g. 128"
+                        display={Math.round(row.bpm * 10) / 10}
+                        onSave={async (text) => (text.trim() === "" ? "Type a BPM from 40 to 300." : saveEdit(row, { bpm: Number(text) }, "BPM"))}
+                      />
+                    ) : (
+                      <span className="px-1 text-faint" title="Filled in by the app the first time the song plays">
+                        —
+                      </span>
+                    )}
                   </td>
                   <td className="px-3 py-2 align-top border-b border-border-subtle group-hover:bg-surface-hover">
-                    <EditableCell
-                      label={`Key for ${name}`}
-                      initial={row.key ?? ""}
-                      placeholder="A minor, 8A…"
-                      display={row.key ? `${row.key}${row.camelot ? ` · ${row.camelot}` : ""}` : <span className="text-faint">—</span>}
-                      onSave={(text) => saveEdit(row, { key: text.trim() === "" ? null : text }, "key")}
-                    />
+                    {row.analysed ? (
+                      <EditableCell
+                        label={`Key for ${name}`}
+                        initial={row.key ?? ""}
+                        placeholder="A minor, 8A…"
+                        display={row.key ? `${row.key}${row.camelot ? ` · ${row.camelot}` : ""}` : <span className="text-faint">—</span>}
+                        onSave={(text) => saveEdit(row, { key: text.trim() === "" ? null : text }, "key")}
+                      />
+                    ) : (
+                      <span className="px-1 text-faint" title="Filled in by the app the first time the song plays">
+                        —
+                      </span>
+                    )}
                   </td>
                 </tr>
               );
@@ -460,7 +480,7 @@ export function AdminMusicTable() {
 
       <div className="flex flex-wrap items-center justify-between gap-2">
         <p className="text-xs text-faint">
-          Click any cell to edit it, then press Enter. Red means the song has no {Object.values(MISSING_LABEL).join(", ")} yet. Changes are saved for every account.
+          Click any cell to edit it, then press Enter. Red means the song has no {Object.values(MISSING_LABEL).join(", ")} yet. Changes are saved for every account. BPM and key can be corrected once the app has analysed the song (the first time it plays).
         </p>
         {pager}
       </div>

@@ -24,6 +24,10 @@
 
 import { buildSongMap, type SongMap } from "@/lib/song-map";
 import { bestTempoRatio } from "@/lib/tempoRatio";
+import { PITCH_CLASSES, camelotForKey } from "@/lib/camelot";
+
+// The Camelot helpers moved to lib/camelot.ts (so the admin page can use them without this module); still exported from here for existing imports.
+export { camelotForKey };
 
 export interface TrackAnalysis {
   bpm: number;
@@ -370,8 +374,6 @@ function downsampleForWaveform(envelope: Float32Array, points = 240): number[] {
 // Krumhansl-Kessler major/minor profile correlation.
 // ---------------------------------------------------------------------------
 
-const PITCH_CLASSES = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"];
-
 // Standard published Krumhansl-Kessler key profiles (public research constants).
 const MAJOR_PROFILE = [6.35, 2.23, 3.48, 2.33, 4.38, 4.09, 2.52, 5.19, 2.39, 3.66, 2.29, 2.88];
 const MINOR_PROFILE = [6.33, 2.68, 3.52, 5.38, 2.6, 3.53, 2.54, 4.75, 3.98, 2.69, 3.34, 3.17];
@@ -510,28 +512,6 @@ function estimateKey(
 
   const confidence = Math.max(0, Math.min(1, bestScore - secondScore));
   return { key: bestLabel, confidence };
-}
-
-// ---------------------------------------------------------------------------
-// Camelot wheel — maps an estimated key to Camelot notation (e.g. "8A") for
-// harmonic-mixing compatibility scoring. Camelot numbers follow the circle
-// of fifths (each +7 semitones/perfect-fifth step advances the number by
-// one); a minor key shares its relative major's number with the "A" letter
-// in place of "B" (relative major = minor tonic + 3 semitones).
-// ---------------------------------------------------------------------------
-
-const MAJOR_CAMELOT_NUMBER_BY_SEMITONE = [8, 3, 10, 5, 12, 7, 2, 9, 4, 11, 6, 1];
-
-export function camelotForKey(key: string | null): string | null {
-  if (!key) return null;
-  const match = key.match(/^([A-G]#?)\s+(major|minor)$/);
-  if (!match) return null;
-  const semitone = PITCH_CLASSES.indexOf(match[1]);
-  if (semitone < 0) return null;
-  const isMinor = match[2] === "minor";
-  const idx = isMinor ? (semitone + 3) % 12 : semitone;
-  const number = MAJOR_CAMELOT_NUMBER_BY_SEMITONE[idx];
-  return `${number}${isMinor ? "A" : "B"}`;
 }
 
 // ---------------------------------------------------------------------------

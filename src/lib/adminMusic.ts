@@ -2,7 +2,7 @@
 // which songs count as "missing info", and what an edit may change. Pure (no database calls), so it is all unit-tested; the routes under
 // app/api/admin/music do the reading and writing.
 import type { Prisma } from "@/generated/prisma/client";
-import { camelotForKey } from "@/lib/audio-analysis-core";
+import { PITCH_CLASSES, camelotForKey, camelotRank } from "@/lib/camelot";
 import { cleanTags, cleanText, MAX_TEXT_LENGTH } from "@/lib/apiValidation";
 
 export const PAGE_SIZES = [25, 50, 100, 250] as const;
@@ -11,11 +11,17 @@ export const SORT_KEYS = ["artist", "title", "genre", "plays", "bpm", "key", "ad
 export type SortKey = (typeof SORT_KEYS)[number];
 export type SortDir = "asc" | "desc";
 
-/** The words that stand in for a name nobody filled in. A song called one of these is as good as unnamed. */
-const PLACEHOLDER_NAMES = ["unknown", "unknown artist", "untitled", "untitled track", "n/a", "na", "-"];
+/**
+ * The words that stand in for a name nobody filled in ("Unknown Artist" is what the library really holds). A song called one of these is as good as
+ * unnamed. Names are trimmed on every way a song is added or edited (cleanText), so a plain case-insensitive match is enough, and it is the very same
+ * test the database filter below makes, so the red marks, the counts and the "Missing info" list always agree.
+ */
+const PLACEHOLDER_NAMES = ["unknown", "unknown artist", "untitled", "untitled track", "n/a", "-"];
 export const MIN_BPM = 40;
 export const MAX_BPM = 300;
 const MAX_SEARCH_WORDS = 6;
+/** The characters a JSON array of strings is built from (a quote, brackets, a comma, a backslash). */
+const JSON_PUNCTUATION = /["[\],\\]/;
 
 export type MissingField = "artist" | "title" | "genre";
 
@@ -40,9 +46,9 @@ export function parseMusicQuery(params: URLSearchParams): MusicQuery {
   };
 }
 
-/** True for a name that is empty, only spaces, or a placeholder such as "Unknown Artist". */
+/** True for a name that is empty or a placeholder such as "Unknown Artist" (the same test as `missingArtistWhere` / `missingTitleWhere`). */
 export function isMissingText(value: string | null | undefined): boolean {
-  const v = (value ?? "").trim().toLowerCase();
+  const v = (value ?? "").toLowerCase();
   return v === "" || PLACEHOLDER_NAMES.includes(v);
 }
 
@@ -77,11 +83,12 @@ export function musicWhere(q: string, missing: boolean): Prisma.TrackWhereInput 
     const options: Prisma.TrackWhereInput[] = [
       { artist: { contains: word, mode: insensitive } },
       { title: { contains: word, mode: insensitive } },
-      { tagsJson: { contains: word, mode: insensitive } },
       { key: { contains: word, mode: insensitive } },
       { camelotKey: { equals: word, mode: insensitive } },
       { genreInfo: { is: { OR: [{ genre: { contains: word, mode: insensitive } }, { subgenresJson: { contains: word, mode: insensitive } }] } } },
     ];
+    // Tags are stored as JSON text (["halloween","spooky"]), so a word holding the JSON's own punctuation would match every tagged song: leave tags out for it.
+    if (!JSON_PUNCTUATION.test(word)) options.push({ tagsJson: { contains: word, mode: insensitive } });
     if (Number.isFinite(n) && n >= MIN_BPM && n <= MAX_BPM) options.push({ bpm: { gte: n - 0.5, lte: n + 0.5 } });
     return { OR: options };
   });
@@ -104,10 +111,28 @@ export function musicOrderBy(sort: SortKey, dir: SortDir): Prisma.TrackOrderByWi
     case "bpm":
       return [{ bpm: { sort: dir, nulls: "last" } }, { artist: "asc" }, tie];
     case "key":
-      return [{ camelotKey: { sort: dir, nulls: "last" } }, { artist: "asc" }, tie];
+      // The wheel order (…2A, 3A … 10A) is not text order, which is all the database has, so the route sorts this one itself (`orderByCamelot`).
+      return [{ artist: "asc" }, tie];
     case "added":
       return [{ createdAt: dir }, tie];
   }
+}
+
+/** True when the database cannot give this sort order itself and the route must order the songs with `orderByCamelot`. */
+export function sortsInMemory(sort: SortKey): boolean {
+  return sort === "key";
+}
+
+/** Puts rows in Camelot wheel order (1A, 1B, 2A … 12B), songs with no key last whichever way it runs; ties keep their incoming order (artist, then id). */
+export function orderByCamelot<T extends { camelotKey: string | null }>(rows: readonly T[], dir: SortDir): T[] {
+  const sign = dir === "desc" ? -1 : 1;
+  return rows
+    .map((row, index) => ({ row, index, rank: camelotRank(row.camelotKey) }))
+    .sort((a, b) => {
+      if (a.rank == null || b.rank == null) return a.rank == null && b.rank == null ? a.index - b.index : a.rank == null ? 1 : -1;
+      return (a.rank - b.rank) * sign || a.index - b.index;
+    })
+    .map((x) => x.row);
 }
 
 /** What the catalog reads for each song. */
@@ -137,6 +162,8 @@ export type MusicRow = {
   /** "auto" | "needs-review" | "confirmed" for a classified song, null when it has no classification yet. */
   genreStatus: string | null;
   plays: number;
+  /** True once the app has analysed the song (it has a tempo); only then do a BPM and key mean anything to the app, so only then are they editable. */
+  analysed: boolean;
   bpm: number | null;
   key: string | null;
   camelot: string | null;
@@ -166,6 +193,7 @@ export function toMusicRow(song: MusicSongRow): MusicRow {
     subgenres: parseStringArray(song.genreInfo?.subgenresJson),
     genreStatus: song.genreInfo?.status ?? null,
     plays: song._count.playEvents,
+    analysed: song.bpm != null,
     bpm: song.bpm,
     key: song.key,
     camelot: song.camelotKey,
@@ -178,7 +206,6 @@ export function toMusicRow(song: MusicSongRow): MusicRow {
 
 // --- Editing -------------------------------------------------------------------------------------------------------------------
 
-const PITCH_CLASSES = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"];
 const NATURAL_SEMITONE: Record<string, number> = { C: 0, D: 2, E: 4, F: 5, G: 7, A: 9, B: 11 };
 
 /**
@@ -214,15 +241,26 @@ export function parseKeyInput(input: string): { key: string; camelotKey: string 
 export type MusicEdit = {
   artist?: string;
   title?: string;
-  bpm?: number | null;
+  bpm?: number;
   key?: string | null;
   camelotKey?: string | null;
   tagsJson?: string | null;
 };
 
+/**
+ * True when the edit changes the song's tempo or key. Those two belong to the app's analysis of the song (the beat grid, the mixing and the
+ * harmonic matching all read them), so the route only accepts them for a song that has been analysed, and marks the song's tempo as set by hand.
+ */
+export function editsTempoOrKey(data: MusicEdit): boolean {
+  return data.bpm !== undefined || data.key !== undefined;
+}
+
+/** The marker stored in Track.bpmSource when the admin set the tempo or key: the app's own re-analysis must then leave both alone. */
+export const MANUAL_BPM_SOURCE = "manual";
+
 export type MusicEditResult = { ok: true; data: MusicEdit } | { ok: false; error: string };
 
-/** Checks an edit from the catalog. Names cannot be blanked (a nameless song is the problem being fixed); BPM and key can be cleared with null. */
+/** Checks an edit from the catalog. Names cannot be blanked (a nameless song is the problem being fixed), and a BPM must be a number (clearing it would make the song look unanalysed while its beat grid and waveform stay); a key can be cleared. */
 export function parseMusicEdit(body: unknown): MusicEditResult {
   if (!body || typeof body !== "object") return { ok: false, error: "Invalid request body." };
   const b = body as Record<string, unknown>;
@@ -236,9 +274,7 @@ export function parseMusicEdit(body: unknown): MusicEditResult {
   }
 
   if ("bpm" in b) {
-    if (b.bpm === null) {
-      data.bpm = null;
-    } else if (typeof b.bpm === "number" && Number.isFinite(b.bpm) && b.bpm >= MIN_BPM && b.bpm <= MAX_BPM) {
+    if (typeof b.bpm === "number" && Number.isFinite(b.bpm) && b.bpm >= MIN_BPM && b.bpm <= MAX_BPM) {
       data.bpm = Math.round(b.bpm * 100) / 100;
     } else {
       return { ok: false, error: `BPM must be a number from ${MIN_BPM} to ${MAX_BPM}.` };
