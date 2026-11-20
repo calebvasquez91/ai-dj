@@ -69,6 +69,12 @@ export default async function AdminPage() {
           detail="Every account's playlists, with full access: rename, take songs out, delete."
         />
         <Card
+          href="/admin/music"
+          title="Music catalog"
+          line={o.songs == null ? "—" : `${o.songs.toLocaleString("en-US")} songs`}
+          detail="Every song in one table: artist, name, genre, plays, tags, BPM and key. Search it, and fix whatever is missing for every account."
+        />
+        <Card
           href="/library"
           title="Music library"
           line={o.songs == null ? "—" : `${o.songs.toLocaleString("en-US")} songs`}

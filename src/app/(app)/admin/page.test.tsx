@@ -40,7 +40,7 @@ describe("the Admin page", () => {
   it("links the admin to every admin screen, each with its number", async () => {
     mocks.owner = { user: { id: "cmadmin0001" } };
     const html = renderToStaticMarkup(await AdminPage());
-    for (const href of ["/admin/feedback", "/admin/genres", "/library?view=review", "/admin/stats", "/admin/playlists", "/library"]) {
+    for (const href of ["/admin/feedback", "/admin/genres", "/library?view=review", "/admin/stats", "/admin/playlists", "/admin/music", "/library"]) {
       expect(html, href).toContain(`href="${href}"`);
     }
     expect(html).toContain("1 message");
