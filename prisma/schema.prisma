@@ -86,6 +86,13 @@ model Track {
   // waveform to auto-analyze at all.
   hotCueOverridesJson String?
 
+  // The BPM and key the song's own file tags carry (ID3 TBPM / TKEY), read once from the stored file (prisma/tag-bpm-key.sql). Kept apart from
+  // bpm / key / camelotKey above, which are the app's own analysis: a song with a bpm counts as analysed, and a tag BPM must not make a never-played
+  // song look analysed. Shown in the admin's Music catalog and searched; never read by the mixing. null means the file has no usable tag.
+  tagBpm        Float?
+  tagKey        String?
+  tagCamelotKey String?
+
   // JSON.stringify'd string array, e.g. ["halloween","spooky"] — user-set,
   // manually editable in the library UI. Drives the Spooky Music system
   // playlist's auto-membership (any track tagged halloween/spooky/horror/

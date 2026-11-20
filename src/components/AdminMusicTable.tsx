@@ -110,6 +110,16 @@ function EditableCell({
   );
 }
 
+/** A BPM or key that comes from the file's own tag (the app has not measured the song yet): shown, marked, and not editable here. */
+function FromTag({ children }: { children: React.ReactNode }) {
+  return (
+    <span className="px-1" title="From the file's own tags. The app measures its own the first time the song plays.">
+      {children}
+      <span className="ml-1 align-middle text-[10px] font-semibold uppercase text-faint">tag</span>
+    </span>
+  );
+}
+
 function SortHeader({ column, sort, dir, onSort }: { column: (typeof COLUMNS)[number]; sort: SortKey; dir: SortDir; onSort: (key: SortKey) => void }) {
   const active = column.sortable && column.key === sort;
   return (
@@ -443,8 +453,10 @@ export function AdminMusicTable() {
                         display={Math.round(row.bpm * 10) / 10}
                         onSave={async (text) => (text.trim() === "" ? "Type a BPM from 40 to 300." : saveEdit(row, { bpm: Number(text) }, "BPM"))}
                       />
+                    ) : row.bpm != null ? (
+                      <FromTag>{Math.round(row.bpm * 10) / 10}</FromTag>
                     ) : (
-                      <span className="px-1 text-faint" title="Filled in by the app the first time the song plays">
+                      <span className="px-1 text-faint" title="The file has no BPM tag; the app measures one the first time the song plays">
                         —
                       </span>
                     )}
@@ -458,8 +470,10 @@ export function AdminMusicTable() {
                         display={row.key ? `${row.key}${row.camelot ? ` · ${row.camelot}` : ""}` : <span className="text-faint">—</span>}
                         onSave={(text) => saveEdit(row, { key: text.trim() === "" ? null : text }, "key")}
                       />
+                    ) : row.key ? (
+                      <FromTag>{`${row.key}${row.camelot ? ` · ${row.camelot}` : ""}`}</FromTag>
                     ) : (
-                      <span className="px-1 text-faint" title="Filled in by the app the first time the song plays">
+                      <span className="px-1 text-faint" title="The file has no key tag; the app measures one the first time the song plays">
                         —
                       </span>
                     )}
@@ -480,7 +494,7 @@ export function AdminMusicTable() {
 
       <div className="flex flex-wrap items-center justify-between gap-2">
         <p className="text-xs text-faint">
-          Click any cell to edit it, then press Enter. Red means the song has no {Object.values(MISSING_LABEL).join(", ")} yet. Changes are saved for every account. BPM and key can be corrected once the app has analysed the song (the first time it plays).
+          Click any cell to edit it, then press Enter. Red means the song has no {Object.values(MISSING_LABEL).join(", ")} yet. Changes are saved for every account. A BPM or key marked &quot;tag&quot; comes from the file itself; the app measures its own the first time the song plays, and only then can it be corrected here.
         </p>
         {pager}
       </div>
