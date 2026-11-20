@@ -3,7 +3,7 @@
 import { prisma } from "@/lib/prisma";
 
 export type AdminPlaylistAction = "playlist.rename" | "playlist.delete" | "playlist.add-song" | "playlist.remove-song" | "playlist.reorder";
-export type AdminLibraryAction = "library.delete-song";
+export type AdminLibraryAction = "library.delete-song" | "library.edit-song";
 
 /** Records the change when `actorId` is not the playlist's owner (the admin working on their own playlists is not worth a line). */
 export async function recordAdminPlaylistAction(args: {
@@ -56,5 +56,39 @@ export async function recordAdminLibraryDelete(args: {
     });
   } catch (err) {
     console.warn("Could not log a song deleted from the library (has prisma/admin-actions.sql been run?):", err);
+  }
+}
+
+/**
+ * Records that the admin changed a song's details from the Music catalog (for every account). The log's playlist columns hold the song,
+ * as for a delete; `detail` says what changed and what the old values were, so a wrong edit can be put back by hand.
+ */
+export async function recordAdminLibraryEdit(args: {
+  actorId: string;
+  track: { id: string; title: string; artist: string; userId: string; bpm?: number | null; key?: string | null; tagsJson?: string | null };
+  changed: { artist?: string; title?: string; bpm?: number | null; key?: string | null; tagsJson?: string | null };
+}): Promise<void> {
+  const { actorId, track, changed } = args;
+  const parts: string[] = [];
+  if (changed.artist !== undefined) parts.push(`artist was "${track.artist}"`);
+  if (changed.title !== undefined) parts.push(`name was "${track.title}"`);
+  if (changed.bpm !== undefined) parts.push(`bpm was ${track.bpm ?? "empty"}`);
+  if (changed.key !== undefined) parts.push(`key was ${track.key ?? "empty"}`);
+  if (changed.tagsJson !== undefined) parts.push(`tags were ${track.tagsJson ?? "empty"}`);
+  try {
+    const owner = await prisma.user.findUnique({ where: { id: track.userId }, select: { email: true } });
+    await prisma.adminAction.create({
+      data: {
+        adminId: actorId,
+        action: "library.edit-song" satisfies AdminLibraryAction,
+        playlistId: null,
+        playlistName: `${changed.artist ?? track.artist} - ${changed.title ?? track.title}`.slice(0, 300),
+        ownerId: track.userId,
+        ownerEmail: owner?.email ?? null,
+        detail: `track ${track.id}; ${parts.join("; ")}`.slice(0, 300),
+      },
+    });
+  } catch (err) {
+    console.warn("Could not log a song edited in the library (has prisma/admin-actions.sql been run?):", err);
   }
 }

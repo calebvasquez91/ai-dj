@@ -6,6 +6,7 @@ import { toTrackApiResponse } from "@/lib/trackApi";
 import { apiHandler, notFound, unauthorized } from "@/lib/apiRoute";
 import { cleanTags, cleanWaveformPeaks } from "@/lib/apiValidation";
 import { isAdmin } from "@/lib/feedbackAdmin";
+import { MANUAL_BPM_SOURCE } from "@/lib/adminMusic";
 import { recordAdminLibraryDelete } from "@/lib/adminAudit";
 import { recordAuditEvent, requestDeviceId } from "@/lib/telemetryServer";
 import { loadOneUserTrackData, saveUserTrackData } from "@/lib/trackUserData";
@@ -110,6 +111,11 @@ async function handlePATCH(request: Request, { params }: { params: Promise<{ id:
     for (const column of Object.keys(data)) {
       if ((existing as Record<string, unknown>)[column] != null) delete data[column];
     }
+  }
+  // A tempo or key the admin set by hand (Music catalog) stays as it is: the app's own re-analysis of the song must not write over it, whoever's
+  // device ran it (the admin may otherwise overwrite analysis, so this is checked apart from the rule above).
+  if (existing.bpmSource === MANUAL_BPM_SOURCE) {
+    for (const column of ["bpm", "bpmConfidence", "key", "keyConfidence", "camelotKey", "bpmSource"]) delete data[column];
   }
 
   const track = Object.keys(data).length > 0 ? await prisma.track.update({ where: { id }, data }) : existing;

@@ -181,6 +181,19 @@ describe("PATCH /api/tracks/[id]: what is shared and what is each person's own",
     expect(mocks.update).toHaveBeenCalledWith({ where: { id: "t1" }, data: { bpm: 126 } });
   });
 
+  it("leaves a tempo and key the admin set by hand alone, even when the admin's own device re-analyses the song", async () => {
+    for (const user of ["u-other", "u-admin"]) {
+      mocks.user = user;
+      mocks.update.mockClear();
+      mocks.findUnique.mockResolvedValue({ ...song, bpm: 128, key: "A minor", camelotKey: "8A", bpmSource: "manual" });
+      const res = await PATCH(patch({ bpmSource: "tap", analysis: { bpm: 64, bpmConfidence: 0.2, key: "C major", keyConfidence: 0.3, camelotKey: "8B", beatGridOffsetSec: 0.4 } }), ctx);
+      expect(res.status).toBe(200);
+      // The rest of the analysis may still be refreshed, but tempo, key and the marker stay.
+      const data = mocks.update.mock.calls[0]?.[0]?.data ?? {};
+      for (const column of ["bpm", "bpmConfidence", "key", "keyConfidence", "camelotKey", "bpmSource"]) expect(data, user + ": " + column).not.toHaveProperty(column);
+    }
+  });
+
   it("refuses tags from anyone but the admin (they decide what is in Spooky Music for everybody)", async () => {
     const res = await PATCH(patch({ tags: ["halloween"] }), ctx);
     expect(res.status).toBe(403);
