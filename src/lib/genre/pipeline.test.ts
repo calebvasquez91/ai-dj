@@ -57,6 +57,34 @@ describe("combining sources", () => {
     expect(lone.genres).toEqual([]);
   });
 
+  it("keeps the parent genre of a subgenre it keeps: one clean file tag that names a subgenre is enough on its own", () => {
+    // A lone file tag is 0.6 x 0.9 = 0.54 for the subgenre; the parent used to get only 0.54 x 0.9 = 0.486, just under the 0.5 cutoff, so the track never resolved.
+    const r = combineSourceTags([tag("file-tags", "Electronic", 0.6, "House")]);
+    expect(r.genres).toHaveLength(1);
+    expect(r.genres[0].genre).toBe("Electronic");
+    expect(r.genres[0].confidence).toBeCloseTo(0.6 * w["file-tags"]);
+    expect(r.genres[0].subgenres.map((s) => s.subgenre)).toEqual(["House"]);
+    expect(resolveGenreTags([tag("file-tags", "Electronic", 0.6, "House")]).autoStatus).toBe("auto");
+    expect(resolveGenreTags([tag("file-tags", "Pop", 0.6, "Dance Pop")]).autoStatus).toBe("auto");
+    expect(resolveGenreTags([tag("file-tags", "Latin", 0.6, "Latin Pop")]).genres.map((g) => g.genre)).toEqual(["Latin"]);
+  });
+
+  it("never makes a parent genre less sure than its best kept subgenre, and does not raise one whose subgenre is not kept", () => {
+    for (const [source, own] of [["musicbrainz", 0.55], ["file-tags", 0.6], ["lastfm", 0.7]] as const) {
+      const r = combineSourceTags([tag(source, "Electronic", own, "House")]);
+      for (const g of r.genres) for (const s of g.subgenres) expect(g.confidence).toBeGreaterThanOrEqual(s.confidence);
+    }
+    // a subgenre below the cutoff is not kept, so it lifts nothing: a weak tag still leaves the track for review
+    const weak = combineSourceTags([tag("file-tags", "Electronic", 0.45, "House")]);
+    expect(weak.genres).toEqual([]);
+    expect(resolveGenreTags([tag("file-tags", "Electronic", 0.45, "House")]).autoStatus).toBe("needs-review");
+  });
+
+  it("still sends a track to review when the file's subgenre tag and another source disagree, or the tag lists several genres", () => {
+    expect(resolveGenreTags([tag("file-tags", "Electronic", 0.6, "House"), tag("lastfm", "Pop", 0.75)]).autoStatus).toBe("needs-review");
+    expect(resolveGenreTags([tag("file-tags", "Electronic", 0.45, "House"), tag("file-tags", "Pop", 0.45, "Dance Pop")]).autoStatus).toBe("needs-review");
+  });
+
   it("does not let the LLM compound with the sources it was shown", () => {
     const sources = combineSourceTags([tag("file-tags", "Pop", 0.6)]).best;
     const withLlm = combineSourceTags([tag("file-tags", "Pop", 0.6), tag("llm", "Pop", 0.6)]).best;
