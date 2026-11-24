@@ -579,11 +579,12 @@ body {
   border-radius: 999px 999px 0 0;
   transform-origin: bottom;
   transform: scaleY(calc(6 / var(--wave-peak, 40)));
+  /* --wave-bar-low/mid/high are set only while a playlist with its own lights plays (components/HolidayLayer.tsx, e.g. GTA6); otherwise the app's own accents. */
   background: linear-gradient(
     to top,
-    color-mix(in srgb, var(--accent-teal-bright) 55%, transparent),
-    color-mix(in srgb, var(--accent-purple) 45%, transparent) 60%,
-    color-mix(in srgb, var(--accent-pink) 35%, transparent)
+    color-mix(in srgb, var(--wave-bar-low, var(--accent-teal-bright)) 55%, transparent),
+    color-mix(in srgb, var(--wave-bar-mid, var(--accent-purple)) 45%, transparent) 60%,
+    color-mix(in srgb, var(--wave-bar-high, var(--accent-pink)) 35%, transparent)
   );
   opacity: 0.16;
   animation: music-wave-bob var(--wave-duration, 1.4s) ease-in-out infinite;

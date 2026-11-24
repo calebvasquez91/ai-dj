@@ -1,6 +1,7 @@
 // Holiday themes for a playlist: the waveform colours, an accent tint and a light particle effect for each of ten holidays, and when each holiday
 // is, so the app can suggest one when it is within three weeks. Spooky Music is NOT part of this: it keeps its own look (the Halloween layers and
-// the spooky-* styles) and never takes a holiday theme. Pure.
+// the spooky-* styles) and never takes a holiday theme. Beside the ten holidays there are CUSTOM playlist themes (GTA6): same shape, but not a
+// holiday, not in the picker, not settable through the API; they are put on one playlist by hand (its PlaylistHoliday row). Pure.
 
 export const HOLIDAY_IDS = [
   "christmas",
@@ -20,19 +21,27 @@ export function isHolidayId(value: unknown): value is HolidayId {
   return typeof value === "string" && (HOLIDAY_IDS as readonly string[]).includes(value);
 }
 
-export type ParticleShape = "snowflake" | "heart" | "confetti" | "shamrock" | "egg" | "firework" | "leaf" | "star" | "diya" | "lantern";
+export type ParticleShape = "snowflake" | "heart" | "confetti" | "shamrock" | "egg" | "firework" | "leaf" | "star" | "diya" | "lantern" | "emoji";
 /** How the particles move: fall, rise, drift about, or burst out from a point and fade. */
 export type ParticleMotion = "fall" | "rise" | "drift" | "burst";
 
 export interface HolidayTheme {
-  id: HolidayId;
+  /** A holiday id, or the id of a custom playlist theme. */
+  id: string;
   label: string;
   /** The waveform's played bars: bottom colour to top colour. Each is bright enough to read on the dark surface (WCAG AA, 4.5:1). */
   waveform: { from: string; to: string };
   /** Tints the app's accent gradient (the play button and progress fill) while the playlist plays. */
   accent: { from: string; to: string };
-  /** The particles' colours, drawn from the holiday's own palette. */
-  particles: { shape: ParticleShape; motion: ParticleMotion; colors: readonly string[] };
+  /**
+   * The particles' colours, drawn from the holiday's own palette. For the "emoji" shape each particle is one of `glyphs` instead (it picks by the same
+   * index as a colour, so `colors` has one entry per glyph and only gives the count).
+   */
+  particles: { shape: ParticleShape; motion: ParticleMotion; colors: readonly string[]; glyphs?: readonly string[] };
+  /** Recolours the ambient equalizer bars behind every page while the playlist plays: bottom, middle and top of each bar. Absent: the app's own colours. */
+  lights?: { low: string; mid: string; high: string };
+  /** The particles show only while a song is actually playing (not while the playlist is just the active one, paused). */
+  onlyWhilePlaying?: boolean;
 }
 
 export const HOLIDAY_THEMES: Readonly<Record<HolidayId, HolidayTheme>> = {
@@ -108,8 +117,41 @@ export const HOLIDAY_THEMES: Readonly<Record<HolidayId, HolidayTheme>> = {
   },
 };
 
+// ---- Custom playlist themes ----------------------------------------------------------------------------------------------------------
+
+/**
+ * Themes made for one playlist rather than a holiday. They are NOT in HOLIDAY_IDS, so the picker never lists them, the suggestion never offers them and
+ * the API (which only accepts a holiday id) cannot set them on any playlist: they exist only where a PlaylistHoliday row was written by hand.
+ *
+ * gta6: the colours of the "Grand Theft Auto VI: The Album" cover the playlist uses: its neon sunset of violet sky, hot-pink glow and orange-peach
+ * horizon. The waveform runs pink to peach; the accent (play button, progress) violet to pink; the ambient bars go peach at the bottom, through pink, to
+ * violet at the top, like the cover's sky. Stars, cars and money fall while a song plays.
+ */
+export const CUSTOM_PLAYLIST_THEMES: Readonly<Record<string, HolidayTheme>> = {
+  gta6: {
+    id: "gta6",
+    label: "GTA6",
+    waveform: { from: "#ff6fb5", to: "#ffb375" },
+    accent: { from: "#8f7bff", to: "#ff6fb5" },
+    particles: {
+      shape: "emoji",
+      motion: "fall",
+      glyphs: ["\u2B50", "\u{1F697}", "\u{1F4B0}", "\u{1F31F}", "\u{1F3CE}\uFE0F", "\u{1F4B5}"], // star, car, money bag, glowing star, race car, dollar
+      colors: ["#ff6fb5", "#ffb375", "#8f7bff", "#ff6fb5", "#ffb375", "#8f7bff"],
+    },
+    lights: { low: "#ffb375", mid: "#ff6fb5", high: "#8f7bff" },
+    onlyWhilePlaying: true,
+  },
+};
+
+/** True for the id of a custom playlist theme (not a holiday). */
+export function isCustomThemeId(value: unknown): value is string {
+  return typeof value === "string" && Object.prototype.hasOwnProperty.call(CUSTOM_PLAYLIST_THEMES, value);
+}
+
 export function holidayTheme(id: string | null | undefined): HolidayTheme | null {
-  return isHolidayId(id) ? HOLIDAY_THEMES[id] : null;
+  if (isHolidayId(id)) return HOLIDAY_THEMES[id];
+  return isCustomThemeId(id) ? CUSTOM_PLAYLIST_THEMES[id] : null;
 }
 
 /** The holiday theme a playing playlist uses: its own, unless it is a system playlist (Spooky Music keeps its own look and never takes one). */

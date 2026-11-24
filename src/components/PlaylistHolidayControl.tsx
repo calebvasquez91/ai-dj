@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { useStore } from "@/lib/store";
-import { HOLIDAY_IDS, HOLIDAY_THEMES, holidayCountdown, isHolidayId, upcomingHoliday, type HolidayId } from "@/lib/holidayThemes";
+import { CUSTOM_PLAYLIST_THEMES, HOLIDAY_IDS, HOLIDAY_THEMES, holidayCountdown, isCustomThemeId, isHolidayId, upcomingHoliday, type HolidayId } from "@/lib/holidayThemes";
 import type { Playlist } from "@/types/music";
 
 const DISMISSED_PREFIX = "ai-dj:holiday-suggestion:";
@@ -51,6 +51,15 @@ export function PlaylistHolidayControl({ playlist }: { playlist: Pick<Playlist, 
     } finally {
       setBusy(false);
     }
+  }
+
+  // A playlist with a custom theme (GTA6) keeps it: it is not one of the holiday themes, so it is shown here and not offered for change.
+  if (isCustomThemeId(playlist.holidayTheme)) {
+    return (
+      <p className="text-xs text-muted">
+        Custom theme: <span className="text-foreground">{CUSTOM_PLAYLIST_THEMES[playlist.holidayTheme].label}</span>
+      </p>
+    );
   }
 
   return (
