@@ -161,6 +161,49 @@ describe("next() with an active shuffle session", () => {
   });
 });
 
+describe("Shuffle Play on a short playlist", () => {
+  const upcoming = () => {
+    const { currentTrack, queue } = useStore.getState();
+    return [currentTrack, ...queue].map((t) => t?.id);
+  };
+
+  it("laps through a 3-song playlist: every song once, never the same song twice at once or in a row", () => {
+    const tracks = [makeTrack("a"), makeTrack("b"), makeTrack("c")];
+    useStore.getState().startShuffle(tracks);
+    const played: (string | undefined)[] = [useStore.getState().currentTrack?.id];
+    for (let i = 0; i < 12; i++) {
+      useStore.getState().next();
+      played.push(useStore.getState().currentTrack?.id);
+      // Whatever is playing and queued is the whole playlist, each song once.
+      expect([...upcoming()].sort()).toEqual(["a", "b", "c"]);
+    }
+    for (let i = 1; i < played.length; i++) expect(played[i]).not.toBe(played[i - 1]);
+    // Over many plays every song keeps coming round.
+    expect(new Set(played).size).toBe(3);
+  });
+
+  it("alternates the two songs of a 2-song playlist", () => {
+    useStore.getState().startShuffle([makeTrack("a"), makeTrack("b")]);
+    const played = [useStore.getState().currentTrack?.id];
+    for (let i = 0; i < 6; i++) {
+      useStore.getState().next();
+      played.push(useStore.getState().currentTrack?.id);
+    }
+    for (let i = 1; i < played.length; i++) expect(played[i]).not.toBe(played[i - 1]);
+    expect(new Set(played)).toEqual(new Set(["a", "b"]));
+  });
+
+  it("never queues a song twice in a longer playlist either, across several laps", () => {
+    const tracks = Array.from({ length: 12 }, (_, i) => makeTrack(`t${i}`));
+    useStore.getState().startShuffle(tracks);
+    for (let i = 0; i < 40; i++) {
+      useStore.getState().next();
+      const ids = upcoming();
+      expect(new Set(ids).size, `step ${i}: ${ids.join(",")}`).toBe(ids.length);
+    }
+  });
+});
+
 describe("Song Sync Mode state", () => {
   it("starts with Auto on, no morph running and no request", () => {
     const state = useStore.getState();

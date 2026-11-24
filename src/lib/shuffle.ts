@@ -71,8 +71,10 @@ export function buildInitialShuffleBatch(
  * stays continuous across the extension seam. Draws from `unplayedIds`
  * first; if that runs out mid-batch (a small library "lapping"), refills
  * it from the full pool minus whatever's still live in the queue
- * (`protectIds`) and keeps going, so the same still-queued track is never
- * picked twice in a row.
+ * (`protectIds`) and minus what this batch has already added, and keeps
+ * going, so a track is never queued twice at once: the batch is shorter than
+ * SHUFFLE_EXTEND_COUNT when the pool has fewer tracks than that (a 3-song
+ * playlist just laps through its 3 songs).
  */
 export function extendShuffleQueue(
   session: { pool: Track[]; unplayedIds: string[] },
@@ -88,7 +90,9 @@ export function extendShuffleQueue(
 
   while (batch.length < SHUFFLE_EXTEND_COUNT) {
     if (unplayedIds.length === 0) {
-      const relapped = session.pool.filter((t) => !protectIds.has(t.id));
+      // Not what is still queued, and not what this very batch has already added: a pool smaller than a batch would otherwise refill with the
+      // same song every time it runs out and queue it five times in a row, and a larger one would repeat a song inside the batch.
+      const relapped = session.pool.filter((t) => !protectIds.has(t.id) && !batch.some((b) => b.id === t.id));
       if (relapped.length === 0) break; // the whole live pool has shrunk to nothing — nothing left to add
       unplayedIds = relapped.map((t) => t.id);
     }
