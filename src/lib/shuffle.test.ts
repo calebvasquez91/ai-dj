@@ -99,6 +99,24 @@ describe("extendShuffleQueue", () => {
     expect(batch).toEqual([]);
   });
 
+  it("never queues the same track twice when the pool is smaller than a batch (it used to refill with it five times in a row)", () => {
+    const pool = [makeTrack("a"), makeTrack("b"), makeTrack("c")];
+    const session = { pool, unplayedIds: [] }; // a lap just ended
+    const { batch } = extendShuffleQueue(session, pool[1], new Set(["b", "c"]), {}, {}); // b and c are still queued
+    expect(batch.map((t) => t.id)).toEqual(["a"]);
+  });
+
+  it("does not repeat a track inside one batch when the lap ends partway through it", () => {
+    const pool = Array.from({ length: 12 }, (_, i) => makeTrack(`t${i}`));
+    const session = { pool, unplayedIds: ["t0", "t1"] }; // two left, then the lap ends mid-batch
+    const protectIds = new Set(["t2", "t3", "t4", "t5", "t6"]); // five still queued
+    const { batch } = extendShuffleQueue(session, pool[6], protectIds, {}, {});
+    const ids = batch.map((t) => t.id);
+    expect(ids).toHaveLength(5);
+    expect(new Set(ids).size).toBe(5);
+    for (const id of ids) expect(protectIds.has(id)).toBe(false);
+  });
+
   it("returns updated unplayedIds excluding what was just picked", () => {
     const pool = Array.from({ length: 8 }, (_, i) => makeTrack(`t${i}`));
     const session = { pool, unplayedIds: pool.map((t) => t.id) };
