@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { activeHolidayTheme, HOLIDAY_IDS, HOLIDAY_THEMES, holidayCountdown, holidayDate, holidayTheme, isHolidayId, upcomingHoliday } from "./holidayThemes";
+import { activeHolidayTheme, CUSTOM_PLAYLIST_THEMES, HOLIDAY_IDS, HOLIDAY_THEMES, holidayCountdown, holidayDate, holidayTheme, isCustomThemeId, isHolidayId, upcomingHoliday } from "./holidayThemes";
 import { AA_RATIO, contrastRatio, WAVEFORM_BACKGROUND } from "./waveformColors";
 
 const day = (y: number, m: number, d: number) => Date.UTC(y, m - 1, d);
@@ -60,6 +60,50 @@ describe("holidayTheme and activeHolidayTheme", () => {
   });
   it("has no Halloween or spooky theme in the list", () => {
     expect([...HOLIDAY_IDS].some((id) => /spooky|halloween/i.test(id))).toBe(false);
+  });
+});
+
+describe("the GTA6 custom theme", () => {
+  const gta6 = CUSTOM_PLAYLIST_THEMES.gta6;
+
+  it("is a custom theme, not a holiday: not in the picker's list, not a valid holiday id (so the API cannot set it), not suggested", () => {
+    expect([...HOLIDAY_IDS]).not.toContain("gta6");
+    expect(isHolidayId("gta6")).toBe(false);
+    expect(isCustomThemeId("gta6")).toBe(true);
+    expect(isCustomThemeId("christmas")).toBe(false);
+    expect(isCustomThemeId("toString")).toBe(false); // not an inherited property
+    expect(holidayTheme("gta6")).toBe(gta6);
+  });
+
+  it("takes the cover's neon sunset colours: pink to peach waveform, violet to pink accent, peach-pink-violet bars", () => {
+    expect(gta6.waveform).toEqual({ from: "#ff6fb5", to: "#ffb375" });
+    expect(gta6.accent).toEqual({ from: "#8f7bff", to: "#ff6fb5" });
+    expect(gta6.lights).toEqual({ low: "#ffb375", mid: "#ff6fb5", high: "#8f7bff" });
+  });
+
+  it("keeps its waveform colours readable on the dark surface (WCAG AA, 4.5:1)", () => {
+    expect(contrastRatio(gta6.waveform.from, WAVEFORM_BACKGROUND)).toBeGreaterThanOrEqual(AA_RATIO);
+    expect(contrastRatio(gta6.waveform.to, WAVEFORM_BACKGROUND)).toBeGreaterThanOrEqual(AA_RATIO);
+  });
+
+  it("rains stars, cars and money, only while a song plays, one glyph per particle choice", () => {
+    const { shape, motion, glyphs, colors } = gta6.particles;
+    expect(shape).toBe("emoji");
+    expect(motion).toBe("fall");
+    expect(gta6.onlyWhilePlaying).toBe(true);
+    expect(glyphs).toEqual(expect.arrayContaining(["\u2B50", "\u{1F697}", "\u{1F4B0}"])); // a star, a car, a money bag
+    expect(colors).toHaveLength(glyphs!.length); // a particle picks its glyph by the same index as a colour
+    expect(new Set(glyphs).size).toBe(glyphs!.length);
+  });
+
+  it("goes to a playlist that has it, never to a system playlist, and the holiday themes stay as they were", () => {
+    expect(activeHolidayTheme({ holidayTheme: "gta6" })?.id).toBe("gta6");
+    expect(activeHolidayTheme({ holidayTheme: "gta6", theme: "spooky" })).toBeNull();
+    for (const id of HOLIDAY_IDS) {
+      expect(HOLIDAY_THEMES[id].lights, id).toBeUndefined();
+      expect(HOLIDAY_THEMES[id].onlyWhilePlaying, id).toBeUndefined();
+      expect(HOLIDAY_THEMES[id].particles.shape, id).not.toBe("emoji");
+    }
   });
 });
 

@@ -4,10 +4,18 @@ import { useEffect, useRef } from "react";
 import type { HolidayTheme, ParticleShape } from "@/lib/holidayThemes";
 import { createParticle, PARTICLE_FPS, particleAlpha, particleBudget, stepParticle, type Particle } from "@/lib/holidayParticles";
 
-/** Draws one particle's shape at the origin of the (already moved and turned) canvas. */
-function drawShape(ctx: CanvasRenderingContext2D, shape: ParticleShape, size: number) {
+/** Draws one particle's shape at the origin of the (already moved and turned) canvas. An "emoji" particle draws its own glyph (a picture, not a shape in the particle's colour). */
+function drawShape(ctx: CanvasRenderingContext2D, shape: ParticleShape, size: number, glyph?: string) {
   const r = size / 2;
   switch (shape) {
+    case "emoji":
+      if (!glyph) return;
+      // Particles are 6 to 14 px across, which is too small for a picture: draw the emoji at twice that.
+      ctx.font = `${Math.round(size * 2)}px "Apple Color Emoji", "Segoe UI Emoji", "Noto Color Emoji", sans-serif`;
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      ctx.fillText(glyph, 0, 0);
+      return;
     case "snowflake":
     case "star": {
       const points = shape === "snowflake" ? 6 : 4;
@@ -85,6 +93,7 @@ export function HolidayParticles({ theme }: { theme: HolidayTheme }) {
     if (!ctx) return;
     const motion = theme.particles.motion;
     const colors = theme.particles.colors;
+    const glyphs = theme.particles.glyphs;
     const reduce = window.matchMedia("(prefers-reduced-motion: reduce)");
     const count = particleBudget({
       reduceMotion: reduce.matches,
@@ -119,13 +128,16 @@ export function HolidayParticles({ theme }: { theme: HolidayTheme }) {
       particles = particles.map((p) => stepParticle(p, Math.min(dt, 0.1), motion, width, height, colors.length));
       ctx.clearRect(0, 0, width, height);
       for (const p of particles) {
+        const emoji = theme.particles.shape === "emoji";
         ctx.save();
         ctx.translate(p.x, p.y);
-        ctx.rotate(p.angle);
-        ctx.globalAlpha = particleAlpha(p, motion);
+        // A car or a money bag turning upside down looks wrong; emoji stay upright.
+        if (!emoji) ctx.rotate(p.angle);
+        // Emoji are full-colour pictures, so they are drawn stronger than the gentle shapes.
+        ctx.globalAlpha = emoji ? Math.min(1, particleAlpha(p, motion) + 0.35) : particleAlpha(p, motion);
         ctx.fillStyle = colors[p.color];
         ctx.strokeStyle = colors[p.color];
-        drawShape(ctx, theme.particles.shape, p.size);
+        drawShape(ctx, theme.particles.shape, p.size, glyphs?.[p.color % glyphs.length]);
         ctx.restore();
       }
     };

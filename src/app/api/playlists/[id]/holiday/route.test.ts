@@ -1,9 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const mocks = vi.hoisted(() => ({ user: "u-owner", findPlaylist: vi.fn(), setHoliday: vi.fn() }));
+const mocks = vi.hoisted(() => ({ user: "u-owner", findPlaylist: vi.fn(), setHoliday: vi.fn(), loadHolidays: vi.fn() }));
 vi.mock("@/auth", () => ({ auth: vi.fn(async () => (mocks.user ? { user: { id: mocks.user } } : null)) }));
 vi.mock("@/lib/prisma", () => ({ prisma: { playlist: { findUnique: mocks.findPlaylist } } }));
-vi.mock("@/lib/playlistHolidayServer", () => ({ setPlaylistHoliday: mocks.setHoliday }));
+vi.mock("@/lib/playlistHolidayServer", () => ({ setPlaylistHoliday: mocks.setHoliday, loadPlaylistHolidays: mocks.loadHolidays }));
 
 import { PUT } from "./route";
 
@@ -17,6 +17,29 @@ beforeEach(() => {
   mocks.user = "u-owner";
   mocks.findPlaylist.mockReset().mockResolvedValue({ userId: "u-owner", theme: null });
   mocks.setHoliday.mockReset().mockResolvedValue(undefined);
+  mocks.loadHolidays.mockReset().mockResolvedValue(new Map());
+});
+
+describe("PUT /api/playlists/[id]/holiday and a custom theme (GTA6)", () => {
+  it("cannot be used to put the custom theme on a playlist: only a holiday id is accepted", async () => {
+    const res = await put({ holiday: "gta6" });
+    expect(res.status).toBe(400);
+    expect(mocks.setHoliday).not.toHaveBeenCalled();
+  });
+  it("keeps a playlist's custom theme: it is neither replaced by a holiday nor cleared, for the owner or the admin", async () => {
+    mocks.loadHolidays.mockResolvedValue(new Map([["p1", "gta6"]]));
+    for (const user of ["u-owner", "u-admin"]) {
+      mocks.user = user;
+      expect((await put({ holiday: "christmas" })).status, user).toBe(400);
+      expect((await put({ holiday: null })).status, user).toBe(400);
+    }
+    expect(mocks.setHoliday).not.toHaveBeenCalled();
+  });
+  it("still lets a playlist with an ordinary holiday theme change it", async () => {
+    mocks.loadHolidays.mockResolvedValue(new Map([["p1", "thanksgiving"]]));
+    expect((await put({ holiday: "christmas" })).status).toBe(200);
+    expect(mocks.setHoliday).toHaveBeenLastCalledWith("p1", "christmas");
+  });
 });
 
 describe("PUT /api/playlists/[id]/holiday", () => {

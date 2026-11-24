@@ -81,6 +81,10 @@ describe("waveformColors: which colours the deck uses", () => {
     expect(waveformColors({ playlist: { holidayTheme: "christmas" }, coverPalette: cover })).toEqual({ from: "#34d058", to: "#ff5c5c" });
     expect(waveformColors({ playlist: { holidayTheme: "valentines" } })).toEqual({ from: "#ff6fa5", to: "#ff4d6d" });
   });
+  it("gives a playlist with the GTA6 custom theme its sunset waveform, over the cover's colours", () => {
+    expect(waveformColors({ playlist: { holidayTheme: "gta6" }, coverPalette: { from: "#111111", to: "#eeeeee" } })).toEqual({ from: "#ff6fb5", to: "#ffb375" });
+  });
+
   it("never lets a holiday theme onto a system playlist (Spooky Music)", () => {
     expect(waveformColors({ playlist: { holidayTheme: "christmas", theme: "spooky" }, coverPalette: cover })).toEqual(cover);
   });
