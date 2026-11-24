@@ -6,7 +6,8 @@
  * A track's stored tags are the raw answers, one per source and genre, plus any `manual` tag. They are combined here:
  *  - A genre two or more independent sources agree on gains confidence (noisy-or: 0.6 and 0.6 make 0.84); a lone tag keeps
  *    its own, so a lone low-confidence tag stays low. Sources are weighted by how much to trust them (SOURCE_WEIGHT).
- *  - A subgenre tag also counts, a little less, for its parent genre.
+ *  - A subgenre tag also counts, a little less, for its parent genre; but a subgenre sure enough to be kept keeps its parent too
+ *    (a track cannot be sure it is Nu Disco and unsure it is Disco), so one clean file tag that names a subgenre is enough.
  *  - The LLM is not independent (it was shown the other sources), so it never compounds with them: it counts as one more
  *    vote at 0.85 of its own confidence, taking the larger of that and the independent agreement.
  *  - A `manual` tag wins outright: the track resolves to what a person set and nothing a source says moves it.
@@ -96,7 +97,11 @@ export function combineSourceTags(tags: readonly GenreTag[]): { genres: Resolved
       if (g === genre && confidence >= KEEP_CONFIDENCE) subgenres.push({ subgenre, confidence });
     }
     subgenres.sort((x, y) => y.confidence - x.confidence);
-    genres.push({ genre, confidence: confidenceOf(votes), subgenres, sources: [...votes.keys()] });
+    // The parent genre is never less sure than its best kept subgenre. Without this, a lone clean file tag naming a subgenre ("House", "Nu Disco",
+    // "Dance Pop": 0.6 x 0.9 = 0.54) reached its parent only at 0.54 x SUBGENRE_TO_GENRE = 0.486, just under KEEP_CONFIDENCE, so such a song never
+    // resolved without the LLM (about half of the songs that had no genre).
+    const confidence = Math.min(COMBINED_CAP, Math.max(confidenceOf(votes), subgenres[0]?.confidence ?? 0));
+    genres.push({ genre, confidence, subgenres, sources: [...votes.keys()] });
   }
   genres.sort((x, y) => y.confidence - x.confidence);
   return { genres: genres.filter((g) => g.confidence >= KEEP_CONFIDENCE), candidates: genres, best: genres[0]?.confidence ?? 0, conflict: sourcesConflict(valid) };
