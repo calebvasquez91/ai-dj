@@ -93,17 +93,18 @@ export async function recordDecision(input: DecisionInput): Promise<boolean> {
   }
 }
 
-export type TransitionStatsResult = { ok: true; stats: TransitionStats; jobs: JobStatusCounts; sinceDays: number | null } | { ok: false; reason: "no-table" };
+export type TransitionStatsResult = { ok: true; stats: TransitionStats; jobs: JobStatusCounts; /** Instrumentals built so far; null before prisma/vocal-split.sql has been run. */ instrumentalsBuilt: number | null; sinceDays: number | null } | { ok: false; reason: "no-table" };
 
 /** The admin's counts: decisions (all time, or the last `days`) and the vocal separation jobs by status. */
 export async function loadTransitionStats(days: 7 | 30 | null, now = Date.now()): Promise<TransitionStatsResult> {
   const since = days ? new Date(now - days * 86_400_000) : null;
   try {
-    const [rows, jobGroups] = await Promise.all([
+    const [rows, jobGroups, instrumentalsBuilt] = await Promise.all([
       prisma.transitionDecision.findMany({ where: since ? { createdAt: { gte: since } } : {}, select: { fromGenre: true, toGenre: true, style: true, decidedBy: true, vetoesJson: true }, take: 50_000 }),
       prisma.stemSeparationJob.groupBy({ by: ["status"], _count: { _all: true } }).catch(() => []),
+      prisma.stemSeparationJob.count({ where: { instrumentalUrl: { not: null } } }).catch(() => null),
     ]);
-    return { ok: true, stats: summarizeDecisions(rows), jobs: summarizeJobStatuses(jobGroups.map((g) => ({ status: g.status, count: g._count._all }))), sinceDays: days };
+    return { ok: true, stats: summarizeDecisions(rows), jobs: summarizeJobStatuses(jobGroups.map((g) => ({ status: g.status, count: g._count._all }))), instrumentalsBuilt, sinceDays: days };
   } catch (err) {
     if (isMissingTable(err)) return { ok: false, reason: "no-table" };
     throw err;

@@ -127,6 +127,15 @@ describe("resolveTransition: tool flags", () => {
     expect(on.map((p) => p.style)).toContain("vocal-swap");
   });
 
+  it("a vocal swap is dropped when the two vocals have no gap to hand over in, and kept when that is unknown", () => {
+    const pair = report({ trackA_bpm: 90, bpmDelta: 2 });
+    const none = rankTransitions(tagged("R&B"), tagged("R&B"), pair, undefined, { enabledTools: ALL_TOOLS, vocalSplit: true, vocalSwapFeasible: false });
+    const unknown = rankTransitions(tagged("R&B"), tagged("R&B"), pair, undefined, { enabledTools: ALL_TOOLS, vocalSplit: true });
+    expect(none.map((p) => p.style)).not.toContain("vocal-swap");
+    expect(unknown.map((p) => p.style)).toContain("vocal-swap");
+    expect(none.length).toBeGreaterThan(0); // another plan stands in
+  });
+
   it("an abrupt ending outranks everything when echo-out is on, and is ignored when it is off", () => {
     const on = resolveTransition(tagged("Electronic"), tagged("Electronic"), report(), undefined, { enabledTools: ALL_TOOLS, abruptEnding: true });
     expect(on.style).toBe("echo-out");

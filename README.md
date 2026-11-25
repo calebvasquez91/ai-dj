@@ -72,3 +72,28 @@ without other code changes once its license has been checked against this app's 
   data at 100 MB (only the derived genre and mood labels are kept, not Last.fm's tag lists), and ask for attribution where its data is shown.
 - **AcoustID**: fingerprints are sent, never audio, and every answer is cached.
 - Only metadata is stored. No lyrics or other copyrighted text is fetched or kept.
+
+## Genre-aware transitions (flag `GENRE_TRANSITIONS_ENABLED`, off)
+
+The DJ and the audio engineer choose each transition's style and tools from the two songs' genres. The genre layer only chooses what to ask for; a beat-synced blend is handed to the existing sync pipeline unchanged (a golden test with the flag on checks the engine arguments, transition plan and `SyncReport` are identical). Pieces: the per-genre table (`src/lib/genreTransitions.ts`), the pair resolver (`transitionPlanner.ts`), the engineer's report and vetoes (`mixability.ts`), the DJ's choice with a Claude Haiku tie-break (`transitionChoice.ts`, `anthropicTransitionPick.ts`), and the hand-off to the engine (`genrePlanApply.ts`, through `planArgsFromState`). A song's key confidence is trusted from the app's own line (0.15), not a stricter one: most songs read under 0.3. The engine's hard cut is switched off by the owner's choice, so a planned quick cut plays as a short phrase blend. Admin: `/admin/transitions` (counts, shared table editor; tables from `prisma/genre-transitions.sql`).
+
+## Vocal / instrumental separation (flag `VOCAL_SPLIT_ENABLED`, off)
+
+**Decision: the instrumental is the sum of the drums, bass and other stems (`src/lib/wav.ts`, `src/lib/stemInstrumental.ts`); no second, two-stem separation run.**
+
+The app already separates four stems with Demucs (`htdemucs`) on Replicate. Two ways to get a vocal-free mix were considered:
+
+| | (a) sum the stems | (b) two-stem run (`isolate_stem: "vocals"`) |
+|---|---|---|
+| Extra model run | none: reuses the finished stems | one more paid run per song |
+| Time | about 1-2 s on the server (measured: 1.3 s for 127 s of audio, 2.0 s for 204 s) | the same Demucs run again (8-12 s of GPU time, about $0.01 per song) |
+| Audio | the three non-vocal stems added sample by sample | Demucs's own `no_vocals`, which it builds as the sum of the same non-vocal sources |
+| File size | 16-bit stereo WAV: 22.4 MB, 36.0 MB and 34.6 MB for songs of 127, 204 and 196 s (a 24-bit model stem is 1.5x that) | not measured |
+
+What was measured, on the three songs that already had finished stem jobs (stems from the pinned model version `5a7041cc`): processing 8.3, 12.4 and 11.9 s; estimated cost $0.009, $0.014 and $0.013; each 24-bit stem 33.7, 54.0 and 51.8 MB; the summed instrumental peaked above full scale on two of the three (it is scaled down by 0.98 and 0.96, not clipped). As a proxy for vocal bleed the 300-3400 Hz level of the instrumental was compared with the vocal stem's loudness over time: the correlation is 0.05, -0.08 and -0.13, so the instrumental does not move with the vocal.
+
+**What was NOT done, and why.** No listening was possible in this session, so there is no listening note on artifacts, and the vocal-band correlation is only a proxy. Option (b) was not measured: a run of the current model version (`ff5ad47d2685`, the first with `isolate_stem`) on a sample song stalled with no output for 15+ minutes (the Replicate account has under $5 of credit, which also limits it to one new prediction at a time), and it was not cancelled from here. The choice therefore rests on how the model builds `no_vocals` (not re-verified numerically) and on the cost and time above. If a listening test of (b) on real songs ever shows it is cleaner, switching is a change to one function.
+
+How it runs: `GET/POST /api/stems/instrumental` builds one instrumental (and the vocal activity timeline, a voice map from the vocal stem's energy) per call, from stems that already exist, and does nothing while the flag is off; add it to `vercel.json` crons when enabling. It never starts a paid separation (the stem flow does, under its own budget). The columns it writes come from `prisma/vocal-split.sql`. Vocal swaps (`src/lib/vocalSwap.ts`) are scheduled only in a stretch where both vocals are silent, so two lead vocals are never audible together; with no such gap the planner picks another style. "Instrumental mode" (a switch on the DJ board, from the next song on) plays the built instrumental in place of the song. The instrumental takes effect in the player's deck loads and Song Sync decodes only.
+
+**Licensing and safety.** Separated files are for playback inside the app only: nothing offers a download, export or share of a vocal or instrumental file. Streaming separated audio to other people needs the same licenses as the original songs. The Demucs code and its pretrained `htdemucs` weights are published by Meta under the MIT license (per the project's repository; this was not re-checked against the live repository in this session, so confirm before any commercial use). Replicate's hosted copy (`ryan5453/demucs`) is a separate wrapper with its own terms. The songs themselves are sent to Replicate to be separated, as the existing stem feature already does.

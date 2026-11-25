@@ -17,6 +17,7 @@
  */
 import type { PlanTransitionArgs } from "@/lib/mix-engine";
 import type { GenreTransitionPlan } from "@/lib/transitionPlanner";
+import type { VocalSwapPlan } from "@/lib/vocalSwap";
 
 /** The plan for one upcoming pair, with the DJ's note. Stored in the player store and read by planArgsFromState. */
 export interface PairGenrePlan {
@@ -30,6 +31,8 @@ export interface PairGenrePlan {
   decidedBy: "local" | "claude" | "local-fallback";
   /** One sentence: the DJ's reason. */
   reason: string;
+  /** For a vocal swap: where the outgoing vocal drops out and the incoming one enters (lib/vocalSwap.ts), never two lead vocals at once. Null/absent otherwise. */
+  vocalSwap?: VocalSwapPlan | null;
   /** The full readout line: "Hip-Hop to R&B: quick-cut with echo-out. Reason: tempo gap of 14 BPM." */
   readout: string;
 }

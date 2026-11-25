@@ -43,6 +43,7 @@ import type { StemCounts } from "@/lib/stemStatus";
 import { judgeStemCandidate } from "@/lib/stemPlanner";
 import { SEED_RADIO_ENABLED } from "@/lib/featureFlags";
 import type { PairGenrePlan } from "@/lib/genrePlanApply";
+import { saveInstrumentalMode } from "@/lib/instrumentalMode";
 import { RADIO_BATCH, isLoneSongPlay, nextRadioBatch, radioNeedsMore, type RadioFacts } from "@/lib/radio";
 import { VOICE_CUT_DEFAULTS, loadVoiceCutSettings, saveVoiceCutSettings, type VoiceCutSettings } from "@/lib/voiceCutSettings";
 import type { VoiceMap } from "@/lib/voiceMap";
@@ -220,6 +221,12 @@ interface PlayerState {
   /** The last few genre-aware decisions, newest last, for the readout and the admin counts. In memory only. */
   genreDecisionLog: PairGenrePlan[];
   setGenrePlan: (plan: PairGenrePlan | null) => void;
+  /** Instrumental mode (lib/instrumentalMode.ts): play a song's vocal-free mix instead of the full song, from the next song on. A device setting; only does anything while VOCAL_SPLIT_ENABLED is on. */
+  instrumentalMode: boolean;
+  /** trackId -> URL of its built instrumental: only songs whose separation has finished. Filled by InstrumentalLoader. */
+  instrumentalAvailability: Record<string, string>;
+  setInstrumentalMode: (on: boolean) => void;
+  setInstrumentalAvailability: (map: Record<string, string>) => void;
   /** Occasional mid-track FX (filter/riser builds, echo throws on breakdowns) — separate from transition FX, which always fire regardless of this setting. */
   ambienceEnabled: boolean;
   ambienceFrequency: AmbienceFrequency;
@@ -567,6 +574,8 @@ export const useStore = create<PlayerState>()(
       activeTransitionShortWhy: null,
       genrePlan: null,
       genreDecisionLog: [],
+      instrumentalMode: false,
+      instrumentalAvailability: {},
       ambienceEnabled: true,
       ambienceFrequency: "occasional",
       ambienceLevel: AMBIENCE_DEFAULT_LEVEL,
@@ -1036,6 +1045,11 @@ export const useStore = create<PlayerState>()(
       setQuantizeEnabled: (enabled) => set({ quantizeEnabled: enabled }),
       setActiveTransitionRationale: (rationale) => set({ activeTransitionRationale: rationale }),
       setActiveTransitionShortWhy: (shortWhy) => set({ activeTransitionShortWhy: shortWhy }),
+      setInstrumentalMode: (on) => {
+        saveInstrumentalMode(on);
+        set({ instrumentalMode: on });
+      },
+      setInstrumentalAvailability: (map) => set({ instrumentalAvailability: map }),
       setGenrePlan: (plan) => set((s) => ({ genrePlan: plan, genreDecisionLog: plan ? [...s.genreDecisionLog, plan].slice(-GENRE_DECISION_LOG_KEPT) : s.genreDecisionLog })),
       setAmbienceEnabled: (enabled) => set({ ambienceEnabled: enabled }),
       setAmbienceFrequency: (frequency) => set({ ambienceFrequency: frequency }),

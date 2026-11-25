@@ -35,6 +35,8 @@ export interface PlannerOptions {
   enabledTools?: ReadonlySet<TransitionTool>;
   /** Whether vocal separation is on (a vocal swap needs it). Default: VOCAL_SPLIT_ENABLED. */
   vocalSplit?: boolean;
+  /** False when the two songs' vocal activity has no gap in the window to hand the vocal over in (lib/vocalSwap.ts planVocalSwap returned null): the swap is then not offered. Default true (unknown is not a veto). */
+  vocalSwapFeasible?: boolean;
   /** The outgoing song ends abruptly (lib/echoOut.ts detectAbruptEnding): echo out, hold 3-5 s, then start the next at its most energetic section. */
   abruptEnding?: boolean;
   /** Replaces the shared table (the admin's edits and a device's own overrides arrive this way). */
@@ -212,7 +214,7 @@ export function rankTransitions(trackA: PlannerTrack, trackB: PlannerTrack, repo
   const usable = (style: TransitionStyle): boolean => {
     const needs = STYLE_TOOL[style];
     if (needs && !tools.has(needs)) return false;
-    if (style === "vocal-swap" && !vocalSplit) return false;
+    if (style === "vocal-swap" && (!vocalSplit || options.vocalSwapFeasible === false)) return false;
     if (noBeat && !BEATLESS_STYLES.has(style)) return false;
     if (unreliable && (style === "long-blend" || style === "bass-swap" || style === "filter-sweep")) return false;
     if (gap.tempoExceedsBoth && GRID_STYLES.has(style)) return false;

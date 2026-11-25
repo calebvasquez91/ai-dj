@@ -152,6 +152,13 @@ model StemSeparationJob {
   bassUrl   String?
   otherUrl  String?
 
+  /// The vocal-free mix (drums + bass + other summed, 16-bit WAV) built from the finished stems by the instrumental job (lib/stemInstrumental.ts); null until built.
+  /// For playback inside the app only: never offered for download. Column added by prisma/vocal-split.sql.
+  instrumentalUrl     String?
+  instrumentalBuiltAt DateTime?
+  /// JSON.stringify'd VoiceMap (lib/voiceMap.ts): when the lead vocal is present, from the vocal stem's energy. Added by prisma/vocal-split.sql.
+  vocalActivityJson   String?
+
   createdAt   DateTime  @default(now())
   completedAt DateTime?
 

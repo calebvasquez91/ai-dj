@@ -108,6 +108,11 @@ export default async function TransitionsPage({ searchParams }: { searchParams: 
               <div><dt className="text-xs text-muted">Done</dt><dd className="font-semibold">{stats.jobs.ready.toLocaleString("en-US")}</dd></div>
               <div><dt className="text-xs text-muted">Failed</dt><dd className="font-semibold">{stats.jobs.failed.toLocaleString("en-US")}</dd></div>
             </dl>
+            <p className="text-sm text-muted">
+              {stats.instrumentalsBuilt == null
+                ? "Instrumentals are not being built yet: the columns for them do not exist (prisma/vocal-split.sql)."
+                : `${stats.instrumentalsBuilt.toLocaleString("en-US")} of ${stats.jobs.ready.toLocaleString("en-US")} finished jobs have a built instrumental.`}
+            </p>
           </section>
         </>
       )}

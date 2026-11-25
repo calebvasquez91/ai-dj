@@ -2,9 +2,10 @@
 
 import { useEffect, useRef } from "react";
 import { detectAbruptEnding } from "@/lib/echoOut";
-import { ECHO_OUT_ENABLED, GENRE_TRANSITIONS_ENABLED } from "@/lib/featureFlags";
+import { ECHO_OUT_ENABLED, GENRE_TRANSITIONS_ENABLED, VOCAL_SPLIT_ENABLED } from "@/lib/featureFlags";
 import type { PairGenrePlan } from "@/lib/genrePlanApply";
 import { buildMixabilityReport } from "@/lib/mixability";
+import { planVocalSwap, vocalDensity } from "@/lib/vocalSwap";
 import { useGenreTransitions } from "@/lib/genreTransitionStore";
 import { useStore } from "@/lib/store";
 import { buildSyncReport } from "@/lib/syncEngine";
@@ -71,16 +72,27 @@ export function GenreTransitionPlanner() {
       const next = { track: nextTrack, analysis: nextAnalysis };
       // Read-only: the same report the sync pipeline builds, used here only for the tempo and key facts.
       const syncReport = buildSyncReport({ current, next });
+      const mixOutSec = syncReport.mixOutMs / 1000;
+      const mixInSec = syncReport.mixInMs / 1000;
+      const windowSec = Math.max(1, syncReport.crossfadeDurationMs / 1000);
+      // Vocal activity (the voice maps built from the isolated vocal stems), when the stems are there. Unknown stays null: it never vetoes anything.
+      const voiceMaps = useStore.getState().trackVoiceMaps;
+      const outVoice = voiceMaps[currentTrack.id] ?? null;
+      const inVoice = voiceMaps[nextTrack.id] ?? null;
       const mixability = buildMixabilityReport({
         a: currentAnalysis,
         b: nextAnalysis,
         durationA: currentTrack.durationSec,
         durationB: nextTrack.durationSec,
-        mixOutSec: syncReport.mixOutMs / 1000,
-        mixInSec: syncReport.mixInMs / 1000,
+        mixOutSec,
+        mixInSec,
+        vocalDensityAtMixOut: vocalDensity(outVoice, mixOutSec, mixOutSec + windowSec),
+        vocalDensityAtMixIn: vocalDensity(inVoice, mixInSec, mixInSec + windowSec),
       });
+      // A vocal swap is only offered when both vocals have a gap to hand over in: never two lead vocals at once.
+      const vocalSwap = VOCAL_SPLIT_ENABLED && outVoice && inVoice ? planVocalSwap({ outgoing: outVoice, incoming: inVoice, windowStartSec: mixOutSec, windowEndSec: mixOutSec + windowSec, incomingEntrySec: mixInSec }) : null;
       const abruptEnding = ECHO_OUT_ENABLED && detectAbruptEnding(currentAnalysis, currentTrack.durationSec).abrupt;
-      const ranked = rankTransitions(currentTrack, nextTrack, syncReport, { djMode: useStore.getState().djMode }, { abruptEnding, rules: useGenreTransitions.getState().effectiveRules() });
+      const ranked = rankTransitions(currentTrack, nextTrack, syncReport, { djMode: useStore.getState().djMode }, { abruptEnding, rules: useGenreTransitions.getState().effectiveRules(), vocalSwapFeasible: VOCAL_SPLIT_ENABLED && outVoice && inVoice ? vocalSwap != null : undefined });
       const decision = await decideTransition({ ranked, mixability, ask: askServer });
 
       // Stale guard: a skip, reorder or shuffle while the answer was in flight means this plan is for a pair that is no longer up next.
@@ -93,6 +105,7 @@ export function GenreTransitionPlanner() {
         plan: decision.plan,
         mixability: decision.mixability.mixability,
         vetoes: decision.vetoes,
+        vocalSwap: decision.plan.style === "vocal-swap" ? vocalSwap : null,
         decidedBy: decision.decidedBy,
         reason: decision.reason,
         readout: describeGenrePlan({ ...decision.plan, reason: decision.reason.replace(/\.$/, "") }),

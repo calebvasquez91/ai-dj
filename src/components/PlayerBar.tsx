@@ -11,6 +11,7 @@ import type { DjSetMode } from "@/lib/mix-engine";
 import { DecksIcon, MixerIcon, NextIcon, PauseIcon, PlayIcon, PreviousIcon, QueueIcon } from "@/components/Icons";
 import { GenrePairTag } from "@/components/GenrePairTag";
 import { GenreTransitionPlanner } from "@/components/GenreTransitionPlanner";
+import { InstrumentalLoader } from "@/components/InstrumentalLoader";
 
 export const CROSSFADE_PRESETS = [5, 10, 15, 20, 30];
 
@@ -99,6 +100,7 @@ export function PlayerBar() {
           <>
             <DualDeckStage />
             <GenreTransitionPlanner />
+            <InstrumentalLoader />
             <YouTubeDeckStage />
             <div
               role="button"
