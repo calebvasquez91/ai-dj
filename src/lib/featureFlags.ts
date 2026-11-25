@@ -54,3 +54,13 @@ export const INSTRUMENTAL_BRIDGE_ENABLED = false;
 export const DJ_EQ_ENABLED = false;
 /** Echo-out (lib/echoOut.ts): a song that ends abruptly echoes into silence, holds 3 to 5 seconds, and the next starts at its peak. */
 export const ECHO_OUT_ENABLED = false;
+
+// ---- Genre-aware transitions and vocal/instrumental separation. Both off until verified on real playback; with both off the app behaves exactly as before.
+
+/**
+ * Genre-aware transitions (lib/genreTransitions.ts, lib/transitionPlanner.ts): the DJ and the Audio Engineer pick which transition style and tools to
+ * request for each pair from the two songs' genres. It only chooses what to ask for and hands a beat-synced blend to the existing sync pipeline unchanged.
+ */
+export const GENRE_TRANSITIONS_ENABLED = false;
+/** Vocal / instrumental separation (vocals.wav + instrumental.wav per track, vocal activity timeline, vocal swap, "Instrumental mode"). Playback inside the app only; never offered for download. */
+export const VOCAL_SPLIT_ENABLED = false;

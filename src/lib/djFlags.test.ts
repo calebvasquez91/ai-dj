@@ -19,4 +19,9 @@ describe("the DJ ability flags", () => {
     expect(flags.SHOW_STEM_BUTTON_ON_SONGS).toBe(false);
     expect(TRANSITION_FX_ENABLED).toBe(false);
   });
+
+  it("keep the genre-aware transition and vocal-split switches off until they are verified", () => {
+    expect(flags.GENRE_TRANSITIONS_ENABLED).toBe(false);
+    expect(flags.VOCAL_SPLIT_ENABLED).toBe(false);
+  });
 });
