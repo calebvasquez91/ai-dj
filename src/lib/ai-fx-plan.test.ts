@@ -154,6 +154,15 @@ describe("fxPlanLocally", () => {
     expect(fxPlanLocally(input(sung)).picks.map((p) => p.id)).toEqual(["drop"]);
   });
 
+  it("when two moments are too close for both, a featured sound beats a slightly stronger ordinary one, but not a much stronger one", () => {
+    const close = (featuredScore: number) => [
+      candidate({ id: "boom", startSec: 64, endSec: 67, score: 0.85 }),
+      candidate({ id: "fah", startSec: 80, endSec: 82, fxName: "fahhhhh", score: featuredScore }),
+    ];
+    expect(fxPlanLocally(input(close(0.8))).picks.map((p) => p.id)).toEqual(["fah"]);
+    expect(fxPlanLocally(input(close(0.5))).picks.map((p) => p.id)).toEqual(["boom"]);
+  });
+
   it("says so when nothing earns an effect", () => {
     const review = fxPlanLocally(input([]));
     expect(review.picks).toEqual([]);

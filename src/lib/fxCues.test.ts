@@ -390,9 +390,33 @@ describe("which of many equally good sounds is heard", () => {
     expect(songsWith(pool, "hit-0")).toBeGreaterThan(0);
   });
 
-  it("with fixed dice the choice is still fixed", () => {
-    const pick = () => proposeFx({ cues: dropCues, pool: hits, songMap: map, frequency: "frequent", random: () => 0.5 }).map((p) => p.fxId);
-    expect(pick()).toEqual(pick());
+  it("the choice follows the dice: the same roll gives the same sounds, a different roll gives different ones", () => {
+    const pick = (roll: number) => proposeFx({ cues: dropCues, pool: hits, songMap: map, frequency: "frequent", random: () => roll }).map((p) => p.fxId);
+    expect(pick(0.1)).toEqual(pick(0.1));
+    expect(pick(0.1)).not.toEqual(pick(0.9));
+  });
+
+  it("uses the caller's dice once per moment, not once per sound", () => {
+    let draws = 0;
+    const random = () => {
+      draws++;
+      return 0.5;
+    };
+    proposeFx({ cues: dropCues, pool: hits, songMap: map, frequency: "frequent", random });
+    // per cue: one roll for the tie-break order, at most one for the featured chance, one for the pick
+    expect(draws).toBeLessThanOrEqual(dropCues.length * 3);
+  });
+
+  it("a featured sound is recognised by name in any form, or by a 'featured' tag", () => {
+    expect(isFeaturedFx({ name: "Fahhhhh!" })).toBe(true);
+    expect(isFeaturedFx({ name: "fahhhhh (2).wav" })).toBe(true);
+    expect(isFeaturedFx({ name: "Some other sound", tags: ["Featured"] })).toBe(true);
+    expect(isFeaturedFx({ name: "Some other sound", tags: ["boom"] })).toBe(false);
+  });
+
+  it("a sound tagged featured is proposed on a drop like the named one", () => {
+    const tagged = fx({ id: "tagged", name: "Something else", durationSec: 1.9, tags: ["featured"] });
+    expect(songsWith([...hits, tagged], "tagged")).toBeGreaterThan(songsWith([...hits, fx({ id: "plain", name: "plain one", durationSec: 1.9 })], "plain") * 1.3);
   });
 
   it("a featured sound is heard more often than the equally good sounds around it, but not every time", () => {
