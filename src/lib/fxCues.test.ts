@@ -1,9 +1,11 @@
 import { describe, expect, it } from "vitest";
 import {
+  FEATURED_FX_NAMES,
   FX_END_GUARD_SEC,
   findFxCues,
   fitFxToCue,
   fxRoleOf,
+  isFeaturedFx,
   placeFx,
   proposeFx,
   vocalOverlap,
@@ -359,5 +361,61 @@ describe("proposeFx", () => {
     const lopsided = [fx({ name: "Riser A", durationSec: 16 }), fx({ name: "Riser B", durationSec: 2 })];
     const strong = (value: number) => proposeFx({ cues: riserCues, pool: lopsided, songMap: map, frequency: "frequent", random: () => value })[0].fxId;
     expect(strong(0)).toBe("Riser A");
+  });
+});
+
+describe("which of many equally good sounds is heard", () => {
+  const map = songMap();
+  const dropCues = find().filter((c) => c.kind === "drop");
+  // A dozen one-shots that all fit a drop equally well: only the order they are listed in used to tell them apart.
+  const hits = Array.from({ length: 10 }, (_, i) => fx({ id: `hit-${i}`, name: `Hit ${i}`, durationSec: 1 }));
+  const fah = fx({ id: "fah", name: "fahhhhh", durationSec: 1.9 });
+  const lcg = (seed: number) => () => {
+    seed = (seed * 1664525 + 1013904223) % 4294967296;
+    return seed / 4294967296;
+  };
+  /** How many of `runs` songs have `fxId` among the proposals. */
+  const songsWith = (pool: FxSound[], fxId: string, runs = 600) => {
+    let n = 0;
+    for (let i = 0; i < runs; i++) {
+      const random = lcg(i + 1);
+      if (proposeFx({ cues: dropCues, pool, songMap: map, frequency: "frequent", random }).some((p) => p.fxId === fxId)) n++;
+    }
+    return n;
+  };
+
+  it("a sound listed last among equals is not shut out any more", () => {
+    const pool = [...hits, fx({ id: "last", name: "Hit last", durationSec: 1 })];
+    expect(songsWith(pool, "last")).toBeGreaterThan(0);
+    expect(songsWith(pool, "hit-0")).toBeGreaterThan(0);
+  });
+
+  it("with fixed dice the choice is still fixed", () => {
+    const pick = () => proposeFx({ cues: dropCues, pool: hits, songMap: map, frequency: "frequent", random: () => 0.5 }).map((p) => p.fxId);
+    expect(pick()).toEqual(pick());
+  });
+
+  it("a featured sound is heard more often than the equally good sounds around it, but not every time", () => {
+    const withFeatured = [...hits, fah];
+    const plain = [...hits, fx({ id: "plain", name: "plain one", durationSec: 1.9 })];
+    const featured = songsWith(withFeatured, "fah");
+    const ordinary = songsWith(plain, "plain");
+    expect(isFeaturedFx(fah)).toBe(true);
+    expect(isFeaturedFx(hits[0])).toBe(false);
+    expect(featured).toBeGreaterThan(ordinary * 1.3);
+    expect(featured).toBeLessThan(600 * 0.7);
+  });
+
+  it("a featured sound still has to fit the moment: a build-up wants a riser, not a one-shot", () => {
+    const buildCues = find().filter((c) => c.kind === "build");
+    for (let i = 0; i < 100; i++) {
+      const proposals = proposeFx({ cues: buildCues, pool: [fah, fx({ id: "riser", name: "Riser", durationSec: 8 })], songMap: map, frequency: "frequent", random: lcg(i + 1) });
+      expect(proposals.every((p) => p.fxId !== "fah")).toBe(true);
+    }
+  });
+
+  it("is matched on the name in any case, with stray spaces", () => {
+    expect(isFeaturedFx({ name: "  FAHHHHH " })).toBe(true);
+    expect(FEATURED_FX_NAMES).toContain("fahhhhh");
   });
 });

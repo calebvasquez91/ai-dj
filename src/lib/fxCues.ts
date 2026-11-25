@@ -303,6 +303,21 @@ export const FX_MAX_PER_SONG: Record<AmbienceFrequency, number> = { off: 0, occa
 const SAME_MOMENT_BARS = 2;
 /** How many near-best sounds a cue chooses among, so the same riser doesn't answer every build. */
 const TIE_BREAK_CANDIDATES = 3;
+/**
+ * Sounds that fit a moment equally well (a dozen one-shots can all score the same at a drop) are put in a random order before the best few are kept. Without it the library's
+ * own order decided: the same three always won and a sound added later (the newest upload) was never even a candidate.
+ */
+const TIE_JITTER = 0.02;
+/**
+ * Sounds the listener wants to hear a little more often (matched on the sound's name, any case). For a moment one fits, it is added to the candidates this often when it did not
+ * already rank among them. It still has to fit (no riser's job done by a one-shot) and keeps its own score, so it takes its turn rather than winning every time.
+ */
+export const FEATURED_FX_NAMES = ["fahhhhh"];
+export const FEATURED_FX_CHANCE = 0.25;
+
+export function isFeaturedFx(fx: Pick<FxSound, "name">): boolean {
+  return FEATURED_FX_NAMES.includes(fx.name.trim().toLowerCase());
+}
 
 export interface ProposeFxInput {
   cues: FxCue[];
@@ -323,7 +338,8 @@ export function proposeFx({ cues, pool, songMap, frequency, recentFxIds = [], ra
 
   const perCue: FxProposal[] = [];
   for (const cue of cues) {
-    const fits = pool
+    const featuredIds = new Set(pool.filter(isFeaturedFx).map((fx) => fx.id));
+    const ranked = pool
       .map((fx) => {
         const proposal = fitFxToCue(fx, cue, map);
         if (!proposal) return null;
@@ -333,9 +349,14 @@ export function proposeFx({ cues, pool, songMap, frequency, recentFxIds = [], ra
         return { ...proposal, score: proposal.score * staleness };
       })
       .filter((p): p is FxProposal => p !== null && p.score >= MIN_FIT_SCORE)
-      .sort((a, b) => b.score - a.score)
-      .slice(0, TIE_BREAK_CANDIDATES);
+      .map((p) => ({ p, key: p.score + random() * TIE_JITTER }))
+      .sort((a, b) => b.key - a.key);
+    let fits = ranked.slice(0, TIE_BREAK_CANDIDATES).map((r) => r.p);
     if (fits.length === 0) continue;
+    if (!fits.some((p) => featuredIds.has(p.fxId)) && random() < FEATURED_FX_CHANCE) {
+      const featured = ranked.find((r) => featuredIds.has(r.p.fxId));
+      if (featured) fits = [...fits.slice(0, TIE_BREAK_CANDIDATES - 1), featured.p];
+    }
     // Weighted by score squared, so a clearly better sound nearly always wins and near-equals alternate.
     const weights = fits.map((p) => p.score * p.score);
     let roll = random() * weights.reduce((sum, w) => sum + w, 0);

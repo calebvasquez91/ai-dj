@@ -72,6 +72,8 @@ export interface BuildFxPlanArgs {
   recentFxIds?: string[];
   /** Effects already played in this song, when this is a re-plan: they count against the cap and the spacing, so a new plan can't crowd or exceed them. */
   prior?: FxPlanSpan[];
+  /** Dice for choosing among near-equal sounds. Real dice by default (a fixed roll made every song pick the same sound for the same moment); tests pass a fixed one. */
+  random?: () => number;
 }
 
 function candidateFor(proposal: FxProposal, cue: FxCue | undefined, fx: FxSound): FxPlanCandidate {
@@ -107,7 +109,7 @@ export function buildFxPlan(args: BuildFxPlanArgs): BuiltFxPlan | null {
     songMap: args.songMap,
     frequency: "frequent",
     recentFxIds: args.recentFxIds,
-    random: () => 0.5,
+    random: args.random ?? Math.random,
   });
   if (proposals.length === 0) return null;
 
