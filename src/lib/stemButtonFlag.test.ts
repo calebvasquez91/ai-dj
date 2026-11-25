@@ -1,4 +1,4 @@
-import { readFileSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { SHOW_STEM_BUTTON_ON_SONGS } from "./featureFlags";
 
@@ -16,6 +16,12 @@ describe("the per-song stem button", () => {
       // every use of the component is the gated one
       expect(source.match(/<SeparateStemsButton/g)?.length, file).toBe(1);
     }
+  });
+
+  it("is rendered nowhere else: the genre-aware transition and vocal-split pieces add no stem button to any song", () => {
+    const dir = new URL("../components/", import.meta.url);
+    const users = readdirSync(dir).filter((f) => /\.tsx$/.test(f) && /<SeparateStemsButton/.test(readFileSync(new URL(f, dir), "utf-8")) && f !== "SeparateStemsButton.tsx");
+    expect(users.sort()).toEqual(["TrackGrid.tsx", "TrackList.tsx"]);
   });
 
   it("leaves the stem engine's own switch alone: it is a separate flag", () => {

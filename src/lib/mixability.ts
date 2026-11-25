@@ -6,6 +6,7 @@
  * Facts the app cannot know yet (vocal density, instrumentalness) are null, and a null never vetoes anything: the Engineer only blocks what it can see.
  */
 import type { TrackAnalysis } from "@/lib/audio-analysis-core";
+import { MIN_KEY_CONFIDENCE_FOR_SCORING } from "@/lib/mix-engine";
 import type { RankedPlan } from "@/lib/transitionPlanner";
 import type { TransitionStyle } from "@/lib/genreTransitions";
 
@@ -13,8 +14,12 @@ import type { TransitionStyle } from "@/lib/genreTransitions";
 export const BEAT_CONFIDENCE_MIN = 0.5;
 /** Below this tempo stability (how evenly spaced the tracked beats are) a grid cannot be trusted across a long blend. */
 export const TEMPO_STABILITY_MIN = 0.3;
-/** Below this key confidence a blend that depends on the keys agreeing is a gamble. */
-export const KEY_CONFIDENCE_MIN = 0.4;
+/**
+ * Below this key confidence a blend that depends on the keys agreeing is a gamble. It is the app's own line for trusting a key reading (the sync engine and
+ * the transition scoring use it), not a stricter one: most real songs read a key confidence under 0.3, so a stricter line vetoed nearly every blend (found
+ * by a dry run on the real library).
+ */
+export const KEY_CONFIDENCE_MIN = MIN_KEY_CONFIDENCE_FOR_SCORING;
 /** At or above this vocal density (0-1, share of the window with a lead vocal) an end is "heavy vocals". */
 export const HEAVY_VOCAL_DENSITY = 0.6;
 

@@ -36,7 +36,7 @@ describe("the Audio Engineer's report", () => {
   });
 
   it("lists what limits the pair in plain words and lowers the score", () => {
-    const r = buildMixabilityReport({ a: analysis({ bpmConfidence: 0.2, keyConfidence: 0.1 }), b: analysis(), durationA: 200, durationB: 200, mixOutSec: 180, mixInSec: 10 });
+    const r = buildMixabilityReport({ a: analysis({ bpmConfidence: 0.2, keyConfidence: 0.05 }), b: analysis(), durationA: 200, durationB: 200, mixOutSec: 180, mixInSec: 10 });
     expect(r.constraints).toContain("the tempo is not certain");
     expect(r.constraints).toContain("the key is not certain");
     expect(r.mixability).toBeLessThan(0.6);
@@ -68,7 +68,7 @@ describe("the Engineer's vetoes", () => {
   });
 
   it("removes key-dependent blends when key confidence is low", () => {
-    const v = engineerVetoes(report({ keyConfidenceA: 0.2 }));
+    const v = engineerVetoes(report({ keyConfidenceA: 0.1 }));
     expect(v.get("long-blend")).toBe("the key is not certain");
     expect(v.has("quick-cut")).toBe(false);
     expect(v.has("fade")).toBe(false);
