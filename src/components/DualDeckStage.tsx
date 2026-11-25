@@ -47,7 +47,8 @@ import { ANALYSIS_JOB_TIMEOUT_MS, pickNextAnalysisJob, tempoChanged } from "@/li
 import { LOOKUP_LOOKAHEAD, reachableTracks } from "@/lib/lookahead";
 import { withTimeout } from "@/lib/withTimeout";
 import { voiceCutoffSec, voiceMapFromStem } from "@/lib/voiceMap";
-import { DJ_EQ_ENABLED, SCRATCH_ENABLED, STUTTER_ENABLED, SONG_SYNC_ENABLED, STEM_FEATURES_ENABLED, VOCAL_MASHUP_ENABLED } from "@/lib/featureFlags";
+import { DJ_EQ_ENABLED, GENRE_TRANSITIONS_ENABLED, SCRATCH_ENABLED, STUTTER_ENABLED, SONG_SYNC_ENABLED, STEM_FEATURES_ENABLED, VOCAL_MASHUP_ENABLED } from "@/lib/featureFlags";
+import { genrePlanSkipsSongSync } from "@/lib/genrePlanApply";
 import { runDjEqTick } from "@/lib/djEq";
 import { manualStutter, planStutter, scheduleStutter, STUTTER_MIN_DECK_LEVEL, type StutterMove } from "@/lib/stutter";
 import { planScratchOverSong } from "@/lib/scratch";
@@ -4282,7 +4283,7 @@ export function DualDeckStage() {
       // fires, so the ordinary triggers don't cut in. A pair with nothing to morph (no trusted tempo, too far apart),
       // or one whose morph couldn't start, falls through to the ordinary transition, as does a transition the user
       // pinned for this mix.
-      if (SONG_SYNC_ENABLED && state.songSyncAuto && nextTrack.source === "local" && !state.forcedTransitionId) {
+      if (SONG_SYNC_ENABLED && state.songSyncAuto && nextTrack.source === "local" && !state.forcedTransitionId && !genrePlanSkipsSongSync(GENRE_TRANSITIONS_ENABLED, state.genrePlan, track.id, nextTrack.id)) {
         const pair = `${track.id}>${nextTrack.id}`;
         if (songSyncTriedRef.current !== pair) {
           const nextAnalysisForSync = getAnalysis(nextTrack.id);
@@ -4749,7 +4750,7 @@ export function DualDeckStage() {
         startTransition(nextTrack, plan);
       };
       // Song Sync Mode (Auto on) makes Mix Now a morph too; a pinned transition, or nothing to morph, keeps the ordinary mix.
-      if (SONG_SYNC_ENABLED && state.songSyncAuto && !state.forcedTransitionId) {
+      if (SONG_SYNC_ENABLED && state.songSyncAuto && !state.forcedTransitionId && !genrePlanSkipsSongSync(GENRE_TRANSITIONS_ENABLED, state.genrePlan, track.id, nextTrack.id)) {
         manualSongSync(ordinaryMixNow);
         return;
       }

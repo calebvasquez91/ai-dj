@@ -8,6 +8,7 @@
  * not a measurement.
  */
 import { bestTempoRatio } from "@/lib/tempoRatio";
+import { genreFlowDistance } from "@/lib/genreTransitions";
 import type { EnergyArc } from "@/lib/curate/profiles";
 
 /** What is known about a track for energy purposes. */
@@ -78,6 +79,8 @@ export interface OrderInput {
   id: string;
   energy: number;
   bpm: number | null;
+  /** The track's top-level genre label; only read when a genre weight is passed to orderByEnergyArc. */
+  genre?: string | null;
 }
 
 /** How much a tempo jump between neighbours counts against a track next to its energy miss. */
@@ -88,11 +91,14 @@ function tempoJump(a: OrderInput | undefined, b: OrderInput | undefined): number
   return Math.min(1, Math.abs(bestTempoRatio(a.bpm, b.bpm) - 1) / 0.3);
 }
 
-function planCost(order: readonly OrderInput[], targets: readonly number[]): number {
+function planCost(order: readonly OrderInput[], targets: readonly number[], genreWeight: number): number {
   let cost = 0;
   for (let i = 0; i < order.length; i++) {
     cost += Math.abs(order[i].energy - targets[i]);
-    if (i > 0) cost += TEMPO_WEIGHT * tempoJump(order[i - 1], order[i]);
+    if (i > 0) {
+      cost += TEMPO_WEIGHT * tempoJump(order[i - 1], order[i]);
+      if (genreWeight > 0) cost += genreWeight * genreFlowDistance(order[i - 1].genre, order[i].genre);
+    }
   }
   return cost;
 }
@@ -102,9 +108,11 @@ function planCost(order: readonly OrderInput[], targets: readonly number[]): num
  * energy and the positions sorted by target, pairing them rank for rank minimises the total miss (so a build really ends on
  * the loudest tracks, which a position-by-position pick would have used up early). Then a few passes of swapping nearby
  * tracks where that smooths the tempo (octave-aware, so 70 -> 140 is no jump) for little energy cost. O(n^2) at worst:
- * playlists are tens of tracks. A non-zero `seed` shuffles near-equal energies so "Regenerate" can give another order.
+ * playlists are tens of tracks. A non-zero `seed` shuffles near-equal energies so "Regenerate" can give another order. A non-zero `genreWeight`
+ * (genre-aware transitions on) adds a small cost for a genre jump between neighbours, so same-genre songs cluster when the energy scores are close.
+ * With 0 (the default) the order is exactly what it was.
  */
-export function orderByEnergyArc(items: readonly OrderInput[], arc: EnergyArc, seed = 0): OrderInput[] {
+export function orderByEnergyArc(items: readonly OrderInput[], arc: EnergyArc, seed = 0, genreWeight = 0): OrderInput[] {
   const n = items.length;
   const targets = arcTargets(arc, n);
   let rng = seed >>> 0;
@@ -123,9 +131,9 @@ export function orderByEnergyArc(items: readonly OrderInput[], arc: EnergyArc, s
     let improved = false;
     for (let i = 0; i < n; i++) {
       for (let j = i + 1; j < Math.min(n, i + 4); j++) {
-        const before = planCost(order, targets);
+        const before = planCost(order, targets, genreWeight);
         [order[i], order[j]] = [order[j], order[i]];
-        if (planCost(order, targets) < before - 1e-9) improved = true;
+        if (planCost(order, targets, genreWeight) < before - 1e-9) improved = true;
         else [order[i], order[j]] = [order[j], order[i]];
       }
     }

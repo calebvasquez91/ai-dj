@@ -65,6 +65,8 @@ export type RankedPlan = Omit<GenreTransitionPlan, "fallbackPlan"> & { score: nu
 
 const STYLE_TOOL: Partial<Record<TransitionStyle, TransitionTool>> = {
   "echo-out": "echo",
+  // The echo-out module is what holds the silence and starts the next song at its peak, so a silence-then-start needs it too.
+  "silence-then-start": "echo",
   "scratch-bridge": "scratch",
   "instrumental-bridge": "instrumentalBridge",
   "bass-swap": "eq",

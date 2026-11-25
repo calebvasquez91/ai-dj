@@ -6,6 +6,8 @@
  */
 import { genresOfTrack } from "@/lib/genreLibrary";
 import { estimateEnergies, orderByEnergyArc } from "@/lib/curate/energyArc";
+import { GENRE_TRANSITIONS_ENABLED } from "@/lib/featureFlags";
+import { GENRE_FLOW_WEIGHT } from "@/lib/genreTransitions";
 import { PROFILES, type EnergyArc, type EventProfile } from "@/lib/curate/profiles";
 import { profileOf, selectTracks, shortfallOf, type Selection, type Shortfall } from "@/lib/curate/select";
 import type { CurationSpec } from "@/lib/curate/spec";
@@ -101,7 +103,7 @@ export function finishCuration(inputs: CurationInputs, selection: Selection): Cu
   const profile = profileOf(spec);
   const arc: EnergyArc = spec.energyArc ?? profile?.energyArc ?? PROFILES.open.energyArc;
   const energies = estimateEnergies(selection.chosen.map((c) => ({ id: c.track.id, loudness: loudnessOf?.(c.track.id) ?? null, bpm: c.bpm, genre: genresOfTrack(c.track)[0]?.genre })));
-  const order = orderByEnergyArc(selection.chosen.map((c) => ({ id: c.track.id, energy: energies.get(c.track.id) ?? 0.5, bpm: c.bpm })), arc, seed);
+  const order = orderByEnergyArc(selection.chosen.map((c) => ({ id: c.track.id, energy: energies.get(c.track.id) ?? 0.5, bpm: c.bpm, genre: genresOfTrack(c.track)[0]?.genre })), arc, seed, GENRE_TRANSITIONS_ENABLED ? GENRE_FLOW_WEIGHT : 0);
   const byId = new Map(selection.chosen.map((c) => [c.track.id, c]));
   const tracks: PreviewTrack[] = order.map((o) => {
     const c = byId.get(o.id)!;

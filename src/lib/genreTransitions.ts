@@ -94,3 +94,26 @@ export const GENRE_TRANSITIONS: Readonly<Record<string, GenreTransitionRule>> = 
 export function genreRule(genre: string | null | undefined): GenreTransitionRule {
   return (genre ? GENRE_TRANSITIONS[genre] : undefined) ?? DEFAULT_GENRE_RULE;
 }
+
+/** How the genres' beat reliability sorts (required > preferred > unreliable > none), for how far apart two genres sit. */
+const BEAT_ORDER: Record<BeatSync, number> = { required: 3, preferred: 2, unreliable: 1, none: 0 };
+
+/**
+ * How far apart two genres sit for MIXING, 0 (the same genre, or nothing known) to 1 (nothing in common): the share of preferred styles they do not
+ * share, plus how far apart their beat reliability is. The playlist planners use it as a small cost so same-genre songs cluster when the energy
+ * planner's scores are close, and so a big genre jump is a place that wants a bridge or a cut. Unknown genres count as no signal, not as distance.
+ */
+export function genreFlowDistance(a: string | null | undefined, b: string | null | undefined, table: Readonly<Record<string, GenreTransitionRule>> = GENRE_TRANSITIONS): number {
+  if (!a || !b || a === b) return 0;
+  const ra = table[a], rb = table[b];
+  if (!ra || !rb) return 0;
+  const sa = new Set(ra.preferredStyles), sb = new Set(rb.preferredStyles);
+  const shared = [...sa].filter((s) => sb.has(s)).length;
+  const union = new Set([...sa, ...sb]).size;
+  const styleGap = 1 - shared / union;
+  const beatGap = Math.abs(BEAT_ORDER[ra.beatSync] - BEAT_ORDER[rb.beatSync]) / 3;
+  return Math.min(1, 0.7 * styleGap + 0.3 * beatGap);
+}
+
+/** How much a genre jump between neighbours counts against a playlist order next to its energy miss (the tempo jump's own weight is 0.12). Used only while GENRE_TRANSITIONS_ENABLED is on. */
+export const GENRE_FLOW_WEIGHT = 0.12;

@@ -42,9 +42,13 @@ import type { StemJobState } from "@/lib/stemAutopilot";
 import type { StemCounts } from "@/lib/stemStatus";
 import { judgeStemCandidate } from "@/lib/stemPlanner";
 import { SEED_RADIO_ENABLED } from "@/lib/featureFlags";
+import type { PairGenrePlan } from "@/lib/genrePlanApply";
 import { RADIO_BATCH, isLoneSongPlay, nextRadioBatch, radioNeedsMore, type RadioFacts } from "@/lib/radio";
 import { VOICE_CUT_DEFAULTS, loadVoiceCutSettings, saveVoiceCutSettings, type VoiceCutSettings } from "@/lib/voiceCutSettings";
 import type { VoiceMap } from "@/lib/voiceMap";
+
+/** How many genre-aware decisions the in-memory log keeps. */
+const GENRE_DECISION_LOG_KEPT = 50;
 
 const MAX_HISTORY = 50;
 /** How many Add Music tracks can wait for background analysis at once; the oldest requests drop first. */
@@ -211,6 +215,11 @@ interface PlayerState {
   activeTransitionRationale: string | null;
   /** Terse version of the same rationale, for the mascot's dismissible player-side label — set/cleared at the exact same moments as activeTransitionRationale, see mix-engine.ts's shortWhy. */
   activeTransitionShortWhy: string | null;
+  /** The genre-aware plan the DJ and the Audio Engineer made for the upcoming pair (components/GenreTransitionPlanner.tsx), or null. Only ever set while GENRE_TRANSITIONS_ENABLED is on; planArgsFromState uses it only for exactly this pair. */
+  genrePlan: PairGenrePlan | null;
+  /** The last few genre-aware decisions, newest last, for the readout and the admin counts. In memory only. */
+  genreDecisionLog: PairGenrePlan[];
+  setGenrePlan: (plan: PairGenrePlan | null) => void;
   /** Occasional mid-track FX (filter/riser builds, echo throws on breakdowns) — separate from transition FX, which always fire regardless of this setting. */
   ambienceEnabled: boolean;
   ambienceFrequency: AmbienceFrequency;
@@ -556,6 +565,8 @@ export const useStore = create<PlayerState>()(
       quantizeEnabled: true,
       activeTransitionRationale: null,
       activeTransitionShortWhy: null,
+      genrePlan: null,
+      genreDecisionLog: [],
       ambienceEnabled: true,
       ambienceFrequency: "occasional",
       ambienceLevel: AMBIENCE_DEFAULT_LEVEL,
@@ -1025,6 +1036,7 @@ export const useStore = create<PlayerState>()(
       setQuantizeEnabled: (enabled) => set({ quantizeEnabled: enabled }),
       setActiveTransitionRationale: (rationale) => set({ activeTransitionRationale: rationale }),
       setActiveTransitionShortWhy: (shortWhy) => set({ activeTransitionShortWhy: shortWhy }),
+      setGenrePlan: (plan) => set((s) => ({ genrePlan: plan, genreDecisionLog: plan ? [...s.genreDecisionLog, plan].slice(-GENRE_DECISION_LOG_KEPT) : s.genreDecisionLog })),
       setAmbienceEnabled: (enabled) => set({ ambienceEnabled: enabled }),
       setAmbienceFrequency: (frequency) => set({ ambienceFrequency: frequency }),
       setAmbienceLevel: (level) => set({ ambienceLevel: clampAmbienceLevel(level) }),

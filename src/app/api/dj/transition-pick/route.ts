@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { auth } from "@/auth";
 import { apiHandler, unauthorized } from "@/lib/apiRoute";
-import { askHaikuToPick } from "@/lib/transitionPickServer";
+import { askHaikuToPick } from "@/lib/anthropicTransitionPick";
 import { sanitizePickRequest } from "@/lib/transitionChoice";
 
 /** A real request is a kilobyte or two. */

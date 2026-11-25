@@ -8,6 +8,8 @@ import { alignEntryToBar, songMapMatchesBpm } from "@/lib/phrase-align";
 import { estimateStructuralCues } from "@/lib/structural-estimate";
 import { TRANSITION_FX_ENABLED } from "@/lib/transitionFx";
 import { bestTempoRatio } from "@/lib/tempoRatio";
+import { GENRE_TRANSITIONS_ENABLED } from "@/lib/featureFlags";
+import { adjustPlanArgsForGenrePlan, planMatchesPair, type PairGenrePlan } from "@/lib/genrePlanApply";
 
 export { snapToBeatGrid } from "@/lib/beat-grid";
 
@@ -679,6 +681,8 @@ export interface PlanningState {
   djVarietyBias: boolean;
   quantizeEnabled: boolean;
   recentTransitionIds: string[];
+  /** The genre-aware plan for the upcoming pair (lib/transitionPlanner.ts), when GENRE_TRANSITIONS_ENABLED is on and the DJ has made one. Optional: absent means the plan is exactly what it was before. */
+  genrePlan?: PairGenrePlan | null;
 }
 
 /** Transition ids whose effect is an overlay SOUND (a riser, scratch chirps, a tag stab, spoken or random words) rather than a way of moving between the two tracks: none of them is planned while TRANSITION_FX_ENABLED is off. */
@@ -708,7 +712,7 @@ export function planArgsFromState(
 ): PlanTransitionArgs {
   const stemReady = Boolean(state.stemAvailability[next.track.id]);
   const rerolled = opts.ignoreOverrides ? [] : state.rerolledTransitionIds;
-  return {
+  const args: PlanTransitionArgs = {
     current,
     next,
     genreHint: state.styleGenreHint,
@@ -729,6 +733,9 @@ export function planArgsFromState(
     categoryWeights,
     quantize: state.quantizeEnabled,
   };
+  // The genre layer only picks which transition to ask for, through arguments planTransition already takes; off, or no plan for this pair: the arguments are untouched.
+  if (GENRE_TRANSITIONS_ENABLED && planMatchesPair(state.genrePlan, current.track.id, next.track.id)) return adjustPlanArgsForGenrePlan(args, state.genrePlan!.plan);
+  return args;
 }
 
 function buildRationale(
