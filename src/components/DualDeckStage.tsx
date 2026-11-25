@@ -49,6 +49,7 @@ import { withTimeout } from "@/lib/withTimeout";
 import { voiceCutoffSec, voiceMapFromStem } from "@/lib/voiceMap";
 import { DJ_EQ_ENABLED, GENRE_TRANSITIONS_ENABLED, SCRATCH_ENABLED, STUTTER_ENABLED, SONG_SYNC_ENABLED, STEM_FEATURES_ENABLED, VOCAL_MASHUP_ENABLED } from "@/lib/featureFlags";
 import { genrePlanSkipsSongSync } from "@/lib/genrePlanApply";
+import { shouldHoldForIncoming, shouldPreloadNext } from "@/lib/nextTrackPreload";
 import { playbackUrl } from "@/lib/instrumentalMode";
 import { runDjEqTick } from "@/lib/djEq";
 import { manualStutter, planStutter, scheduleStutter, STUTTER_MIN_DECK_LEVEL, type StutterMove } from "@/lib/stutter";
@@ -460,6 +461,10 @@ export function DualDeckStage() {
     decks: Record<DeckId, DeckNodes>;
   } | null>(null);
   const loadedTrackId = useRef<Record<DeckId, string | null>>({ A: null, B: null });
+  // The next song, loaded into the idle deck ahead of its transition (preloadNextTrack), so the transition finds it ready instead of starting to fetch it.
+  const preloadedRef = useRef<{ deckId: DeckId; trackId: string; url: string } | null>(null);
+  // When an automatic transition began waiting for that preloaded song to be ready (shouldHoldForIncoming), ms; null when it is not waiting.
+  const incomingHoldSinceRef = useRef<number | null>(null);
   const transitionRef = useRef<ActiveTransition | null>(null);
   // Tracks the last mid-track ambience trigger per-track (reset whenever the
   // active track changes) so shouldTriggerAmbience() can enforce a cooldown.
@@ -2007,6 +2012,67 @@ export function DualDeckStage() {
       return { source, filter, gain };
     }
 
+    /**
+     * Puts a song on the incoming deck. If preloadNextTrack already loaded exactly this song on exactly this deck, the deck is left alone (setting `src` again would start
+     * the download over and throw the preload away); otherwise it is loaded now, as before.
+     */
+    function attachIncomingSource(el: HTMLAudioElement, deckId: DeckId, track: { id: string; sourceUrl: string }) {
+      const url = playUrl(track);
+      const pre = preloadedRef.current;
+      const preloaded = pre !== null && pre.deckId === deckId && pre.trackId === track.id && pre.url === url && el.getAttribute("src") === url;
+      if (!preloaded) el.src = url;
+      preloadedRef.current = null;
+      incomingHoldSinceRef.current = null;
+      loadedTrackId.current[deckId] = track.id;
+    }
+
+    /**
+     * Loads the next song into the idle deck while the playing one is in its last minute and a half, silent and paused. The transition then starts with it already
+     * downloaded and seekable, instead of fetching it while the fade runs (a late start, a dip, a stumble or a jump a moment after the transition began).
+     */
+    function preloadNextTrack() {
+      if (
+        transitionRef.current || mashupRef.current || mashupStartingRef.current || songSyncRef.current || songSyncStartingRef.current || tempoRampRef.current ||
+        tempoRampStartingRef.current || loopRef.current || backspinRef.current || reverseRef.current || vocalMashupPrepRef.current
+      ) return;
+      const state = useStore.getState();
+      const track = state.currentTrack;
+      const nextTrack = state.queue[0];
+      if (!state.isPlaying || !track || !nextTrack || track.source !== "local" || nextTrack.source !== "local" || nextTrack.id === track.id) return;
+      const activeId = activeDeckRef.current;
+      const idleId: DeckId = activeId === "A" ? "B" : "A";
+      const activeEl = deckEl(activeId);
+      const idleEl = deckEl(idleId);
+      if (!activeEl || !idleEl || !Number.isFinite(activeEl.duration) || activeEl.duration <= 0) return;
+      if (!shouldPreloadNext(activeEl.duration - activeEl.currentTime, activeEl.currentTime)) return;
+      const url = playUrl(nextTrack);
+      const pre = preloadedRef.current;
+      if (pre && pre.deckId === idleId && pre.trackId === nextTrack.id && pre.url === url && idleEl.getAttribute("src") === url) return;
+      idleEl.pause();
+      idleEl.src = url;
+      idleEl.load();
+      preloadedRef.current = { deckId: idleId, trackId: nextTrack.id, url };
+      incomingHoldSinceRef.current = null;
+    }
+
+    /** True when an automatic transition should wait a moment longer: the preloaded incoming song is not ready to play yet and there is still room to wait. */
+    function holdForIncoming(nextTrack: { id: string }, windowSec: number, remainingSec: number): boolean {
+      const pre = preloadedRef.current;
+      const toDeckId: DeckId = activeDeckRef.current === "A" ? "B" : "A";
+      const toEl = deckEl(toDeckId);
+      if (!pre || pre.trackId !== nextTrack.id || pre.deckId !== toDeckId || !toEl || toEl.getAttribute("src") !== pre.url) {
+        incomingHoldSinceRef.current = null;
+        return false;
+      }
+      if (toEl.readyState >= 3) {
+        incomingHoldSinceRef.current = null;
+        return false;
+      }
+      const now = performance.now();
+      if (incomingHoldSinceRef.current == null) incomingHoldSinceRef.current = now;
+      return shouldHoldForIncoming({ readyState: toEl.readyState, remainingSec, windowSec, heldMs: now - incomingHoldSinceRef.current });
+    }
+
     function startTransition(nextTrack: LocalTrack, plan: TransitionPlan) {
       if (transitionRef.current) return;
       const ctx = audioCtxRef.current;
@@ -2036,8 +2102,7 @@ export function DualDeckStage() {
         plan.effect !== "spin-up" &&
         (plan.tempoSync || plan.category === "tempo-ramp");
 
-      loadedTrackId.current[toDeckId] = nextTrack.id;
-      toEl.src = playUrl(nextTrack);
+      attachIncomingSource(toEl, toDeckId, nextTrack);
       toEl.currentTime = plan.incomingEntryOffsetSec;
       toEl.playbackRate = plan.effect === "spin-up" ? SPIN_UP_MIN_RATE : startsTempoSynced ? plan.tempoRatioStart : 1;
       toNodes.gain.gain.setValueAtTime(0, ctx.currentTime);
@@ -2487,8 +2552,7 @@ export function DualDeckStage() {
       const idleEl = deckEl(m.toDeckId);
       const idleNodes = deckNodesRef.current[m.toDeckId];
       if (ctx && idleEl && idleNodes) {
-        loadedTrackId.current[m.toDeckId] = m.nextTrack.id;
-        idleEl.src = playUrl(m.nextTrack);
+        attachIncomingSource(idleEl, m.toDeckId, m.nextTrack);
         idleEl.currentTime = m.plan.entryOffsetSec + m.trackTimeElapsedSec;
         idleEl.playbackRate = 1;
         idleNodes.gain.gain.cancelScheduledValues(ctx.currentTime);
@@ -2981,9 +3045,8 @@ export function DualDeckStage() {
       const toEl = deckEl(s.toDeckId);
       const toNodes = deckNodesRef.current[s.toDeckId];
       if (!ctx || !toEl || !toNodes) return;
-      loadedTrackId.current[s.toDeckId] = s.nextTrack.id;
       toEl.pause();
-      toEl.src = playUrl(s.nextTrack);
+      attachIncomingSource(toEl, s.toDeckId, s.nextTrack);
       toEl.currentTime = 0;
       toEl.playbackRate = 1;
       toNodes.gain.gain.cancelScheduledValues(ctx.currentTime);
@@ -4274,6 +4337,7 @@ export function DualDeckStage() {
           if (nextTrack.source !== "local") {
             fadeThenAdvance(clampedWindow);
           } else {
+            if (holdForIncoming(nextTrack, clampedWindow, duration - currentTime)) return;
             startTransition(nextTrack, { ...plan, windowSec: clampedWindow });
           }
         }
@@ -4493,6 +4557,8 @@ export function DualDeckStage() {
           tempoRampCompletedPairRef.current === pairKey
             ? { ...plan, windowSec: clampedWindow, tempoSync: true, tempoRatioStart: 1 }
             : { ...plan, windowSec: clampedWindow };
+        // The next song should have been loaded ahead (preloadNextTrack): if the browser is still fetching it, wait a moment (while there is room) rather than fade into silence.
+        if (holdForIncoming(nextTrack, clampedWindow, duration - currentTime)) return;
         applyLearningNudge(track, nextTrack, state, currentTime, finalPlan);
         startTransition(nextTrack, finalPlan);
         tempoRampCompletedPairRef.current = null;
@@ -4632,6 +4698,7 @@ export function DualDeckStage() {
                 : activeEl.currentTime
           );
       }
+      preloadNextTrack();
       tryAutoTransition();
       tryAmbience();
       trySpookyFxMoment();
@@ -4898,6 +4965,8 @@ export function DualDeckStage() {
       idleEl.removeAttribute("src");
       idleEl.load();
     }
+    preloadedRef.current = null;
+    incomingHoldSinceRef.current = null;
     resetDeckNodes(idleId, 0);
     loadedTrackId.current[idleId] = null;
 
