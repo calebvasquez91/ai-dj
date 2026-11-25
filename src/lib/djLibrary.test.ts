@@ -44,6 +44,12 @@ describe("reading the list", () => {
     expect(skipped).toBe(4);
   });
 
+  it("reads a file that starts with a byte order mark, so its first song is not lost", () => {
+    const { rows, skipped } = parseLibraryJsonl("﻿" + line({ id: "T001", title: "Raining Blood", artist: "Slayer" }) + "\n" + line({ id: "T002", title: "B", artist: "C" }));
+    expect(rows.map((r) => r.id)).toEqual(["T001", "T002"]);
+    expect(skipped).toBe(0);
+  });
+
   it("takes a year or an energy only when it is a sane number", () => {
     const { rows } = parseLibraryJsonl(line({ id: "T1", title: "A", artist: "B", year: null, energy: 11 }) + "\n" + line({ id: "T2", title: "A", artist: "B", year: "1999", energy: "5" }));
     expect(rows.every((r) => r.year === null && r.energy === null)).toBe(true);
@@ -66,6 +72,16 @@ describe("comparing titles and artists", () => {
     expect(artistKeys("Guns N' Roses")).toEqual(["gunsnroses"]);
     expect(artistKeys("Unknown Artist")).toEqual([]);
     expect(artistKeys("&LEZ & Robin M")).toEqual(["lez", "robinm"]);
+  });
+
+  it("leaves out a bracketed note in the artist line", () => {
+    expect(artistKeys("Everything but the Girl (Todd Terry Remix)")).toEqual(["everythingbutthegirl"]);
+    expect(artistKeys("Terror Squad (Fat Joe & Remy Ma)")).toEqual(["terrorsquad"]);
+  });
+
+  it("keeps accented letters and dashes working without invisible characters in the source", () => {
+    expect(titleKey("Amé – Radio Edit")).toBe(titleKey("Ame"));
+    expect(titleKey("Beyoncé — Live")).toBe(titleKey("Beyonce"));
   });
 
   it("sees a remix, a mashup, a cover, a live or acoustic take, but not a clean, dirty, radio or instrumental edit", () => {
@@ -104,10 +120,26 @@ describe("which uploaded songs are on the list", () => {
     expect(ids("Zombie", "Unknown Artist")).toEqual([]);
   });
 
-  it("does not match a remix to the original, but does when the list's own row is that remix", () => {
+  it("a remix and an original never match each other, in either direction; a remix matches a list row that is that remix", () => {
     expect(ids("Caroline (Rey Santana Remix) (Dirty Short Edit)", "Aminé")).toEqual([]);
     expect(ids("Savage (Remix)", "Megan Thee Stallion")).toEqual(["T4"]);
-    expect(ids("Savage", "Megan Thee Stallion")).toEqual(["T4"]);
+    expect(ids("Savage", "Megan Thee Stallion")).toEqual([]);
+  });
+
+  it("an act joined with '&' is one name: a solo artist does not match it, the act (in any order) does", () => {
+    const acts = buildLibraryIndex([
+      row({ id: "B1", title: "Layla", artist: "Derek & The Dominos" }),
+      row({ id: "B2", title: "Blinding", artist: "Drake & PartyNextDoor" }),
+      row({ id: "B3", title: "Missing", artist: "Everything but the Girl (Todd Terry Remix)" }),
+      row({ id: "B4", title: "Forever", artist: "Drake ft. Tems" }),
+    ]);
+    const found = (title: string, artist: string) => matchLibrary({ title, artist }, acts).map((r) => r.id);
+    expect(found("Layla", "Derek")).toEqual([]);
+    expect(found("Layla", "Derek & The Dominos")).toEqual(["B1"]);
+    expect(found("Blinding", "PARTYNEXTDOOR & Drake")).toEqual(["B2"]);
+    expect(found("Blinding", "Drake")).toEqual([]);
+    expect(found("Missing", "Everything But The Girl")).toEqual(["B3"]);
+    expect(found("Forever (Quick Hit Dirty)", "Drake")).toEqual(["B4"]);
   });
 
   it("has nothing to match a placeholder row against", () => {
@@ -123,17 +155,21 @@ describe("the moods a song gets", () => {
     expect(moods.every(isMoodId)).toBe(true);
   });
 
-  it("adds what the playlist says after the song's own, without repeats", () => {
-    expect(libraryMoods([row({ playlist: "Parties & BBQ", moods: ["party", "swagger"] })])).toEqual(["party"]);
+  it("uses the playlist's mood only for a song whose own words gave none, never next to them", () => {
     expect(libraryMoods([row({ playlist: "Sad & Mellow", moods: ["swagger"] })])).toEqual(["sad"]);
+    expect(libraryMoods([row({ playlist: "Lovey Dovey", moods: [] })])).toEqual(["romantic"]);
+    expect(libraryMoods([row({ playlist: "Lovey Dovey", moods: ["anthemic", "catchy"] })])).toEqual(["uplifting"]);
+    expect(libraryMoods([row({ playlist: "Parties & BBQ", moods: ["party", "swagger"] })])).toEqual(["party"]);
     expect(libraryMoods([row({ playlist: "Not A Playlist", moods: [] })])).toEqual([]);
   });
 
   it("joins the rows of a song that is in more than one playlist, and keeps at most the cap", () => {
     const many = ["chill", "party", "workout", "romantic", "sad", "happy", "dark"];
     expect(libraryMoods([row({ moods: many })]).length).toBe(MAX_MOODS_KEPT);
-    const twice = libraryMoods([row({ playlist: "Workouts", moods: ["dreamy"] }), row({ playlist: "Lovey Dovey", moods: ["dreamy"] })]);
-    expect(twice).toEqual(["dreamy", "workout", "romantic"]);
+    const twice = libraryMoods([row({ playlist: "Workouts", moods: ["dreamy"] }), row({ playlist: "Lovey Dovey", moods: ["hazy", "swagger"] })]);
+    expect(twice).toEqual(["dreamy"]);
+    const bare = libraryMoods([row({ playlist: "Workouts", moods: ["swagger"] }), row({ playlist: "Lovey Dovey", moods: [] })]);
+    expect(bare).toEqual(["workout", "romantic"]);
   });
 
   it("only uses moods that are on the app's list", () => {
@@ -145,13 +181,20 @@ describe("what is filled in", () => {
   const rows = [row({ playlist: "Workouts", moods: ["hype"], year: 2008 })];
 
   it("fills moods and year when the song has neither", () => {
-    expect(planFill({ moods: [], year: null }, rows)).toEqual({ moods: ["energetic", "workout"], year: 2008 });
+    expect(planFill({ moods: [], year: null }, rows)).toEqual({ moods: ["energetic"], year: 2008 });
   });
 
   it("never touches moods or a year the song already has", () => {
     expect(planFill({ moods: ["chill"], year: 1999 }, rows)).toEqual({});
     expect(planFill({ moods: ["chill"], year: null }, rows)).toEqual({ year: 2008 });
-    expect(planFill({ moods: [], year: 1999 }, rows)).toEqual({ moods: ["energetic", "workout"] });
+    expect(planFill({ moods: [], year: 1999 }, rows)).toEqual({ moods: ["energetic"] });
+  });
+
+  it("uses a year only when every row that has one agrees, and skips it when they do not", () => {
+    const agree = [row({ year: 2016 }), row({ year: 2016 }), row({ year: null })];
+    const differ = [row({ year: 2016 }), row({ year: 2023 })];
+    expect(planFill({ moods: ["chill"], year: null }, agree)).toEqual({ year: 2016 });
+    expect(planFill({ moods: ["chill"], year: null }, differ)).toEqual({});
   });
 
   it("has nothing to add when the list knows neither", () => {

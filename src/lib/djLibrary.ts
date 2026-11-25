@@ -8,10 +8,13 @@
  *    explicit mark or anything a source or a person set. The list's BPM, key and energy are the list's own estimates (it says so itself), and the app's own
  *    analysis is better; the 1-10 energy has no place to live (the curator works energy out from loudness and tempo).
  *  - A song matches on its title and its main artist, both compared with the noise taken out (accents, case, punctuation, "(Clean)", "(Quick Hit Dirty)", "feat. ...").
- *    A version that changes the song (a remix, a cover, a mashup, a live or acoustic take, a slowed or sped-up one) is not matched to the original, because
- *    its mood may differ; a clean, dirty, radio, intro or extended edit is the same song and is matched.
- *  - A mood word is kept only when it maps onto the app's own mood list (lib/moodTags.ts); the rest are dropped. The playlist the owner filed the song under
- *    adds one more, after the song's own.
+ *    A version that changes the song (a remix, a cover, a mashup, a live or acoustic take, a slowed or sped-up one) only matches a list row that is the SAME kind of
+ *    version, never the original, because its mood may differ; a clean, dirty, radio, intro, extended or instrumental edit is the same song and is matched.
+ *  - A mood word is kept only when it maps onto the app's own mood list (lib/moodTags.ts); the rest are dropped. The playlist the owner filed a song under is
+ *    used only for a song whose own words gave no mood at all, so a guess from a playlist name never sits next to, or against, what the list says.
+ *  - Moods written here are ordinary moods in TrackGenre.moodsJson, with no mark of where they came from. A later re-classify (genre/stored.ts mergeRun) puts
+ *    its own moods first and keeps five, so when the sources name five moods they take every slot and the list's moods go. That is the pipeline's policy (what
+ *    the sources found outranks the list) and is left as it is; the fill SQL does not put them back, because it only writes while a song has no moods.
  */
 import { normalizeMood } from "@/lib/moodTags";
 import { MAX_MOODS_KEPT } from "@/lib/genre/stored";
@@ -28,7 +31,7 @@ export interface LibraryRow {
   energy: number | null;
 }
 
-/** What a playlist name says about its songs, canonical mood ids (lib/moodTags.ts). Only used after a song's own moods, to fill up to the cap. */
+/** What a playlist name says about its songs, canonical mood ids (lib/moodTags.ts). Used only for a song whose own mood words map to nothing. */
 export const PLAYLIST_MOODS: Readonly<Record<string, readonly string[]>> = {
   "Get You Pumped": ["energetic"],
   "Parties & BBQ": ["party"],
@@ -44,11 +47,12 @@ const asString = (v: unknown): string => (typeof v === "string" ? v.trim() : "")
 const asYear = (v: unknown): number | null => (typeof v === "number" && Number.isInteger(v) && v >= 1900 && v <= 2100 ? v : null);
 const asEnergy = (v: unknown): number | null => (typeof v === "number" && Number.isFinite(v) && v >= 1 && v <= 10 ? v : null);
 
-/** The rows of a JSON Lines file. A blank line is ignored; a line that is not an object with an id, title and artist is counted in `skipped`, never thrown. */
+/** The rows of a JSON Lines file. A blank line is ignored, and so is a leading byte order mark; a line that is not an object with an id, title and artist is counted in `skipped`, never thrown. */
 export function parseLibraryJsonl(text: string): { rows: LibraryRow[]; skipped: number } {
   const rows: LibraryRow[] = [];
   let skipped = 0;
-  for (const line of text.split(/\r?\n/)) {
+  const body = text.charCodeAt(0) === 0xfeff ? text.slice(1) : text;
+  for (const line of body.split(/\r?\n/)) {
     if (!line.trim()) continue;
     let raw: unknown;
     try {
@@ -78,25 +82,35 @@ export function parseLibraryJsonl(text: string): { rows: LibraryRow[]; skipped: 
   return { rows, skipped };
 }
 
-const fold = (s: string) => s.toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "");
+// The combining marks (U+0300 to U+036F) and the en and em dash, built from their code points so the source holds no invisible characters.
+const COMBINING_MARKS = new RegExp(`[${String.fromCharCode(0x300)}-${String.fromCharCode(0x36f)}]`, "g");
+const TITLE_DASH_TAIL = new RegExp(`\\s[-${String.fromCharCode(0x2013)}${String.fromCharCode(0x2014)}]\\s.*$`);
+
+const fold = (s: string) => s.toLowerCase().normalize("NFD").replace(COMBINING_MARKS, "");
 const alnum = (s: string) => fold(s).replace(/&/g, "and").replace(/[^a-z0-9]+/g, "");
+const dropBrackets = (s: string) => s.replace(/\(.*?\)|\[.*?\]/g, " ");
 
 /** A title with the noise taken out: brackets and what is in them, a trailing " - Radio Edit" style tail, and "feat. ..." */
 export function titleKey(title: string): string {
-  return alnum(
-    fold(title)
-      .replace(/\(.*?\)|\[.*?\]/g, " ")
-      .replace(/\s[-–—]\s.*$/, " ")
-      .replace(/\b(?:feat|ft|featuring)\b.*$/, " ")
-  );
+  return alnum(dropBrackets(fold(title)).replace(TITLE_DASH_TAIL, " ").replace(/\b(?:feat|ft|featuring)\b.*$/, " "));
 }
 
-/** The song's artists, each with the noise taken out, main artist first. "Unknown Artist" and empty names are dropped. */
+/** The song's artists, each with the noise taken out (brackets and what is in them included), main artist first. "Unknown Artist" and empty names are dropped. */
 export function artistKeys(artist: string): string[] {
-  return fold(artist)
+  return dropBrackets(fold(artist))
     .split(/\s*(?:,|&|\band\b|\bx\b|\bwith\b|\b(?:ft|feat|featuring)\b\.?)\s*/)
     .map(alnum)
     .filter((a) => a !== "" && a !== "unknownartist");
+}
+
+/** The whole artist line as one key, brackets and a "feat. ..." tail removed ("Derek & The Dominos" stays one name). */
+function wholeArtistKey(artist: string): string {
+  return alnum(dropBrackets(fold(artist)).replace(/\b(?:ft|feat|featuring)\b.*$/, " "));
+}
+
+/** An artist line that joins names with "&" or "and" outside any brackets: one act (Derek & The Dominos) or a pair (Drake & PartyNextDoor), which a name alone cannot tell apart. */
+function joinsWithAmpersand(artist: string): boolean {
+  return /&|\band\b/.test(dropBrackets(fold(artist)).replace(/\b(?:ft|feat|featuring)\b.*$/, " "));
 }
 
 const VARIANT_PATTERNS: readonly [RegExp, string][] = [
@@ -132,29 +146,39 @@ export function buildLibraryIndex(rows: readonly LibraryRow[]): LibraryIndex {
   return index;
 }
 
-/** The library rows that are this uploaded song: same title, the row's main artist among the song's artists, and no version the row does not have. */
+const sameSet = (a: ReadonlySet<string>, b: ReadonlySet<string>) => a.size === b.size && [...a].every((x) => b.has(x));
+
+/**
+ * The library rows that are this uploaded song: same title, the same kind of version (both the original, or both a remix, and so on), and the same artist: the
+ * row's main artist is among the song's, and when the row joins names with "&" every one of them is (or the whole artist lines are the same), because
+ * "Derek & The Dominos" is one act and must not match a solo "Derek".
+ */
 export function matchLibrary(track: { title: string; artist: string }, index: LibraryIndex): LibraryRow[] {
   const candidates = index.get(titleKey(track.title));
   if (!candidates) return [];
   const artists = artistKeys(track.artist);
   const variants = variantTokens(track.title);
+  const trackWhole = wholeArtistKey(track.artist);
   return candidates.filter((row) => {
-    const main = artistKeys(row.artist)[0];
-    if (!main || !artists.includes(main)) return false;
-    const rowVariants = variantTokens(row.title);
-    for (const v of variants) if (!rowVariants.has(v)) return false;
+    if (!sameSet(variants, variantTokens(row.title))) return false;
+    const rowArtists = artistKeys(row.artist);
+    if (rowArtists.length === 0 || !artists.includes(rowArtists[0])) return false;
+    if (joinsWithAmpersand(row.artist) && wholeArtistKey(row.artist) !== trackWhole && !rowArtists.every((a) => artists.includes(a))) return false;
     return true;
   });
 }
 
-/** The canonical moods for a song from every row that names it (the same song can sit in several playlists): the songs' own words first, then the playlists', at most MAX_MOODS_KEPT. */
+/**
+ * The canonical moods for a song from every row that names it (the same song can sit in several playlists): the songs' own words, at most MAX_MOODS_KEPT. Only a
+ * song whose own words map to no mood gets the moods its playlists stand for, so a playlist's name is a last resort, never an addition to what the list says.
+ */
 export function libraryMoods(rows: readonly LibraryRow[]): string[] {
   const out: string[] = [];
   const add = (mood: string | null | undefined) => {
     if (mood && !out.includes(mood) && out.length < MAX_MOODS_KEPT) out.push(mood);
   };
   for (const row of rows) for (const word of row.moods) add(normalizeMood(word));
-  for (const row of rows) for (const mood of PLAYLIST_MOODS[row.playlist] ?? []) add(mood);
+  if (out.length === 0) for (const row of rows) for (const mood of PLAYLIST_MOODS[row.playlist] ?? []) add(mood);
   return out;
 }
 
@@ -170,7 +194,7 @@ export interface Fill {
   year?: number;
 }
 
-/** What to fill in for one matched song, given what it has now. Empty when there is nothing to add. */
+/** What to fill in for one matched song, given what it has now. Empty when there is nothing to add. The year is used only when every row that has one agrees on it. */
 export function planFill(current: StoredFacts, rows: readonly LibraryRow[]): Fill {
   const fill: Fill = {};
   if (current.moods.length === 0) {
@@ -178,8 +202,8 @@ export function planFill(current: StoredFacts, rows: readonly LibraryRow[]): Fil
     if (moods.length > 0) fill.moods = moods;
   }
   if (current.year == null) {
-    const year = rows.map((r) => r.year).find((y): y is number => y != null);
-    if (year != null) fill.year = year;
+    const years = new Set(rows.map((r) => r.year).filter((y): y is number => y != null));
+    if (years.size === 1) fill.year = [...years][0];
   }
   return fill;
 }
