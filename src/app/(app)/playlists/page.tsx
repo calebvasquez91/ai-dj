@@ -30,7 +30,7 @@ export default function PlaylistsPage() {
       <div className="flex items-center justify-between gap-3">
         <h1 className="text-2xl font-bold tracking-tight">Playlists</h1>
         <div className="flex flex-wrap items-center gap-2">
-          <Button variant="secondary" onClick={() => useCurateUi.getState().show()}>
+          <Button variant="secondary" title="Describe a playlist and Vibe Code builds it" onClick={() => useCurateUi.getState().show()}>
             <SparklesIcon size={14} />
             Vibe Code
           </Button>

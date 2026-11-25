@@ -202,6 +202,7 @@ export default function Home() {
                   </span>
                 }
                 title="Vibe Code"
+                subtitle="Describe a playlist"
                 onClick={() => useCurateUi.getState().show()}
               />
               {likedCount > 0 && (

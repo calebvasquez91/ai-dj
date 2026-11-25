@@ -4,7 +4,7 @@ import { AuthSessionProvider } from "@/components/AuthSessionProvider";
 import { AppDataLoader } from "@/components/AppDataLoader";
 import { GenreRunner } from "@/components/GenreRunner";
 import { TrackGenreSheetHost } from "@/components/TrackGenreSheet";
-import { CreateWithDjSheet } from "@/components/CreateWithDjSheet";
+import { VibeCodeSheet } from "@/components/VibeCodeSheet";
 import { StemAutopilot } from "@/components/StemAutopilot";
 import { VoiceMapLoader } from "@/components/VoiceMapLoader";
 import { STEM_FEATURES_ENABLED, VOCAL_MASHUP_ENABLED } from "@/lib/featureFlags";
@@ -42,7 +42,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
       <TelemetryClient />
       <HolidayLayer />
       <TrackGenreSheetHost />
-      <CreateWithDjSheet />
+      <VibeCodeSheet />
       {STEM_FEATURES_ENABLED && <StemAutopilot />}
       {!STEM_FEATURES_ENABLED && VOCAL_MASHUP_ENABLED && <StemAutopilot scope="mashup-next" />}
       {(STEM_FEATURES_ENABLED || VOCAL_MASHUP_ENABLED) && <VoiceMapLoader />}

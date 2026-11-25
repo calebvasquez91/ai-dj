@@ -9,6 +9,7 @@ import { cx } from "./cx";
 export function Tile({
   cover,
   title,
+  subtitle,
   href,
   onClick,
   active = false,
@@ -16,6 +17,8 @@ export function Tile({
 }: {
   cover: ReactNode;
   title: string;
+  /** A short second line saying what the tile does, when its name alone does not. */
+  subtitle?: string;
   href?: string;
   onClick?: () => void;
   active?: boolean;
@@ -29,8 +32,11 @@ export function Tile({
   const content = (
     <>
       <span className="h-14 w-14 shrink-0 [&>*]:rounded-none">{cover}</span>
-      <span className={cx("line-clamp-2 min-w-0 flex-1 text-sm font-semibold leading-tight", active ? "text-accent" : "text-foreground")}>
-        {title}
+      <span className="flex min-w-0 flex-1 flex-col justify-center">
+        <span className={cx("text-sm font-semibold leading-tight", subtitle ? "line-clamp-1" : "line-clamp-2", active ? "text-accent" : "text-foreground")}>
+          {title}
+        </span>
+        {subtitle && <span className="line-clamp-2 text-xs leading-tight text-muted">{subtitle}</span>}
       </span>
     </>
   );

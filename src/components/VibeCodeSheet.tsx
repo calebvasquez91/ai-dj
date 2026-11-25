@@ -22,21 +22,21 @@ function EnergySparkline({ energies }: { energies: number[] }) {
 }
 
 /**
- * "Vibe Code" (once "Create with DJ"): type what you want ("90s R&B for a workout, clean only"), see a preview built from your own library
+ * "Vibe Code": type what you want ("90s R&B for a workout, clean only"), see a preview built from your own library
  * (title, description, count, runtime, energy line, and any shortfall with Discover suggestions), remove tracks or
- * regenerate, then save it as a normal playlist. If the request names nothing usable the DJ asks one question.
+ * regenerate, then save it as a normal playlist. If the request names nothing usable Vibe Code asks one question.
  */
-export function CreateWithDjSheet() {
+export function VibeCodeSheet() {
   const { open, initialRequest, close } = useCurateUi();
   return (
     <Sheet open={open} onClose={close} title="Vibe Code" full>
       {/* Mounted only while open, so every opening starts from a clean slate. */}
-      {open && <CreateWithDjBody initialRequest={initialRequest} close={close} />}
+      {open && <VibeCodeBody initialRequest={initialRequest} close={close} />}
     </Sheet>
   );
 }
 
-function CreateWithDjBody({ initialRequest, close }: { initialRequest: string; close: () => void }) {
+function VibeCodeBody({ initialRequest, close }: { initialRequest: string; close: () => void }) {
   const router = useRouter();
   const [request, setRequest] = useState(initialRequest);
   const [answer, setAnswer] = useState("");
@@ -71,7 +71,7 @@ function CreateWithDjBody({ initialRequest, close }: { initialRequest: string; c
         setRemoved(new Set());
       }
     } catch (err) {
-      setError(err instanceof Error ? err.message : "The DJ couldn't build that.");
+      setError(err instanceof Error ? err.message : "Vibe Code couldn't build that.");
     } finally {
       setBusy(false);
     }
