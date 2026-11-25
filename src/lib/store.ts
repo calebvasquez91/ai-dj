@@ -42,9 +42,15 @@ import type { StemJobState } from "@/lib/stemAutopilot";
 import type { StemCounts } from "@/lib/stemStatus";
 import { judgeStemCandidate } from "@/lib/stemPlanner";
 import { SEED_RADIO_ENABLED } from "@/lib/featureFlags";
+import type { PairGenrePlan } from "@/lib/genrePlanApply";
+import { saveInstrumentalMode } from "@/lib/instrumentalMode";
+import { useGenreTransitions } from "@/lib/genreTransitionStore";
 import { RADIO_BATCH, isLoneSongPlay, nextRadioBatch, radioNeedsMore, type RadioFacts } from "@/lib/radio";
 import { VOICE_CUT_DEFAULTS, loadVoiceCutSettings, saveVoiceCutSettings, type VoiceCutSettings } from "@/lib/voiceCutSettings";
 import type { VoiceMap } from "@/lib/voiceMap";
+
+/** How many genre-aware decisions the in-memory log keeps. */
+const GENRE_DECISION_LOG_KEPT = 50;
 
 const MAX_HISTORY = 50;
 /** How many Add Music tracks can wait for background analysis at once; the oldest requests drop first. */
@@ -211,6 +217,17 @@ interface PlayerState {
   activeTransitionRationale: string | null;
   /** Terse version of the same rationale, for the mascot's dismissible player-side label — set/cleared at the exact same moments as activeTransitionRationale, see mix-engine.ts's shortWhy. */
   activeTransitionShortWhy: string | null;
+  /** The genre-aware plan the DJ and the Audio Engineer made for the upcoming pair (components/GenreTransitionPlanner.tsx), or null. Only ever set while GENRE_TRANSITIONS_ENABLED is on; planArgsFromState uses it only for exactly this pair. */
+  genrePlan: PairGenrePlan | null;
+  /** The last few genre-aware decisions, newest last, for the readout and the admin counts. In memory only. */
+  genreDecisionLog: PairGenrePlan[];
+  setGenrePlan: (plan: PairGenrePlan | null) => void;
+  /** Instrumental mode (lib/instrumentalMode.ts): play a song's vocal-free mix instead of the full song, from the next song on. A device setting; only does anything while VOCAL_SPLIT_ENABLED is on. */
+  instrumentalMode: boolean;
+  /** trackId -> URL of its built instrumental: only songs whose separation has finished. Filled by InstrumentalLoader. */
+  instrumentalAvailability: Record<string, string>;
+  setInstrumentalMode: (on: boolean) => void;
+  setInstrumentalAvailability: (map: Record<string, string>) => void;
   /** Occasional mid-track FX (filter/riser builds, echo throws on breakdowns) — separate from transition FX, which always fire regardless of this setting. */
   ambienceEnabled: boolean;
   ambienceFrequency: AmbienceFrequency;
@@ -491,7 +508,7 @@ async function runRadio(seed: Track, get: () => PlayerState, set: (partial: Part
   const similarArtists = await fetchSimilarArtists(seed.artist);
   const s = get();
   if (s.currentTrack?.id !== seed.id) return; // the person moved on while the artists were being looked up
-  const { tracks, enough } = nextRadioBatch(seed, s.localLibrary, { factsOf: radioFactsOf(s.trackAnalysis), similarArtists, exclude: new Set([seed.id]) }, [seed], RADIO_BATCH);
+  const { tracks, enough } = nextRadioBatch(seed, s.localLibrary, { factsOf: radioFactsOf(s.trackAnalysis), similarArtists, exclude: new Set([seed.id]), genreFlow: useGenreTransitions.getState().settings.enabled }, [seed], RADIO_BATCH);
   set({
     queue: tracks,
     radioSession: { seedId: seed.id, playedIds: [], similarArtists },
@@ -556,6 +573,10 @@ export const useStore = create<PlayerState>()(
       quantizeEnabled: true,
       activeTransitionRationale: null,
       activeTransitionShortWhy: null,
+      genrePlan: null,
+      genreDecisionLog: [],
+      instrumentalMode: false,
+      instrumentalAvailability: {},
       ambienceEnabled: true,
       ambienceFrequency: "occasional",
       ambienceLevel: AMBIENCE_DEFAULT_LEVEL,
@@ -1025,6 +1046,12 @@ export const useStore = create<PlayerState>()(
       setQuantizeEnabled: (enabled) => set({ quantizeEnabled: enabled }),
       setActiveTransitionRationale: (rationale) => set({ activeTransitionRationale: rationale }),
       setActiveTransitionShortWhy: (shortWhy) => set({ activeTransitionShortWhy: shortWhy }),
+      setInstrumentalMode: (on) => {
+        saveInstrumentalMode(on);
+        set({ instrumentalMode: on });
+      },
+      setInstrumentalAvailability: (map) => set({ instrumentalAvailability: map }),
+      setGenrePlan: (plan) => set((s) => ({ genrePlan: plan, genreDecisionLog: plan ? [...s.genreDecisionLog, plan].slice(-GENRE_DECISION_LOG_KEPT) : s.genreDecisionLog })),
       setAmbienceEnabled: (enabled) => set({ ambienceEnabled: enabled }),
       setAmbienceFrequency: (frequency) => set({ ambienceFrequency: frequency }),
       setAmbienceLevel: (level) => set({ ambienceLevel: clampAmbienceLevel(level) }),
@@ -1186,7 +1213,7 @@ export const useStore = create<PlayerState>()(
             const s = get();
             const seed = s.localLibrary.find((t) => t.id === nextRadio!.seedId) ?? nextTrack;
             const exclude = new Set([...nextRadio.playedIds, nextTrack.id, ...rest.map((t) => t.id)]);
-            const { tracks: more } = nextRadioBatch(seed, s.localLibrary, { factsOf: radioFactsOf(s.trackAnalysis), similarArtists: nextRadio.similarArtists, exclude }, [nextTrack, ...rest], RADIO_BATCH);
+            const { tracks: more } = nextRadioBatch(seed, s.localLibrary, { factsOf: radioFactsOf(s.trackAnalysis), similarArtists: nextRadio.similarArtists, exclude, genreFlow: useGenreTransitions.getState().settings.enabled }, [nextTrack, ...rest], RADIO_BATCH);
             extendedQueue = [...extendedQueue, ...more];
           }
         }

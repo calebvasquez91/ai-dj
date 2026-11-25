@@ -152,6 +152,14 @@ model StemSeparationJob {
   bassUrl   String?
   otherUrl  String?
 
+  /// The vocal-free mix (drums + bass + other summed, 16-bit WAV) built from the finished stems by the instrumental job (lib/stemInstrumental.ts); null until built.
+  /// For playback inside the app only: never offered for download. Column added by prisma/vocal-split.sql.
+  instrumentalUrl     String?
+  /// When the instrumental was last ATTEMPTED (set on success and on failure; a failed job is retried an hour later). Despite the name, not only successes.
+  instrumentalBuiltAt DateTime?
+  /// JSON.stringify'd VoiceMap (lib/voiceMap.ts): when the lead vocal is present, from the vocal stem's energy. Added by prisma/vocal-split.sql.
+  vocalActivityJson   String?
+
   createdAt   DateTime  @default(now())
   completedAt DateTime?
 
@@ -483,4 +491,31 @@ model PlaylistHoliday {
   /// One of the ten holiday ids in lib/holidayThemes.ts - enforced in app code, not a DB enum.
   holiday    String
   updatedAt  DateTime @default(now()) @updatedAt
+}
+
+/// The admin's edits to the genre transition table (lib/genreTransitionOverrides.ts): one row per top-level genre, shared by every account
+/// (prisma/genre-transitions.sql). A genre without a row uses the built-in table.
+model GenreTransitionOverride {
+  genre     String   @id
+  /// JSON.stringify'd RuleOverride: { preferredStyles?, blendBarsRange? }.
+  ruleJson  String
+  updatedBy String
+  updatedAt DateTime @default(now()) @updatedAt
+}
+
+/// One genre-aware transition decision, logged for the admin's counts (lib/transitionStats.ts): the genre pair, the style chosen, who chose it and
+/// what the Audio Engineer vetoed. No song titles and no account: it only says what kind of transition happened (prisma/genre-transitions.sql).
+model TransitionDecision {
+  id         String   @id @default(cuid())
+  fromGenre  String
+  toGenre    String
+  style      String
+  /// "local" | "claude" | "local-fallback" - enforced in app code.
+  decidedBy  String
+  /// JSON.stringify'd [{ style, reason }].
+  vetoesJson String   @default("[]")
+  mixability Float
+  createdAt  DateTime @default(now())
+
+  @@index([createdAt])
 }

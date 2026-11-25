@@ -8,6 +8,8 @@ import { alignEntryToBar, songMapMatchesBpm } from "@/lib/phrase-align";
 import { estimateStructuralCues } from "@/lib/structural-estimate";
 import { TRANSITION_FX_ENABLED } from "@/lib/transitionFx";
 import { bestTempoRatio } from "@/lib/tempoRatio";
+import { GENRE_TRANSITIONS_ENABLED } from "@/lib/featureFlags";
+import { adjustPlanArgsForGenrePlan, planMatchesPair, type PairGenrePlan } from "@/lib/genrePlanApply";
 
 export { snapToBeatGrid } from "@/lib/beat-grid";
 
@@ -658,6 +660,8 @@ export interface PlanTransitionArgs {
   quantize?: boolean;
   /** The incoming track's isolated vocal stem is ready (store.stemAvailability) — makes "vocal-layering" more attractive. */
   vocalStemReady?: boolean;
+  /** forceTransitionId was set by the genre-aware planner (lib/genrePlanApply.ts), not by the person: the pick is explained as chosen for the genres, never as "your pick". */
+  chosenByGenre?: boolean;
 }
 
 /** How many of the most recent transition ids are remembered to discourage repeating a technique back-to-back. */
@@ -679,6 +683,8 @@ export interface PlanningState {
   djVarietyBias: boolean;
   quantizeEnabled: boolean;
   recentTransitionIds: string[];
+  /** The genre-aware plan for the upcoming pair (lib/transitionPlanner.ts), when GENRE_TRANSITIONS_ENABLED is on and the DJ has made one. Optional: absent means the plan is exactly what it was before. */
+  genrePlan?: PairGenrePlan | null;
 }
 
 /** Transition ids whose effect is an overlay SOUND (a riser, scratch chirps, a tag stab, spoken or random words) rather than a way of moving between the two tracks: none of them is planned while TRANSITION_FX_ENABLED is off. */
@@ -708,7 +714,7 @@ export function planArgsFromState(
 ): PlanTransitionArgs {
   const stemReady = Boolean(state.stemAvailability[next.track.id]);
   const rerolled = opts.ignoreOverrides ? [] : state.rerolledTransitionIds;
-  return {
+  const args: PlanTransitionArgs = {
     current,
     next,
     genreHint: state.styleGenreHint,
@@ -729,6 +735,9 @@ export function planArgsFromState(
     categoryWeights,
     quantize: state.quantizeEnabled,
   };
+  // The genre layer only picks which transition to ask for, through arguments planTransition already takes; off, or no plan for this pair: the arguments are untouched.
+  if (GENRE_TRANSITIONS_ENABLED && planMatchesPair(state.genrePlan, current.track.id, next.track.id)) return adjustPlanArgsForGenrePlan(args, state.genrePlan!.plan);
+  return args;
 }
 
 function buildRationale(
@@ -737,11 +746,15 @@ function buildRationale(
   tempoSync: boolean,
   camelotScore: number,
   hasConfidentTempo: boolean,
-  wasForced: boolean
+  wasForced: boolean,
+  wasGenreChosen = false
 ): string {
   const harmonicNote = camelotScore >= 2 ? " Same key." : camelotScore === 1 ? " Harmonically compatible keys." : "";
   if (wasForced) {
     return `${t.name} — your pick. ${t.description}` + harmonicNote;
+  }
+  if (wasGenreChosen) {
+    return `${t.name} — chosen for this pair of genres. ${t.description}` + harmonicNote;
   }
   const genre = genreHint ? genreFamilies.find((g) => g.id === genreHint) : null;
   const djNames = (genre?.exampleDjs.length ? genre.exampleDjs : t.exampleDjs).slice(0, 2).join(" & ");
@@ -785,9 +798,11 @@ function buildShortWhy(
   tempoSync: boolean,
   camelotScore: number,
   breakdown: ScoreBreakdown | null,
-  wasForced: boolean
+  wasForced: boolean,
+  wasGenreChosen = false
 ): string {
   if (wasForced) return `${t.name} — your pick`;
+  if (wasGenreChosen) return `${t.name} — fits the genres`;
   if (!breakdown) return `${t.name} — best fit available`;
 
   const genre = genreHint ? genreFamilies.find((g) => g.id === genreHint) : null;
@@ -838,6 +853,7 @@ export function planTransition({
   categoryWeights = {},
   quantize = true,
   vocalStemReady = false,
+  chosenByGenre = false,
 }: PlanTransitionArgs): TransitionPlan {
   const bpmDelta = Math.abs(bestTempoRatio(current.analysis.bpm, next.analysis.bpm) - 1);
   // Two tracks that both fell back to the same neutral 120 BPM (low
@@ -888,7 +904,10 @@ export function planTransition({
     cueDropSwapEligible,
     vocalStemReady,
   });
-  const wasForced = Boolean(forceTransitionId) && transition.id === forceTransitionId;
+  const wasPinned = Boolean(forceTransitionId) && transition.id === forceTransitionId;
+  // A pin the genre planner made is not the person's own: it keeps its own wording and never counts as "your pick".
+  const wasForced = wasPinned && !chosenByGenre;
+  const wasGenreChosen = wasPinned && chosenByGenre;
 
   const windowBeats = windowBeatsForTransition(transition, tempoSync, bpmDelta);
   const effectiveBpm = current.analysis.bpm > 0 ? current.analysis.bpm : 120;
@@ -979,8 +998,8 @@ export function planTransition({
     tempoSync,
     tempoRatioStart,
     effect: TRANSITION_EFFECT_BY_ID[transition.id] ?? "none",
-    rationale: buildRationale(transition, genreHint, tempoSync, camelotScore, hasConfidentTempo, wasForced),
-    shortWhy: buildShortWhy(transition, genreHint, personaDjNames, djMode, tempoSync, camelotScore, breakdown, wasForced),
+    rationale: buildRationale(transition, genreHint, tempoSync, camelotScore, hasConfidentTempo, wasForced, wasGenreChosen),
+    shortWhy: buildShortWhy(transition, genreHint, personaDjNames, djMode, tempoSync, camelotScore, breakdown, wasForced, wasGenreChosen),
   };
 }
 

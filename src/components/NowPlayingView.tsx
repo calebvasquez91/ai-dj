@@ -12,6 +12,7 @@ import { LayerIndicator } from "@/components/LayerIndicator";
 import { LikeButton } from "@/components/LikeButton";
 import { NowPlayingTabs } from "@/components/NowPlayingTabs";
 import { GenreBadge } from "@/components/GenreBadge";
+import { GenrePairTag } from "@/components/GenrePairTag";
 
 const PARTICLE_EMOJIS = ["🍂", "🕸️", "⚡"];
 const PARTICLE_LIFETIME_MS = 4000;
@@ -179,7 +180,7 @@ export function NowPlayingView() {
           <div className="w-full max-w-md flex flex-col gap-2">
             {isTransitioning && queue[0] ? (
               <p className="text-center text-accent-pink font-semibold break-words line-clamp-2">
-                Mixing into &ldquo;{queue[0].title}&rdquo;
+                Mixing into &ldquo;{queue[0].title}&rdquo;<GenrePairTag />
               </p>
             ) : (
               <div className="flex items-center gap-3 font-mono text-xs tabular-nums text-muted">

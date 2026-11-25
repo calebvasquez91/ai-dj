@@ -47,7 +47,9 @@ import { ANALYSIS_JOB_TIMEOUT_MS, pickNextAnalysisJob, tempoChanged } from "@/li
 import { LOOKUP_LOOKAHEAD, reachableTracks } from "@/lib/lookahead";
 import { withTimeout } from "@/lib/withTimeout";
 import { voiceCutoffSec, voiceMapFromStem } from "@/lib/voiceMap";
-import { DJ_EQ_ENABLED, SCRATCH_ENABLED, STUTTER_ENABLED, SONG_SYNC_ENABLED, STEM_FEATURES_ENABLED, VOCAL_MASHUP_ENABLED } from "@/lib/featureFlags";
+import { DJ_EQ_ENABLED, GENRE_TRANSITIONS_ENABLED, SCRATCH_ENABLED, STUTTER_ENABLED, SONG_SYNC_ENABLED, STEM_FEATURES_ENABLED, VOCAL_MASHUP_ENABLED } from "@/lib/featureFlags";
+import { genrePlanSkipsSongSync } from "@/lib/genrePlanApply";
+import { playbackUrl } from "@/lib/instrumentalMode";
 import { runDjEqTick } from "@/lib/djEq";
 import { manualStutter, planStutter, scheduleStutter, STUTTER_MIN_DECK_LEVEL, type StutterMove } from "@/lib/stutter";
 import { planScratchOverSong } from "@/lib/scratch";
@@ -439,6 +441,9 @@ const AMBIENT_FADE_SEC = 1.5;
 /** After a mid-track ambience effect fires, the Spooky Music DJ's random effect waits this long so the two don't stack. */
 const AMBIENCE_STACK_GUARD_SEC = 8;
 const AMBIENT_CROSSFADE_LEAD_SEC = 2;
+
+/** The URL a deck plays or decodes for a song: its built instrumental when Instrumental mode is on and one exists, else the song itself (always the song while VOCAL_SPLIT_ENABLED is off). */
+const playUrl = (track: { id: string; sourceUrl: string }): string => playbackUrl(track, useStore.getState());
 
 export function DualDeckStage() {
   const audioARef = useRef<HTMLAudioElement>(null);
@@ -2032,7 +2037,7 @@ export function DualDeckStage() {
         (plan.tempoSync || plan.category === "tempo-ramp");
 
       loadedTrackId.current[toDeckId] = nextTrack.id;
-      toEl.src = nextTrack.sourceUrl;
+      toEl.src = playUrl(nextTrack);
       toEl.currentTime = plan.incomingEntryOffsetSec;
       toEl.playbackRate = plan.effect === "spin-up" ? SPIN_UP_MIN_RATE : startsTempoSynced ? plan.tempoRatioStart : 1;
       toNodes.gain.gain.setValueAtTime(0, ctx.currentTime);
@@ -2302,7 +2307,7 @@ export function DualDeckStage() {
         const nodes = deckNodesRef.current[deckId];
         if (!ctx || !masterGain || !el || !nodes) return;
 
-        const buffer = await decodeTrackBuffer(ctx, track.sourceUrl);
+        const buffer = await decodeTrackBuffer(ctx, playUrl(track));
 
         // The world may have moved on while decoding — abort rather than
         // reverse a slice that's no longer where playback actually is.
@@ -2388,7 +2393,7 @@ export function DualDeckStage() {
         const masterGain = masterGainRef.current;
         if (!ctx || !masterGain) return;
 
-        const buffer = await decodeTrackBuffer(ctx, nextTrack.sourceUrl);
+        const buffer = await decodeTrackBuffer(ctx, playUrl(nextTrack));
 
         // The world may have moved on while we were decoding (track
         // skipped, a transition started some other way) — abort rather
@@ -2483,7 +2488,7 @@ export function DualDeckStage() {
       const idleNodes = deckNodesRef.current[m.toDeckId];
       if (ctx && idleEl && idleNodes) {
         loadedTrackId.current[m.toDeckId] = m.nextTrack.id;
-        idleEl.src = m.nextTrack.sourceUrl;
+        idleEl.src = playUrl(m.nextTrack);
         idleEl.currentTime = m.plan.entryOffsetSec + m.trackTimeElapsedSec;
         idleEl.playbackRate = 1;
         idleNodes.gain.gain.cancelScheduledValues(ctx.currentTime);
@@ -2820,7 +2825,7 @@ export function DualDeckStage() {
 
         // The audio engineer's report is built; the AI DJ confirms or overrides it while A's buffer decodes.
         const [bufA, review] = await Promise.all([
-          withTimeout(decodeTrackBuffer(ctx, track.sourceUrl), SONG_SYNC_DECODE_TIMEOUT_MS, "Song sync buffer"),
+          withTimeout(decodeTrackBuffer(ctx, playUrl(track)), SONG_SYNC_DECODE_TIMEOUT_MS, "Song sync buffer"),
           requestSyncReview({ currentTitle: track.title, nextTitle: nextTrack.title, report, plan }),
         ]);
         if (stale()) return false;
@@ -2978,7 +2983,7 @@ export function DualDeckStage() {
       if (!ctx || !toEl || !toNodes) return;
       loadedTrackId.current[s.toDeckId] = s.nextTrack.id;
       toEl.pause();
-      toEl.src = s.nextTrack.sourceUrl;
+      toEl.src = playUrl(s.nextTrack);
       toEl.currentTime = 0;
       toEl.playbackRate = 1;
       toNodes.gain.gain.cancelScheduledValues(ctx.currentTime);
@@ -3226,7 +3231,7 @@ export function DualDeckStage() {
         const nodes = deckNodesRef.current[deckId];
         if (!el || !nodes) return;
 
-        const buffer = await decodeTrackBuffer(ctx, track.sourceUrl);
+        const buffer = await decodeTrackBuffer(ctx, playUrl(track));
 
         // The world may have moved on while decoding — abort rather than
         // ramp a pairing that's no longer current.
@@ -4282,7 +4287,7 @@ export function DualDeckStage() {
       // fires, so the ordinary triggers don't cut in. A pair with nothing to morph (no trusted tempo, too far apart),
       // or one whose morph couldn't start, falls through to the ordinary transition, as does a transition the user
       // pinned for this mix.
-      if (SONG_SYNC_ENABLED && state.songSyncAuto && nextTrack.source === "local" && !state.forcedTransitionId) {
+      if (SONG_SYNC_ENABLED && state.songSyncAuto && nextTrack.source === "local" && !state.forcedTransitionId && !genrePlanSkipsSongSync(GENRE_TRANSITIONS_ENABLED, state.genrePlan, track.id, nextTrack.id)) {
         const pair = `${track.id}>${nextTrack.id}`;
         if (songSyncTriedRef.current !== pair) {
           const nextAnalysisForSync = getAnalysis(nextTrack.id);
@@ -4749,7 +4754,7 @@ export function DualDeckStage() {
         startTransition(nextTrack, plan);
       };
       // Song Sync Mode (Auto on) makes Mix Now a morph too; a pinned transition, or nothing to morph, keeps the ordinary mix.
-      if (SONG_SYNC_ENABLED && state.songSyncAuto && !state.forcedTransitionId) {
+      if (SONG_SYNC_ENABLED && state.songSyncAuto && !state.forcedTransitionId && !genrePlanSkipsSongSync(GENRE_TRANSITIONS_ENABLED, state.genrePlan, track.id, nextTrack.id)) {
         manualSongSync(ordinaryMixNow);
         return;
       }
@@ -4901,7 +4906,7 @@ export function DualDeckStage() {
     if (!activeEl) return;
     resetDeckNodes(activeDeck, 0);
     activeEl.playbackRate = 1;
-    activeEl.src = currentTrack.sourceUrl;
+    activeEl.src = playUrl(currentTrack);
     // A track that starts outside of a transition (a direct pick, or the
     // very first track of a session) fades in from silence instead of
     // snapping to full volume — tracks that arrive via a real transition

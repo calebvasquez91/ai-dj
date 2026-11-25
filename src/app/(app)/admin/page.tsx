@@ -69,6 +69,12 @@ export default async function AdminPage() {
           detail="Every account's playlists, with full access: rename, take songs out, delete."
         />
         <Card
+          href="/admin/transitions"
+          title="Transitions"
+          line="Genre-aware mixing"
+          detail="How many transitions of each style and genre pair, what the audio engineer vetoed, vocal separation jobs, and the shared transition table."
+        />
+        <Card
           href="/admin/music"
           title="Music catalog"
           line={o.songs == null ? "—" : `${o.songs.toLocaleString("en-US")} songs`}

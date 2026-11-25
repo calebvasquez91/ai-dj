@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { DjMoveSettingsSection } from "@/components/DjMoveSettingsSection";
+import { GenreTransitionSettingsSection } from "@/components/GenreTransitionSettingsSection";
 import { useSession } from "next-auth/react";
 import { THEME_PREFERENCES, useTheme, type ThemePreference } from "@/lib/theme";
 
@@ -51,6 +52,8 @@ export default function SettingsPage() {
       </section>
 
       <DjMoveSettingsSection />
+
+      <GenreTransitionSettingsSection />
 
       {accountId && (
         <section className="flex flex-col gap-2" aria-labelledby="account-heading">

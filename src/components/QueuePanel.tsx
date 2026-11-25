@@ -8,6 +8,7 @@ import { CloseIcon } from "@/components/Icons";
 import { FxLibraryPanel } from "@/components/FxLibraryPanel";
 import { LayerIndicator } from "@/components/LayerIndicator";
 import { RadioStrip } from "@/components/RadioStrip";
+import { GenrePairTag } from "@/components/GenrePairTag";
 
 type PanelTab = "queue" | "fx";
 
@@ -60,7 +61,7 @@ export function QueueBody() {
           <RadioStrip />
           {isTransitioning && queue[0] && (
             <p className="rounded-full bg-accent-pink/15 px-3 py-1.5 text-center text-xs font-semibold text-accent-pink break-words">
-              Mixing into &ldquo;{queue[0].title}&rdquo;
+              Mixing into &ldquo;{queue[0].title}&rdquo;<GenrePairTag />
             </p>
           )}
 

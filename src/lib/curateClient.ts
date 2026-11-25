@@ -6,6 +6,8 @@ import { create } from "zustand";
 import type { CurationPreview } from "@/lib/curate/curate";
 import type { DiscoverSuggestion } from "@/lib/curate/discover";
 import type { CurationSpec } from "@/lib/curate/spec";
+import { GENRE_TRANSITIONS_ENABLED } from "@/lib/featureFlags";
+import { useGenreTransitions } from "@/lib/genreTransitionStore";
 
 export type CurateResult =
   | { kind: "clarification"; question: string; notes: string[] }
@@ -22,7 +24,7 @@ export interface CurateInput {
 export async function requestCuration(input: CurateInput): Promise<CurateResult> {
   let res: Response;
   try {
-    res = await fetch("/api/ai/curate", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(input) });
+    res = await fetch("/api/ai/curate", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ ...input, genreFlow: GENRE_TRANSITIONS_ENABLED && useGenreTransitions.getState().settings.enabled }) });
   } catch {
     throw new Error("Couldn't reach the DJ. Check your connection and try again.");
   }

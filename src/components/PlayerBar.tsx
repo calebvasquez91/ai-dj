@@ -9,6 +9,9 @@ import { TrackThumbnail } from "@/components/TrackThumbnail";
 import { genreFamilies } from "@/data/styles";
 import type { DjSetMode } from "@/lib/mix-engine";
 import { DecksIcon, MixerIcon, NextIcon, PauseIcon, PlayIcon, PreviousIcon, QueueIcon } from "@/components/Icons";
+import { GenrePairTag } from "@/components/GenrePairTag";
+import { GenreTransitionPlanner } from "@/components/GenreTransitionPlanner";
+import { InstrumentalLoader } from "@/components/InstrumentalLoader";
 
 export const CROSSFADE_PRESETS = [5, 10, 15, 20, 30];
 
@@ -96,6 +99,8 @@ export function PlayerBar() {
         {currentTrack ? (
           <>
             <DualDeckStage />
+            <GenreTransitionPlanner />
+            <InstrumentalLoader />
             <YouTubeDeckStage />
             <div
               role="button"
@@ -118,7 +123,7 @@ export function PlayerBar() {
                 <p className="text-sm font-medium truncate">{currentTrack.title}</p>
                 <p className={`text-xs text-muted truncate ${isTransitioning && queue[0] ? "max-tablet:hidden" : ""}`}>{currentTrack.artist}</p>
                 {isTransitioning && queue[0] && (
-                  <p className="tablet:hidden text-xs font-semibold text-accent-pink truncate">Mixing into &ldquo;{queue[0].title}&rdquo;</p>
+                  <p className="tablet:hidden text-xs font-semibold text-accent-pink truncate">Mixing into &ldquo;{queue[0].title}&rdquo;<GenrePairTag /></p>
                 )}
               </div>
             </div>
@@ -161,7 +166,7 @@ export function PlayerBar() {
         <div className="w-full flex items-center gap-2 font-mono text-xs tabular-nums text-muted max-tablet:hidden">
           {isTransitioning && queue[0] ? (
             <span className="flex-1 text-center text-accent-pink font-semibold truncate">
-              Mixing into &ldquo;{queue[0].title}&rdquo;
+              Mixing into &ldquo;{queue[0].title}&rdquo;<GenrePairTag />
             </span>
           ) : (
             <>
