@@ -484,3 +484,30 @@ model PlaylistHoliday {
   holiday    String
   updatedAt  DateTime @default(now()) @updatedAt
 }
+
+/// The admin's edits to the genre transition table (lib/genreTransitionOverrides.ts): one row per top-level genre, shared by every account
+/// (prisma/genre-transitions.sql). A genre without a row uses the built-in table.
+model GenreTransitionOverride {
+  genre     String   @id
+  /// JSON.stringify'd RuleOverride: { preferredStyles?, blendBarsRange? }.
+  ruleJson  String
+  updatedBy String
+  updatedAt DateTime @default(now()) @updatedAt
+}
+
+/// One genre-aware transition decision, logged for the admin's counts (lib/transitionStats.ts): the genre pair, the style chosen, who chose it and
+/// what the Audio Engineer vetoed. No song titles and no account: it only says what kind of transition happened (prisma/genre-transitions.sql).
+model TransitionDecision {
+  id         String   @id @default(cuid())
+  fromGenre  String
+  toGenre    String
+  style      String
+  /// "local" | "claude" | "local-fallback" - enforced in app code.
+  decidedBy  String
+  /// JSON.stringify'd [{ style, reason }].
+  vetoesJson String   @default("[]")
+  mixability Float
+  createdAt  DateTime @default(now())
+
+  @@index([createdAt])
+}
