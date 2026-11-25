@@ -9,6 +9,7 @@
  */
 import { bestTempoRatio } from "@/lib/tempoRatio";
 import { genreFlowDistance } from "@/lib/genreTransitions";
+import { camelotCompatibility } from "@/lib/mix-engine";
 import type { EnergyArc } from "@/lib/curate/profiles";
 
 /** What is known about a track for energy purposes. */
@@ -81,23 +82,32 @@ export interface OrderInput {
   bpm: number | null;
   /** The track's top-level genre label; only read when a genre weight is passed to orderByEnergyArc. */
   genre?: string | null;
+  /** The track's Camelot code ("8A"); only read when a key weight is passed to orderByEnergyArc. */
+  camelot?: string | null;
 }
 
 /** How much a tempo jump between neighbours counts against a track next to its energy miss. */
 const TEMPO_WEIGHT = 0.12;
+
+/** 0 for the same key, 0.5 for a relative or adjacent one, 1 for a clash; 0 when either key is unknown (nothing to prefer). */
+function keyJump(a: OrderInput | undefined, b: OrderInput | undefined): number {
+  if (!a?.camelot || !b?.camelot) return 0;
+  return 1 - camelotCompatibility(a.camelot, b.camelot) / 2;
+}
 
 function tempoJump(a: OrderInput | undefined, b: OrderInput | undefined): number {
   if (!a?.bpm || !b?.bpm) return 0;
   return Math.min(1, Math.abs(bestTempoRatio(a.bpm, b.bpm) - 1) / 0.3);
 }
 
-function planCost(order: readonly OrderInput[], targets: readonly number[], genreWeight: number): number {
+function planCost(order: readonly OrderInput[], targets: readonly number[], genreWeight: number, keyWeight: number): number {
   let cost = 0;
   for (let i = 0; i < order.length; i++) {
     cost += Math.abs(order[i].energy - targets[i]);
     if (i > 0) {
       cost += TEMPO_WEIGHT * tempoJump(order[i - 1], order[i]);
       if (genreWeight > 0) cost += genreWeight * genreFlowDistance(order[i - 1].genre, order[i].genre);
+      if (keyWeight > 0) cost += keyWeight * keyJump(order[i - 1], order[i]);
     }
   }
   return cost;
@@ -110,9 +120,10 @@ function planCost(order: readonly OrderInput[], targets: readonly number[], genr
  * tracks where that smooths the tempo (octave-aware, so 70 -> 140 is no jump) for little energy cost. O(n^2) at worst:
  * playlists are tens of tracks. A non-zero `seed` shuffles near-equal energies so "Regenerate" can give another order. A non-zero `genreWeight`
  * (genre-aware transitions on) adds a small cost for a genre jump between neighbours, so same-genre songs cluster when the energy scores are close.
- * With 0 (the default) the order is exactly what it was.
+ * A non-zero `keyWeight` does the same for Camelot keys (a clash between neighbours costs `keyWeight`, a relative or adjacent key half of it; nothing when either key
+ * is unknown). With 0 for both (the default) the order is exactly what it was.
  */
-export function orderByEnergyArc(items: readonly OrderInput[], arc: EnergyArc, seed = 0, genreWeight = 0): OrderInput[] {
+export function orderByEnergyArc(items: readonly OrderInput[], arc: EnergyArc, seed = 0, genreWeight = 0, keyWeight = 0): OrderInput[] {
   const n = items.length;
   const targets = arcTargets(arc, n);
   let rng = seed >>> 0;
@@ -131,9 +142,9 @@ export function orderByEnergyArc(items: readonly OrderInput[], arc: EnergyArc, s
     let improved = false;
     for (let i = 0; i < n; i++) {
       for (let j = i + 1; j < Math.min(n, i + 4); j++) {
-        const before = planCost(order, targets, genreWeight);
+        const before = planCost(order, targets, genreWeight, keyWeight);
         [order[i], order[j]] = [order[j], order[i]];
-        if (planCost(order, targets, genreWeight) < before - 1e-9) improved = true;
+        if (planCost(order, targets, genreWeight, keyWeight) < before - 1e-9) improved = true;
         else [order[i], order[j]] = [order[j], order[i]];
       }
     }

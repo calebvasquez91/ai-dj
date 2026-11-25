@@ -519,3 +519,27 @@ model TransitionDecision {
 
   @@index([createdAt])
 }
+
+/// The owner's own song list (data/dj-library.jsonl: songs they want, most of them not uploaded), imported by scripts/import-song-list.ts for the "From your
+/// song list" suggestions in Vibe Code (shown to the admin only). Music facts only: no recommender names and no notes. Table created by prisma/song-list.sql.
+model SongListEntry {
+  /// The list's own id ("T001").
+  id          String   @id
+  playlist    String
+  title       String
+  artist      String
+  genre       String   @default("")
+  subGenre    String   @default("")
+  year        Int?
+  bpm         Float?
+  camelot     String?
+  /// 1-10, the list's own estimate.
+  energy      Int?
+  /// The list's mood words, comma separated.
+  moods       String   @default("")
+  /// true when the list marks the song explicit; false is only an estimate.
+  explicit    Boolean?
+  durationSec Int?
+
+  @@index([playlist])
+}

@@ -27,8 +27,17 @@ export interface LibraryRow {
   /** The song's own mood words, as the list wrote them. */
   moods: string[];
   year: number | null;
-  /** 1-10. Kept for the report only: it has no column to go into. */
+  /** 1-10. Not stored on uploaded songs (no column); used to order the song-list suggestions (lib/songList.ts). */
   energy: number | null;
+  /** The list's own genre and subgenre wording, mapped onto the taxonomy only when a request is scored (lib/songList.ts). Empty when the list has none. */
+  genre: string;
+  subGenre: string;
+  /** The list's estimates; null when it has none. */
+  bpm: number | null;
+  camelot: string | null;
+  /** True when the list marks the song explicit. False is only an estimate that it is not, so it is never read as "clean". */
+  explicit: boolean | null;
+  durationSec: number | null;
 }
 
 /** What a playlist name says about its songs, canonical mood ids (lib/moodTags.ts). Used only for a song whose own mood words map to nothing. */
@@ -46,6 +55,9 @@ export const PLAYLIST_MOODS: Readonly<Record<string, readonly string[]>> = {
 const asString = (v: unknown): string => (typeof v === "string" ? v.trim() : "");
 const asYear = (v: unknown): number | null => (typeof v === "number" && Number.isInteger(v) && v >= 1900 && v <= 2100 ? v : null);
 const asEnergy = (v: unknown): number | null => (typeof v === "number" && Number.isFinite(v) && v >= 1 && v <= 10 ? v : null);
+const asBpm = (v: unknown): number | null => (typeof v === "number" && Number.isFinite(v) && v >= 40 && v <= 240 ? v : null);
+const asCamelot = (v: unknown): string | null => (typeof v === "string" && /^(?:1[0-2]|[1-9])[AB]$/.test(v.trim().toUpperCase()) ? v.trim().toUpperCase() : null);
+const asDuration = (v: unknown): number | null => (typeof v === "number" && Number.isFinite(v) && v > 0 && v < 7200 ? Math.round(v) : null);
 
 /** The rows of a JSON Lines file. A blank line is ignored, and so is a leading byte order mark; a line that is not an object with an id, title and artist is counted in `skipped`, never thrown. */
 export function parseLibraryJsonl(text: string): { rows: LibraryRow[]; skipped: number } {
@@ -77,6 +89,12 @@ export function parseLibraryJsonl(text: string): { rows: LibraryRow[]; skipped: 
       moods: asString(o.moods).split(",").map((m) => m.trim()).filter(Boolean),
       year: asYear(o.year),
       energy: asEnergy(o.energy),
+      genre: asString(o.genre),
+      subGenre: asString(o.subGenre),
+      bpm: asBpm(o.bpm),
+      camelot: asCamelot(o.camelot),
+      explicit: typeof o.explicit === "boolean" ? o.explicit : null,
+      durationSec: asDuration(o.durationSec),
     });
   }
   return { rows, skipped };

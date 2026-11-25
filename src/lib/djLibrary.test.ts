@@ -23,6 +23,12 @@ const row = (over: Partial<LibraryRow> = {}): LibraryRow => ({
   moods: [],
   year: null,
   energy: null,
+  genre: "",
+  subGenre: "",
+  bpm: null,
+  camelot: null,
+  explicit: null,
+  durationSec: null,
   ...over,
 });
 
@@ -34,7 +40,16 @@ describe("reading the list", () => {
       line({ id: "T001", playlist: "Get You Pumped", title: "Raining Blood", artist: "Slayer", moods: "aggressive,intense, dark", year: 1986, energy: 10 }) + "\n"
     );
     expect(skipped).toBe(0);
-    expect(rows).toEqual([{ id: "T001", playlist: "Get You Pumped", title: "Raining Blood", artist: "Slayer", moods: ["aggressive", "intense", "dark"], year: 1986, energy: 10 }]);
+    expect(rows).toEqual([row({ id: "T001", playlist: "Get You Pumped", title: "Raining Blood", artist: "Slayer", moods: ["aggressive", "intense", "dark"], year: 1986, energy: 10 })]);
+  });
+
+  it("reads the list's genre, tempo, key, rating and length, keeping only values that make sense", () => {
+    const { rows } = parseLibraryJsonl(
+      line({ id: "T1", title: "A", artist: "B", genre: "Metal", subGenre: "Thrash Metal", bpm: 210, camelot: "7a", explicit: true, durationSec: 254.4 }) + "\n" +
+        line({ id: "T2", title: "A", artist: "B", bpm: 5, camelot: "13A", explicit: "yes", durationSec: -3 })
+    );
+    expect(rows[0]).toMatchObject({ genre: "Metal", subGenre: "Thrash Metal", bpm: 210, camelot: "7A", explicit: true, durationSec: 254 });
+    expect(rows[1]).toMatchObject({ genre: "", subGenre: "", bpm: null, camelot: null, explicit: null, durationSec: null });
   });
 
   it("ignores blank lines, counts bad ones, and never throws", () => {
