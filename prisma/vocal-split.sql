@@ -1,7 +1,7 @@
 -- Three columns on StemSeparationJob (schema.prisma) for vocal / instrumental separation (VOCAL_SPLIT_ENABLED):
 --
 --   instrumentalUrl      the vocal-free mix (drums + bass + other summed) built from a finished job's stems, stored in Blob. For playback inside the app only.
---   instrumentalBuiltAt  when it was built.
+--   instrumentalBuiltAt  when a build was last attempted (set on success and on failure; a failed job is retried an hour later).
 --   vocalActivityJson    when the lead vocal is present (a voice map built from the vocal stem's energy), so vocal swaps can be scheduled in the gaps.
 --
 -- Additive and idempotent: it only adds nullable columns, and does nothing if they exist. It does not touch existing rows. Run it once against the database

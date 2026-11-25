@@ -98,6 +98,7 @@ export default async function TransitionsPage({ searchParams }: { searchParams: 
           <Counts title="By style" rows={stats.stats.byStyle} empty="No transitions decided yet." />
           <Counts title="By genre pair" rows={stats.stats.byGenrePair} empty="No transitions decided yet." />
           <Counts title="What the Audio Engineer vetoed" rows={stats.stats.vetoes} empty="No vetoes yet." />
+          {stats.stats.vetoesSampled && <p className="text-xs text-muted" role="status">The veto breakdown covers the most recent decisions that had a veto, not all of them. The other counts are exact.</p>}
 
           <section className="card p-4 flex flex-col gap-2" aria-label="Vocal separation jobs">
             <h2 className="font-semibold">Vocal separation jobs</h2>

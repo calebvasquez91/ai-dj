@@ -53,7 +53,7 @@ export function parseOverrideTable(raw: unknown): OverrideTable {
   if (!value || typeof value !== "object" || Array.isArray(value)) return {};
   const out: OverrideTable = {};
   for (const [genre, entry] of Object.entries(value as Record<string, unknown>)) {
-    if (!(genre in GENRE_TRANSITIONS)) continue;
+    if (!Object.hasOwn(GENRE_TRANSITIONS, genre)) continue;
     const parsed = parseRuleOverride(entry);
     if (parsed) out[genre] = parsed;
   }
@@ -65,9 +65,27 @@ function apply(rule: GenreTransitionRule, o: RuleOverride | undefined): GenreTra
   return { ...rule, ...(o.preferredStyles ? { preferredStyles: o.preferredStyles } : {}), ...(o.blendBarsRange ? { blendBarsRange: o.blendBarsRange } : {}) };
 }
 
+/**
+ * What to store after an edit, for one layer (this device, or the shared table): only the fields the person actually changed from the rule now in force,
+ * plus anything this layer already overrode. A person who only reorders styles does not also pin the bar range. Null when there is nothing to store.
+ */
+export function overrideFromEdit(
+  rule: GenreTransitionRule,
+  existing: RuleOverride | undefined,
+  edited: { preferredStyles: readonly TransitionStyle[]; blendBarsRange: readonly [number, number] },
+): RuleOverride | null {
+  const out: RuleOverride = { ...(existing ?? {}) };
+  const sameStyles = edited.preferredStyles.length === rule.preferredStyles.length && edited.preferredStyles.every((s, i) => s === rule.preferredStyles[i]);
+  const sameBars = edited.blendBarsRange[0] === rule.blendBarsRange[0] && edited.blendBarsRange[1] === rule.blendBarsRange[1];
+  if (!sameStyles) out.preferredStyles = [...edited.preferredStyles];
+  if (!sameBars) out.blendBarsRange = [edited.blendBarsRange[0], edited.blendBarsRange[1]];
+  return out.preferredStyles || out.blendBarsRange ? out : null;
+}
+
 /** The table the planner reads: the built-in one with the shared edits applied, then this device's. Always has every built-in genre. */
 export function mergeRules(shared: OverrideTable = {}, device: OverrideTable = {}, base: Readonly<Record<string, GenreTransitionRule>> = GENRE_TRANSITIONS): Record<string, GenreTransitionRule> {
   const out: Record<string, GenreTransitionRule> = {};
-  for (const [genre, rule] of Object.entries(base)) out[genre] = apply(apply(rule, shared[genre]), device[genre]);
+  const own = (table: OverrideTable, genre: string): RuleOverride | undefined => (Object.hasOwn(table, genre) ? table[genre] : undefined);
+  for (const [genre, rule] of Object.entries(base)) out[genre] = apply(apply(rule, own(shared, genre)), own(device, genre));
   return out;
 }

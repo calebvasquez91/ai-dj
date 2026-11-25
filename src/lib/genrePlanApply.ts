@@ -68,11 +68,11 @@ export function adjustPlanArgsForGenrePlan(args: PlanTransitionArgs, plan: Genre
   switch (plan.style) {
     case "echo-out":
     case "silence-then-start":
-      return { ...args, forceTransitionId: ECHO_OUT_TRANSITION_ID };
+      return { ...args, forceTransitionId: ECHO_OUT_TRANSITION_ID, chosenByGenre: true };
     case "quick-cut":
     case "fade": {
       const sec = Math.max(MIN_SHORT_WINDOW_SEC, barsToSec(plan.bars, args.current.analysis.bpm));
-      return { ...args, forceTransitionId: SHORT_BLEND_TRANSITION_ID, overrideSec: args.overrideSec ?? sec };
+      return { ...args, forceTransitionId: SHORT_BLEND_TRANSITION_ID, overrideSec: args.overrideSec ?? sec, chosenByGenre: true };
     }
     default:
       return args; // bridges and a vocal swap: advisory for now

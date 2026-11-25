@@ -6,8 +6,6 @@
  */
 import { genresOfTrack } from "@/lib/genreLibrary";
 import { estimateEnergies, orderByEnergyArc } from "@/lib/curate/energyArc";
-import { GENRE_TRANSITIONS_ENABLED } from "@/lib/featureFlags";
-import { GENRE_FLOW_WEIGHT } from "@/lib/genreTransitions";
 import { PROFILES, type EnergyArc, type EventProfile } from "@/lib/curate/profiles";
 import { profileOf, selectTracks, shortfallOf, type Selection, type Shortfall } from "@/lib/curate/select";
 import type { CurationSpec } from "@/lib/curate/spec";
@@ -90,6 +88,8 @@ export interface CurationInputs {
   /** The loudness (mean waveform level 0-1) of the tracks that were chosen, by id; absent ids are treated as unknown. */
   loudnessOf?: (trackId: string) => number | null;
   seed?: number;
+  /** How much a genre jump between neighbours costs in the order (lib/genreTransitions.ts GENRE_FLOW_WEIGHT), or 0. Set only when genre-aware transitions are on for the person asking. */
+  genreFlowWeight?: number;
 }
 
 /** What the server needs before it can order: the selection (so it can fetch loudness for just those tracks). */
@@ -99,11 +99,11 @@ export function selectForCuration(inputs: Pick<CurationInputs, "spec" | "library
 
 /** Orders a selection along the energy arc and builds the preview. */
 export function finishCuration(inputs: CurationInputs, selection: Selection): CurationPreview {
-  const { spec, library, bpmOf, loudnessOf, seed = 0 } = inputs;
+  const { spec, library, bpmOf, loudnessOf, seed = 0, genreFlowWeight = 0 } = inputs;
   const profile = profileOf(spec);
   const arc: EnergyArc = spec.energyArc ?? profile?.energyArc ?? PROFILES.open.energyArc;
   const energies = estimateEnergies(selection.chosen.map((c) => ({ id: c.track.id, loudness: loudnessOf?.(c.track.id) ?? null, bpm: c.bpm, genre: genresOfTrack(c.track)[0]?.genre })));
-  const order = orderByEnergyArc(selection.chosen.map((c) => ({ id: c.track.id, energy: energies.get(c.track.id) ?? 0.5, bpm: c.bpm, genre: genresOfTrack(c.track)[0]?.genre })), arc, seed, GENRE_TRANSITIONS_ENABLED ? GENRE_FLOW_WEIGHT : 0);
+  const order = orderByEnergyArc(selection.chosen.map((c) => ({ id: c.track.id, energy: energies.get(c.track.id) ?? 0.5, bpm: c.bpm, genre: genresOfTrack(c.track)[0]?.genre })), arc, seed, genreFlowWeight);
   const byId = new Map(selection.chosen.map((c) => [c.track.id, c]));
   const tracks: PreviewTrack[] = order.map((o) => {
     const c = byId.get(o.id)!;

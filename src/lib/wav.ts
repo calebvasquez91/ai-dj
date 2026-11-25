@@ -87,6 +87,24 @@ export function sumWav(stems: readonly WavAudio[]): WavAudio {
   return { sampleRate, channels: out };
 }
 
+/**
+ * Adds `next` into `acc` in place and returns it (or returns `next` itself when there is no sum yet), so a sum of many stems needs only the running total and the
+ * stem being added in memory. Same rules as sumWav: matching rate and channel count; a shorter stem is padded with silence, a longer one extends the sum.
+ */
+export function addInto(acc: WavAudio | null, next: WavAudio): WavAudio {
+  if (!acc) return next;
+  if (acc.sampleRate !== next.sampleRate) throw new WavError("stems have different sample rates");
+  if (acc.channels.length !== next.channels.length) throw new WavError("stems have different channel counts");
+  const frames = Math.max(acc.channels[0].length, next.channels[0].length);
+  const channels = acc.channels.map((ch, c) => {
+    const dst = ch.length === frames ? ch : Float32Array.from({ length: frames }, (_, i) => (i < ch.length ? ch[i] : 0));
+    const src = next.channels[c];
+    for (let i = 0; i < src.length; i++) dst[i] += src[i];
+    return dst;
+  });
+  return { sampleRate: acc.sampleRate, channels };
+}
+
 /** The largest absolute sample. */
 export function peakOf(audio: WavAudio): number {
   let peak = 0;

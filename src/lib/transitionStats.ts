@@ -19,6 +19,8 @@ export interface Count {
 }
 
 export interface TransitionStats {
+  /** True when the veto counts come from only the most recent decisions that had a veto (the veto detail is JSON text and is read from a capped sample). */
+  vetoesSampled: boolean;
   total: number;
   byStyle: Count[];
   byGenrePair: Count[];
@@ -49,6 +51,7 @@ function vetoesOf(json: string): { style: string; reason: string }[] {
 export function summarizeDecisions(rows: readonly DecisionRow[]): TransitionStats {
   const vetoes = rows.flatMap((r) => vetoesOf(r.vetoesJson).map((v) => `${v.style}: ${v.reason}`));
   return {
+    vetoesSampled: false,
     total: rows.length,
     byStyle: tally(rows.map((r) => r.style)),
     byGenrePair: tally(rows.map((r) => `${r.fromGenre} → ${r.toGenre}`)),
@@ -75,4 +78,33 @@ export function summarizeJobStatuses(rows: readonly { status: string; count: num
     else out.other += r.count;
   }
   return out;
+}
+
+/** What the database adds up for the dashboard: one row per style, per genre pair and per decider, plus a capped sample of the decisions that had a veto. */
+export interface DecisionAggregates {
+  total: number;
+  byStyle: { style: string; count: number }[];
+  byPair: { fromGenre: string; toGenre: string; count: number }[];
+  byDecider: { decidedBy: string; count: number }[];
+  /** The most recent decisions that carried at least one veto, newest first. */
+  vetoRows: { vetoesJson: string }[];
+  /** Whether more decisions with a veto existed than were read. */
+  vetoRowsCapped: boolean;
+}
+
+const byCount = (a: Count, b: Count) => b.count - a.count || a.key.localeCompare(b.key);
+
+/** The same counts as summarizeDecisions, built from the database's own totals: exact however many decisions there are. Only the veto detail comes from a sample. */
+export function statsFromAggregates(a: DecisionAggregates): TransitionStats {
+  const vetoes = tally(a.vetoRows.flatMap((r) => vetoesOf(r.vetoesJson).map((v) => `${v.style}: ${v.reason}`)));
+  return {
+    vetoesSampled: a.vetoRowsCapped,
+    total: a.total,
+    byStyle: a.byStyle.map((g) => ({ key: g.style, count: g.count })).sort(byCount),
+    byGenrePair: a.byPair.map((g) => ({ key: `${g.fromGenre} \u2192 ${g.toGenre}`, count: g.count })).sort(byCount),
+    vetoes,
+    vetoTotal: vetoes.reduce((n, v) => n + v.count, 0),
+    modelCalls: a.byDecider.find((g) => g.decidedBy === "claude")?.count ?? 0,
+    modelFallbacks: a.byDecider.find((g) => g.decidedBy === "local-fallback")?.count ?? 0,
+  };
 }

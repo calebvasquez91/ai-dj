@@ -1,9 +1,9 @@
 import { describe, expect, it } from "vitest";
 import { GENRE_TRANSITIONS } from "./genreTransitions";
-import { mergeRules, parseOverrideTable, parseRuleOverride } from "./genreTransitionOverrides";
+import { mergeRules, overrideFromEdit, parseOverrideTable, parseRuleOverride } from "./genreTransitionOverrides";
 import { GENRE_TRANSITION_DEFAULTS, parseGenreTransitionSettings } from "./genreTransitionSettings";
-import { parseDecisionInput } from "./genreTransitionsServer";
-import { summarizeDecisions, summarizeJobStatuses } from "./transitionStats";
+import { DECISION_KEEP_DAYS, isTaxonomyGenre, parseDecisionInput, saveSharedOverride, shouldPrune } from "./genreTransitionsServer";
+import { statsFromAggregates, summarizeDecisions, summarizeJobStatuses } from "./transitionStats";
 import { rankTransitions } from "./transitionPlanner";
 
 describe("parseRuleOverride", () => {
@@ -91,11 +91,17 @@ describe("the decision the browser logs", () => {
     expect(parseDecisionInput(null)).toBeNull();
   });
 
-  it("caps strings, clamps mixability and drops malformed vetoes", () => {
-    const d = parseDecisionInput({ ...ok, fromGenre: "x".repeat(200), mixability: 5, vetoes: [{ style: "a", reason: "b" }, { style: 1 }, null] });
-    expect(d?.fromGenre).toHaveLength(40);
+  it("clamps mixability and drops malformed vetoes", () => {
+    const d = parseDecisionInput({ ...ok, mixability: 5, vetoes: [{ style: "a", reason: "b" }, { style: 1 }, null] });
     expect(d?.mixability).toBe(1);
     expect(d?.vetoes).toEqual([{ style: "a", reason: "b" }]);
+  });
+
+  it("logs only genres of the taxonomy: free text, inherited keys and an unknown genre are refused", () => {
+    expect(parseDecisionInput({ ...ok, fromGenre: "x".repeat(200) })).toBeNull();
+    expect(parseDecisionInput({ ...ok, toGenre: "Not A Genre" })).toBeNull();
+    expect(parseDecisionInput({ ...ok, fromGenre: "toString" })).toBeNull();
+    expect(parseDecisionInput({ ...ok, toGenre: "Unknown" })).toBeNull();
   });
 });
 
@@ -118,10 +124,92 @@ describe("the admin counts", () => {
   });
 
   it("is all zeros for no decisions", () => {
-    expect(summarizeDecisions([])).toEqual({ total: 0, byStyle: [], byGenrePair: [], vetoes: [], vetoTotal: 0, modelCalls: 0, modelFallbacks: 0 });
+    expect(summarizeDecisions([])).toEqual({ vetoesSampled: false, total: 0, byStyle: [], byGenrePair: [], vetoes: [], vetoTotal: 0, modelCalls: 0, modelFallbacks: 0 });
   });
 
   it("sums vocal separation jobs by status, putting an unknown status under other", () => {
     expect(summarizeJobStatuses([{ status: "ready", count: 4 }, { status: "failed", count: 1 }, { status: "pending", count: 2 }, { status: "weird", count: 3 }])).toEqual({ pending: 2, processing: 0, ready: 4, failed: 1, other: 3 });
+  });
+});
+
+describe("genre names are the table's own, never inherited object keys", () => {
+  it("rejects toString, constructor and __proto__ everywhere a genre name is checked", () => {
+    for (const name of ["toString", "constructor", "__proto__", "hasOwnProperty"]) {
+      expect(isTaxonomyGenre(name), name).toBe(false);
+      expect(parseOverrideTable(JSON.parse(`{"${name}": {"preferredStyles": ["fade"]}}`)), name).toEqual({});
+    }
+    expect(isTaxonomyGenre("Hip-Hop")).toBe(true);
+  });
+
+  it("the admin save refuses an inherited key before touching the database", async () => {
+    expect(await saveSharedOverride("toString", { preferredStyles: ["fade"] }, "admin")).toEqual({ ok: false, reason: "unknown-genre" });
+    expect(await saveSharedOverride("Nope", { preferredStyles: ["fade"] }, "admin")).toEqual({ ok: false, reason: "unknown-genre" });
+  });
+
+  it("a rule lookup for an inherited key is the safe default, not a function", async () => {
+    const { genreRule, DEFAULT_GENRE_RULE, genreFlowDistance } = await import("./genreTransitions");
+    expect(genreRule("constructor")).toBe(DEFAULT_GENRE_RULE);
+    expect(genreRule("toString")).toBe(DEFAULT_GENRE_RULE);
+    expect(genreFlowDistance("toString", "Pop")).toBe(0);
+  });
+
+  it("mergeRules ignores inherited keys on the override tables", () => {
+    const hostile = Object.create({ Pop: { preferredStyles: ["fade"] } }) as Record<string, never>;
+    expect(mergeRules(hostile, hostile).Pop.preferredStyles).toEqual(GENRE_TRANSITIONS.Pop.preferredStyles);
+  });
+});
+
+describe("overrideFromEdit: only what was changed is stored", () => {
+  const pop = GENRE_TRANSITIONS.Pop;
+  const same = { preferredStyles: pop.preferredStyles, blendBarsRange: pop.blendBarsRange };
+
+  it("reordering styles does not also pin the bar range", () => {
+    const reordered = [...pop.preferredStyles].reverse();
+    expect(overrideFromEdit(pop, undefined, { ...same, preferredStyles: reordered })).toEqual({ preferredStyles: reordered });
+  });
+
+  it("changing only the bars does not pin the styles", () => {
+    expect(overrideFromEdit(pop, undefined, { ...same, blendBarsRange: [2, 3] })).toEqual({ blendBarsRange: [2, 3] });
+  });
+
+  it("keeps what this layer already overrode when the other field is edited", () => {
+    const existing = { blendBarsRange: [1, 2] as [number, number] };
+    const rule = mergeRules({}, { Pop: existing }).Pop;
+    const reordered = [...rule.preferredStyles].reverse();
+    expect(overrideFromEdit(rule, existing, { preferredStyles: reordered, blendBarsRange: rule.blendBarsRange })).toEqual({ blendBarsRange: [1, 2], preferredStyles: reordered });
+  });
+
+  it("stores nothing when nothing changed", () => {
+    expect(overrideFromEdit(pop, undefined, same)).toBeNull();
+  });
+});
+
+describe("exact admin counts from the database's own totals", () => {
+  it("builds the same numbers as summing the rows, however many decisions there are", () => {
+    const s = statsFromAggregates({
+      total: 123456,
+      byStyle: [{ style: "fade", count: 40 }, { style: "quick-cut", count: 123416 }],
+      byPair: [{ fromGenre: "Pop", toGenre: "Rock", count: 100000 }, { fromGenre: "Rock", toGenre: "Pop", count: 23456 }],
+      byDecider: [{ decidedBy: "local", count: 123000 }, { decidedBy: "claude", count: 400 }, { decidedBy: "local-fallback", count: 56 }],
+      vetoRows: [{ vetoesJson: JSON.stringify([{ style: "long-blend", reason: "the key is not certain" }]) }, { vetoesJson: "[]" }],
+      vetoRowsCapped: true,
+    });
+    expect(s.total).toBe(123456); // past the old 50,000-row cap
+    expect(s.byStyle[0]).toEqual({ key: "quick-cut", count: 123416 });
+    expect(s.byGenrePair[0]).toEqual({ key: "Pop \u2192 Rock", count: 100000 });
+    expect(s.modelCalls).toBe(400);
+    expect(s.modelFallbacks).toBe(56);
+    expect(s.vetoes).toEqual([{ key: "long-blend: the key is not certain", count: 1 }]);
+    expect(s.vetoesSampled).toBe(true);
+  });
+});
+
+describe("the decision log does not grow without limit", () => {
+  it("prunes at most once every six hours, and keeps 180 days", () => {
+    const six = 6 * 3_600_000;
+    expect(shouldPrune(six, 0)).toBe(true);
+    expect(shouldPrune(six - 1, 0)).toBe(false);
+    expect(shouldPrune(2 * six, six)).toBe(true);
+    expect(DECISION_KEEP_DAYS).toBe(180);
   });
 });

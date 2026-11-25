@@ -1,16 +1,20 @@
 "use client";
 
 import { useState } from "react";
-import { MAX_BARS, MAX_PREFERRED_STYLES, MIN_BARS, type OverrideTable, type RuleOverride } from "@/lib/genreTransitionOverrides";
+import { MAX_BARS, MAX_PREFERRED_STYLES, MIN_BARS, overrideFromEdit, type OverrideTable, type RuleOverride } from "@/lib/genreTransitionOverrides";
 import { GENRE_TRANSITIONS, TRANSITION_STYLES, type GenreTransitionRule, type TransitionStyle } from "@/lib/genreTransitions";
 
-function Row({ genre, rule, overridden, onSave, busy }: { genre: string; rule: GenreTransitionRule; overridden: boolean; onSave: (genre: string, override: RuleOverride | null) => void; busy: boolean }) {
+function Row({ genre, rule, existing, onSave, busy }: { genre: string; rule: GenreTransitionRule; existing: RuleOverride | undefined; onSave: (genre: string, override: RuleOverride | null) => void; busy: boolean }) {
+  const overridden = existing !== undefined;
   const [styles, setStyles] = useState<TransitionStyle[]>([...rule.preferredStyles]);
   const [lo, setLo] = useState(String(rule.blendBarsRange[0]));
   const [hi, setHi] = useState(String(rule.blendBarsRange[1]));
   const available = TRANSITION_STYLES.filter((s) => !styles.includes(s));
   const loN = Number(lo), hiN = Number(hi);
   const barsOk = Number.isInteger(loN) && Number.isInteger(hiN) && loN >= MIN_BARS && hiN <= MAX_BARS && loN <= hiN;
+  // Only what changed is saved (and what this layer already had is kept), so reordering styles does not also pin the bar range.
+  const edit = barsOk ? overrideFromEdit(rule, existing, { preferredStyles: styles, blendBarsRange: [loN, hiN] }) : null;
+  const changed = edit !== null && JSON.stringify(edit) !== JSON.stringify(existing ?? null);
   const move = (i: number, d: -1 | 1) => setStyles((cur) => {
     const next = [...cur];
     const j = i + d;
@@ -59,7 +63,7 @@ function Row({ genre, rule, overridden, onSave, busy }: { genre: string; rule: G
         </div>
         {!barsOk && <p className="text-xs text-accent-pink" role="alert">Use whole bars from {MIN_BARS} to {MAX_BARS}, shortest first.</p>}
         <div className="flex flex-wrap gap-2">
-          <button type="button" className="btn-outline !text-xs" disabled={busy || !barsOk} onClick={() => onSave(genre, { preferredStyles: styles, blendBarsRange: [loN, hiN] })}>Save {genre}</button>
+          <button type="button" className="btn-outline !text-xs" disabled={busy || !barsOk || !changed} onClick={() => onSave(genre, edit)}>Save {genre}</button>
           {overridden && <button type="button" className="btn-outline !text-xs" disabled={busy} onClick={() => onSave(genre, null)}>Reset to the default</button>}
         </div>
       </div>
@@ -77,7 +81,7 @@ export function GenreRuleEditor({ rules, overrides, onSave, busy = false }: { ru
     <div className="flex flex-col gap-2">
       {Object.keys(GENRE_TRANSITIONS).map((genre) => (
         // Remounted when the rule underneath changes, so the form always starts from what is in force.
-        <Row key={`${genre}:${JSON.stringify(rules[genre])}`} genre={genre} rule={rules[genre] ?? GENRE_TRANSITIONS[genre]} overridden={genre in overrides} onSave={onSave} busy={busy} />
+        <Row key={`${genre}:${JSON.stringify(rules[genre])}`} genre={genre} rule={rules[genre] ?? GENRE_TRANSITIONS[genre]} existing={Object.hasOwn(overrides, genre) ? overrides[genre] : undefined} onSave={onSave} busy={busy} />
       ))}
     </div>
   );

@@ -7,6 +7,8 @@
  * The filtering, scoring and energy math never leave this machine; the model only reads the request and refines the order.
  */
 import { finishCuration, refineOrder, selectForCuration, type CurationPreview } from "@/lib/curate/curate";
+import { GENRE_TRANSITIONS_ENABLED } from "@/lib/featureFlags";
+import { GENRE_FLOW_WEIGHT } from "@/lib/genreTransitions";
 import type { DiscoverSuggestion } from "@/lib/curate/discover";
 import { parseRequestLocally, validateSpec, type CurationSpec, type SpecResult } from "@/lib/curate/spec";
 import type { Track } from "@/types/music";
@@ -22,6 +24,8 @@ export interface CurateRequestBody {
   spec?: unknown;
   /** Changes which near-equal tracks and orderings come out. */
   seed?: unknown;
+  /** True when this device has genre-aware transitions switched on: the order then also clusters same-genre songs. Honoured only while GENRE_TRANSITIONS_ENABLED is on. */
+  genreFlow?: unknown;
 }
 
 export interface CurateDeps {
@@ -71,7 +75,8 @@ export async function runCuration(body: CurateRequestBody, deps: CurateDeps): Pr
   const { tracks, bpmOf } = await deps.loadLibrary();
   const selection = selectForCuration({ spec, library: tracks, bpmOf, seed });
   const loudness = await deps.loudnessOf(selection.chosen.map((c) => c.track.id));
-  const inputs = { spec, notes, library: tracks, bpmOf, loudnessOf: (id: string) => loudness.get(id) ?? null, seed };
+  const genreFlowWeight = GENRE_TRANSITIONS_ENABLED && body.genreFlow === true ? GENRE_FLOW_WEIGHT : 0;
+  const inputs = { spec, notes, library: tracks, bpmOf, loudnessOf: (id: string) => loudness.get(id) ?? null, seed, genreFlowWeight };
   let preview = finishCuration(inputs, selection);
 
   let refined = false;

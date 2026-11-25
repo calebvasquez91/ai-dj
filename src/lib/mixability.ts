@@ -28,6 +28,9 @@ const BEAT_SYNCED: ReadonlySet<TransitionStyle> = new Set<TransitionStyle>(["lon
 /** Styles whose sound depends on the two keys agreeing while they overlap. */
 const KEY_DEPENDENT: ReadonlySet<TransitionStyle> = new Set<TransitionStyle>(["long-blend", "medium-blend", "vocal-swap"]);
 
+/** Every constraint sentence the Engineer can write: a closed list, so a request that carries constraints can be checked against it (nothing free-form reaches a prompt). */
+export const KNOWN_CONSTRAINTS = ["the tempo is not certain", "the beat is not steady", "the key is not certain", "both ends have heavy vocals"] as const;
+
 export interface MixabilityReport {
   beatConfidenceA: number;
   beatConfidenceB: number;

@@ -4,7 +4,7 @@ import { prisma } from "@/lib/prisma";
 import { isMissingTable } from "@/lib/missingTable";
 import { GENRE_TRANSITIONS, TRANSITION_STYLES } from "@/lib/genreTransitions";
 import { parseOverrideTable, parseRuleOverride, type OverrideTable, type RuleOverride } from "@/lib/genreTransitionOverrides";
-import { summarizeDecisions, summarizeJobStatuses, type JobStatusCounts, type TransitionStats } from "@/lib/transitionStats";
+import { statsFromAggregates, summarizeJobStatuses, type JobStatusCounts, type TransitionStats } from "@/lib/transitionStats";
 
 export interface SharedOverrides {
   ready: boolean;
@@ -30,11 +30,16 @@ export async function loadSharedOverrides(): Promise<SharedOverrides> {
   }
 }
 
+/** True for a top-level genre in the table, and only for those: not an inherited key such as "toString". */
+export function isTaxonomyGenre(genre: string): boolean {
+  return Object.hasOwn(GENRE_TRANSITIONS, genre);
+}
+
 export type SaveResult = { ok: true } | { ok: false; reason: "no-table" | "unknown-genre" | "empty" };
 
 /** Sets one genre's shared override, or clears it when `override` is null (the genre goes back to the built-in rule). */
 export async function saveSharedOverride(genre: string, override: unknown, adminId: string): Promise<SaveResult> {
-  if (!(genre in GENRE_TRANSITIONS)) return { ok: false, reason: "unknown-genre" };
+  if (!isTaxonomyGenre(genre)) return { ok: false, reason: "unknown-genre" };
   try {
     if (override == null) {
       await prisma.genreTransitionOverride.deleteMany({ where: { genre } });
@@ -71,9 +76,10 @@ export function parseDecisionInput(body: unknown): DecisionInput | null {
   if (!(TRANSITION_STYLES as readonly string[]).includes(style)) return null;
   const decidedBy = (DECIDED_BY as readonly unknown[]).includes(b.decidedBy) ? (b.decidedBy as DecisionInput["decidedBy"]) : null;
   if (!decidedBy) return null;
-  const fromGenre = cap(b.fromGenre, 40);
-  const toGenre = cap(b.toGenre, 40);
-  if (!fromGenre || !toGenre) return null;
+  // Only genres of the taxonomy are logged: free text from a browser never becomes a row (and a song with no genre is not a genre pair).
+  const fromGenre = typeof b.fromGenre === "string" ? b.fromGenre : "";
+  const toGenre = typeof b.toGenre === "string" ? b.toGenre : "";
+  if (!isTaxonomyGenre(fromGenre) || !isTaxonomyGenre(toGenre)) return null;
   const mixability = typeof b.mixability === "number" && Number.isFinite(b.mixability) ? Math.min(1, Math.max(0, b.mixability)) : 0;
   const vetoes = (Array.isArray(b.vetoes) ? b.vetoes : [])
     .slice(0, 12)
@@ -82,10 +88,24 @@ export function parseDecisionInput(body: unknown): DecisionInput | null {
   return { fromGenre, toGenre, style, decidedBy, vetoes, mixability };
 }
 
-/** Logs one decision. Returns false when the table does not exist yet (nothing is lost but the log line). */
-export async function recordDecision(input: DecisionInput): Promise<boolean> {
+/** Decisions older than this are deleted: the dashboard looks at all time, the last 30 days and the last 7, and the log must not grow without limit. */
+export const DECISION_KEEP_DAYS = 180;
+const PRUNE_EVERY_MS = 6 * 3_600_000;
+let lastPruneAt = 0;
+
+/** Whether this server instance should prune now: at most once every six hours. Pure, so it is tested. */
+export function shouldPrune(now: number, lastAt: number): boolean {
+  return now - lastAt >= PRUNE_EVERY_MS;
+}
+
+/** Logs one decision. Returns false when the table does not exist yet (nothing is lost but the log line). Occasionally deletes decisions older than DECISION_KEEP_DAYS. */
+export async function recordDecision(input: DecisionInput, now = Date.now()): Promise<boolean> {
   try {
     await prisma.transitionDecision.create({ data: { fromGenre: input.fromGenre, toGenre: input.toGenre, style: input.style, decidedBy: input.decidedBy, vetoesJson: JSON.stringify(input.vetoes), mixability: input.mixability } });
+    if (shouldPrune(now, lastPruneAt)) {
+      lastPruneAt = now;
+      await prisma.transitionDecision.deleteMany({ where: { createdAt: { lt: new Date(now - DECISION_KEEP_DAYS * 86_400_000) } } }).catch(() => {});
+    }
     return true;
   } catch (err) {
     if (isMissingTable(err)) return false;
@@ -93,18 +113,34 @@ export async function recordDecision(input: DecisionInput): Promise<boolean> {
   }
 }
 
+/** How many decisions with a veto are read for the veto breakdown (the veto detail is JSON text, so it cannot be summed in the database). */
+const VETO_SAMPLE_ROWS = 5000;
+
 export type TransitionStatsResult = { ok: true; stats: TransitionStats; jobs: JobStatusCounts; /** Instrumentals built so far; null before prisma/vocal-split.sql has been run. */ instrumentalsBuilt: number | null; sinceDays: number | null } | { ok: false; reason: "no-table" };
 
-/** The admin's counts: decisions (all time, or the last `days`) and the vocal separation jobs by status. */
+/** The admin's counts: decisions (all time, or the last `days`), added up in the database so they are exact, and the vocal separation jobs by status. */
 export async function loadTransitionStats(days: 7 | 30 | null, now = Date.now()): Promise<TransitionStatsResult> {
   const since = days ? new Date(now - days * 86_400_000) : null;
+  const where = since ? { createdAt: { gte: since } } : {};
   try {
-    const [rows, jobGroups, instrumentalsBuilt] = await Promise.all([
-      prisma.transitionDecision.findMany({ where: since ? { createdAt: { gte: since } } : {}, select: { fromGenre: true, toGenre: true, style: true, decidedBy: true, vetoesJson: true }, take: 50_000 }),
+    const [total, byStyle, byPair, byDecider, vetoRows, jobGroups, instrumentalsBuilt] = await Promise.all([
+      prisma.transitionDecision.count({ where }),
+      prisma.transitionDecision.groupBy({ by: ["style"], where, _count: { _all: true } }),
+      prisma.transitionDecision.groupBy({ by: ["fromGenre", "toGenre"], where, _count: { _all: true } }),
+      prisma.transitionDecision.groupBy({ by: ["decidedBy"], where, _count: { _all: true } }),
+      prisma.transitionDecision.findMany({ where: { ...where, NOT: { vetoesJson: "[]" } }, select: { vetoesJson: true }, orderBy: { createdAt: "desc" }, take: VETO_SAMPLE_ROWS + 1 }),
       prisma.stemSeparationJob.groupBy({ by: ["status"], _count: { _all: true } }).catch(() => []),
       prisma.stemSeparationJob.count({ where: { instrumentalUrl: { not: null } } }).catch(() => null),
     ]);
-    return { ok: true, stats: summarizeDecisions(rows), jobs: summarizeJobStatuses(jobGroups.map((g) => ({ status: g.status, count: g._count._all }))), instrumentalsBuilt, sinceDays: days };
+    const stats = statsFromAggregates({
+      total,
+      byStyle: byStyle.map((g) => ({ style: g.style, count: g._count._all })),
+      byPair: byPair.map((g) => ({ fromGenre: g.fromGenre, toGenre: g.toGenre, count: g._count._all })),
+      byDecider: byDecider.map((g) => ({ decidedBy: g.decidedBy, count: g._count._all })),
+      vetoRows: vetoRows.slice(0, VETO_SAMPLE_ROWS),
+      vetoRowsCapped: vetoRows.length > VETO_SAMPLE_ROWS,
+    });
+    return { ok: true, stats, jobs: summarizeJobStatuses(jobGroups.map((g) => ({ status: g.status, count: g._count._all }))), instrumentalsBuilt, sinceDays: days };
   } catch (err) {
     if (isMissingTable(err)) return { ok: false, reason: "no-table" };
     throw err;

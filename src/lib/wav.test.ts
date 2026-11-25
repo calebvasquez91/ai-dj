@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { WavError, instrumentalFromStemFiles, parseWav, peakOf, sumWav, writeWav16, type WavAudio } from "./wav";
+import { WavError, addInto, instrumentalFromStemFiles, parseWav, peakOf, sumWav, writeWav16, type WavAudio } from "./wav";
 
 /** Builds a WAV in any of the formats the parser reads: pcm16, pcm24, pcm32, float32, or 24-bit with the extensible header the separation model writes. */
 function encode(audio: WavAudio, kind: "pcm16" | "pcm24" | "pcm32" | "float32" | "pcm24-extensible"): Uint8Array {
@@ -109,5 +109,22 @@ describe("the instrumental: the sum of every stem but the vocals", () => {
     expect(maxDiff(back.channels[0], sumWav([drums, bass, other]).channels[0])).toBeLessThan(2e-4);
     // the vocal-free file is half the size of a 24-bit stem of the same length (16 vs 24 bits)
     expect(result.bytes.length).toBeLessThan(encode(drums, "pcm24-extensible").length);
+  });
+});
+
+describe("addInto: a running sum", () => {
+  it("gives the same result as summing all the stems at once", () => {
+    const a = tone(100, 0.2), b = tone(60, 0.2), c = tone(900, 0.2);
+    const whole = sumWav([tone(100, 0.2), tone(60, 0.2), tone(900, 0.2)]);
+    let acc: WavAudio | null = null;
+    for (const s of [a, b, c]) acc = addInto(acc, s);
+    for (const i of [0, 100, 2000, 4409]) expect(acc!.channels[0][i]).toBeCloseTo(whole.channels[0][i], 6);
+  });
+
+  it("pads a shorter total, extends for a longer stem, and refuses stems that do not belong together", () => {
+    expect(addInto(tone(100, 0.2, 4000), tone(60, 0.2, 5000)).channels[0]).toHaveLength(5000);
+    expect(addInto(tone(100, 0.2, 5000), tone(60, 0.2, 4000)).channels[0]).toHaveLength(5000);
+    expect(() => addInto(tone(100, 0.2, 100, 44100), tone(100, 0.2, 100, 48000))).toThrow(/sample rates/);
+    expect(() => addInto(tone(100, 0.2), { sampleRate: 44100, channels: [new Float32Array(4410)] })).toThrow(/channel counts/);
   });
 });

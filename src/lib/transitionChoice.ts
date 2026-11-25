@@ -7,14 +7,19 @@
  * The plan is chosen 60 to 90 seconds before the transition (PLAN_LEAD_SEC), so nothing waits until the end of the song.
  */
 import type { GenreTransitionPlan, RankedPlan } from "@/lib/transitionPlanner";
-import { applyVetoes, type MixabilityReport } from "@/lib/mixability";
+import { KNOWN_CONSTRAINTS, applyVetoes, type MixabilityReport } from "@/lib/mixability";
 
 /** The plan is decided this early (seconds before the mix-out): between 60 and 90, so a 2 s model call never holds up a transition. */
 export const PLAN_LEAD_SEC = { min: 60, max: 90 } as const;
 /** The top plan must lead the runner-up by at least this share of its own score to be chosen without asking Claude. */
 export const CLEAR_MARGIN = 0.2;
-/** Claude gets this long; after it the local winner stands. */
-export const ASK_TIMEOUT_MS = 2000;
+/** The server's call to Claude gets this long (the spec's 2 seconds). */
+export const HAIKU_CALL_TIMEOUT_MS = 2000;
+/**
+ * The browser waits this long for the whole answer: the server's 2 s plus the round trip to our own route and a cold start. It must be longer than
+ * HAIKU_CALL_TIMEOUT_MS, or answers that arrive in time are dropped by the browser's own clock. After it the local winner stands.
+ */
+export const ASK_TIMEOUT_MS = 3000;
 
 export interface PickCandidate {
   style: string;
@@ -126,11 +131,27 @@ export function sanitizePickRequest(body: unknown): PickRequest | null {
   if (!body || typeof body !== "object") return null;
   const b = body as { genrePair?: { a?: unknown; b?: unknown }; mixability?: unknown; candidates?: unknown };
   if (typeof b.genrePair?.a !== "string" || typeof b.genrePair?.b !== "string") return null;
-  if (!b.mixability || typeof b.mixability !== "object") return null;
+  const mixability = sanitizeMixability(b.mixability);
+  if (!mixability) return null;
   if (!Array.isArray(b.candidates) || b.candidates.length !== 2 || !b.candidates.every(isCandidate)) return null;
   const cap = (s: string) => s.slice(0, 120);
   const [c1, c2] = b.candidates as PickCandidate[];
   const clean = (c: PickCandidate): PickCandidate => ({ style: cap(c.style), bars: c.bars, tools: c.tools.filter((t): t is string => typeof t === "string").slice(0, 6).map(cap), keepSync: c.keepSync, why: cap(c.why) });
-  return { genrePair: { a: cap(b.genrePair.a), b: cap(b.genrePair.b) }, mixability: b.mixability as PickRequest["mixability"], candidates: [clean(c1), clean(c2)] };
+  return { genrePair: { a: cap(b.genrePair.a), b: cap(b.genrePair.b) }, mixability, candidates: [clean(c1), clean(c2)] };
 }
 
+
+const NUMERIC_FACTS = ["mixability", "beatConfidenceA", "beatConfidenceB", "keyConfidenceA", "keyConfidenceB", "energyAtMixOut", "energyAtMixIn", "vocalDensityAtMixOut", "vocalDensityAtMixIn"] as const;
+
+/**
+ * The Engineer's facts as the browser sends them, rebuilt from a whitelist: each number clamped to 0-1 (or null), the constraints only from the closed list
+ * of sentences the Engineer writes. Nothing else the client sends reaches the prompt. Null when it is not an object at all.
+ */
+export function sanitizeMixability(raw: unknown): PickRequest["mixability"] | null {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
+  const r = raw as Record<string, unknown>;
+  const num = (v: unknown): number | null => (typeof v === "number" && Number.isFinite(v) ? Math.min(1, Math.max(0, v)) : null);
+  const out = Object.fromEntries(NUMERIC_FACTS.map((k) => [k, num(r[k])])) as Record<(typeof NUMERIC_FACTS)[number], number | null>;
+  const constraints = (Array.isArray(r.constraints) ? r.constraints : []).filter((c): c is string => typeof c === "string" && (KNOWN_CONSTRAINTS as readonly string[]).includes(c)).slice(0, KNOWN_CONSTRAINTS.length);
+  return { ...out, mixability: out.mixability ?? 0, beatConfidenceA: out.beatConfidenceA ?? 0, beatConfidenceB: out.beatConfidenceB ?? 0, keyConfidenceA: out.keyConfidenceA ?? 0, keyConfidenceB: out.keyConfidenceB ?? 0, constraints };
+}

@@ -15,6 +15,8 @@ import { describeGenrePlan, rankTransitions } from "@/lib/transitionPlanner";
 /** Asks the server's Haiku route to choose between two close plans. Any problem is null: the DJ keeps its local winner. */
 /** Tells the server which kind of transition was chosen, for the admin's counts (genres and style only, never a title). Fire and forget: a failure costs only a log line. */
 function logDecision(entry: PairGenrePlan): void {
+  // A song with no genre is not a genre pair: nothing useful to count.
+  if (entry.plan.genrePair.a === "Unknown" || entry.plan.genrePair.b === "Unknown") return;
   void fetch("/api/dj/transition-log", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -57,7 +59,10 @@ export function GenreTransitionPlanner() {
 
   // Switched off here: any plan already made is dropped, so the engine and the pills go back to exactly what they were.
   useEffect(() => {
-    if (!enabled && useStore.getState().genrePlan) useStore.getState().setGenrePlan(null);
+    if (enabled) return;
+    // Forget which pair was planned too, so switching back on during the same song plans it again.
+    plannedPair.current = null;
+    if (useStore.getState().genrePlan) useStore.getState().setGenrePlan(null);
   }, [enabled]);
 
   useEffect(() => {

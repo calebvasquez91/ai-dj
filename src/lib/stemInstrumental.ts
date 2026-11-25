@@ -9,7 +9,7 @@
  * The job never starts a separation: it only works from stems that exist. Separated files are for playback inside the app; nothing here (or anywhere) offers
  * them for download. Dependencies are injected so the logic is tested without the network or the database.
  */
-import { instrumentalFromStemFiles, parseWav } from "@/lib/wav";
+import { addInto, parseWav, writeWav16, type WavAudio } from "@/lib/wav";
 import { voiceMapFromStem, type VoiceMap } from "@/lib/voiceMap";
 
 export interface StemJobForInstrumental {
@@ -39,17 +39,21 @@ export interface InstrumentalResult {
 export async function buildInstrumental(job: StemJobForInstrumental, deps: InstrumentalDeps): Promise<InstrumentalResult> {
   const { vocalsUrl, drumsUrl, bassUrl, otherUrl } = job;
   if (!vocalsUrl || !drumsUrl || !bassUrl || !otherUrl) throw new Error("the job does not have all four stems yet");
-  const [vocals, drums, bass, other] = await Promise.all([vocalsUrl, drumsUrl, bassUrl, otherUrl].map((u) => deps.fetchBytes(u)));
-  const instrumental = instrumentalFromStemFiles([drums, bass, other]);
+  // One stem at a time, added into a running total: a long song's decoded stems are large, and only the total and the stem being added are ever held.
+  let total: WavAudio | null = null;
+  for (const url of [drumsUrl, bassUrl, otherUrl]) total = addInto(total, parseWav(await deps.fetchBytes(url)));
+  const instrumental = writeWav16(total!);
+  const instrumentalDurationSec = total!.channels[0].length / total!.sampleRate;
+  total = null;
 
   // The vocal activity: the vocal stem folded to mono, then the same voice-map rule the rest of the app uses.
-  const vocalAudio = parseWav(vocals);
+  const vocalAudio = parseWav(await deps.fetchBytes(vocalsUrl));
   const mono = new Float32Array(vocalAudio.channels[0].length);
   for (const ch of vocalAudio.channels) for (let i = 0; i < mono.length; i++) mono[i] += ch[i] / vocalAudio.channels.length;
   const voiceMap = voiceMapFromStem(mono, vocalAudio.sampleRate);
 
   const instrumentalUrl = await deps.store(`stems/${job.trackId}/${job.id}-instrumental.wav`, instrumental.bytes, "audio/wav");
-  return { instrumentalUrl, voiceMap, scaledBy: instrumental.scaledBy, durationSec: instrumental.durationSec };
+  return { instrumentalUrl, voiceMap, scaledBy: instrumental.scaledBy, durationSec: instrumentalDurationSec };
 }
 
 /** The voice map stored on a job, or null when there is none or it is damaged. */
@@ -64,3 +68,27 @@ export function parseVocalActivity(json: string | null | undefined): VoiceMap | 
     return null;
   }
 }
+
+/** A job whose build failed is left alone this long before the background job tries it again, so one bad job never holds up the ones behind it. */
+export const INSTRUMENTAL_RETRY_AFTER_MS = 3_600_000;
+/** The largest stem file the job will take (bytes): a longer song than this is skipped rather than risk the function's memory. About 25 minutes of 24-bit stereo. */
+export const MAX_STEM_BYTES = 200_000_000;
+
+/**
+ * Which finished jobs still need an instrumental: all four stems there, none built, and not attempted within INSTRUMENTAL_RETRY_AFTER_MS.
+ * `instrumentalBuiltAt` records the last ATTEMPT (set on success and on failure), so a failing job drops to the back instead of being picked every call.
+ */
+export function instrumentalTodoWhere(now: number) {
+  return {
+    status: "ready",
+    instrumentalUrl: null,
+    vocalsUrl: { not: null },
+    drumsUrl: { not: null },
+    bassUrl: { not: null },
+    otherUrl: { not: null },
+    OR: [{ instrumentalBuiltAt: null }, { instrumentalBuiltAt: { lt: new Date(now - INSTRUMENTAL_RETRY_AFTER_MS) } }],
+  };
+}
+
+/** Never-tried jobs first, then the longest-waiting retries; oldest first within each. */
+export const INSTRUMENTAL_TODO_ORDER = [{ instrumentalBuiltAt: { sort: "asc" as const, nulls: "first" as const } }, { createdAt: "asc" as const }];

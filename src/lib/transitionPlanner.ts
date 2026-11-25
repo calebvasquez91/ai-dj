@@ -120,7 +120,7 @@ export function genresOfTrack(track: PlannerTrack): string[] {
 }
 
 function ruleFor(table: Readonly<Record<string, GenreTransitionRule>>, genre: string | undefined): GenreTransitionRule {
-  return (genre ? table[genre] : undefined) ?? DEFAULT_GENRE_RULE;
+  return (genre && Object.hasOwn(table, genre) ? table[genre] : undefined) ?? DEFAULT_GENRE_RULE;
 }
 
 /** Every style a track's genres accept: the primary's, widened by its secondaries'. */

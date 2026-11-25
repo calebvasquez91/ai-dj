@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { buildInstrumental, parseVocalActivity, type StemJobForInstrumental } from "./stemInstrumental";
+import { INSTRUMENTAL_RETRY_AFTER_MS, buildInstrumental, instrumentalTodoWhere, parseVocalActivity, type StemJobForInstrumental } from "./stemInstrumental";
 import { parseWav, type WavAudio } from "./wav";
 
 /** A 16-bit stereo WAV of the given channels. */
@@ -122,5 +122,44 @@ describe("Instrumental mode (playbackUrl)", () => {
     expect(playbackUrl({ id: "b", sourceUrl: "https://blob/b.mp3" }, state)).toBe("https://blob/b.mp3"); // not separated yet: plays in full
     expect(playbackUrl({ id: "a", sourceUrl: "https://blob/a.mp3" }, { ...state, instrumentalMode: false })).toBe("https://blob/a.mp3");
     vi.doUnmock("@/lib/featureFlags");
+  });
+});
+
+describe("the instrumental job's memory and queue behaviour", () => {
+  const stems = {
+    "u://vocals": wav16(burst(10, [[1, 5]], 0.5, 500)),
+    "u://drums": wav16(burst(10, [[0, 10]], 0.1, 100)),
+    "u://bass": wav16(burst(10, [[0, 10]], 0.1, 60)),
+    "u://other": wav16(burst(10, [[0, 10]], 0.1, 700)),
+  };
+
+  it("reads one stem at a time (never more than one download in flight)", async () => {
+    let inFlight = 0;
+    let maxInFlight = 0;
+    const order: string[] = [];
+    await buildInstrumental(job, {
+      fetchBytes: async (url) => {
+        inFlight++;
+        maxInFlight = Math.max(maxInFlight, inFlight);
+        order.push(url);
+        await new Promise((r) => setTimeout(r, 5));
+        inFlight--;
+        return stems[url as keyof typeof stems];
+      },
+      store: async (p) => `https://blob/${p}`,
+    });
+    expect(maxInFlight).toBe(1);
+    expect(order).toEqual(["u://drums", "u://bass", "u://other", "u://vocals"]);
+  });
+
+  it("a job that failed lately is not picked again until the retry delay has passed, so it cannot block the ones behind it", () => {
+    const now = Date.UTC(2026, 10, 25, 12);
+    const where = instrumentalTodoWhere(now);
+    expect(where.status).toBe("ready");
+    expect(where.instrumentalUrl).toBeNull();
+    const [never, retry] = where.OR;
+    expect(never).toEqual({ instrumentalBuiltAt: null });
+    expect((retry.instrumentalBuiltAt as { lt: Date }).lt.getTime()).toBe(now - INSTRUMENTAL_RETRY_AFTER_MS);
+    expect(INSTRUMENTAL_RETRY_AFTER_MS).toBe(3_600_000);
   });
 });

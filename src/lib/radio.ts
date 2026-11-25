@@ -41,6 +41,8 @@ export interface RadioOptions {
   similarArtists?: readonly string[];
   /** Song ids never to pick (already played or queued). */
   exclude?: ReadonlySet<string>;
+  /** True when this device has genre-aware transitions switched on: the batch then also clusters same-genre songs. Honoured only while GENRE_TRANSITIONS_ENABLED is on. */
+  genreFlow?: boolean;
 }
 
 const norm = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
@@ -172,7 +174,7 @@ export function nextRadioBatch(seed: Track, library: readonly Track[], options: 
     pool.map((c) => ({ id: c.track.id, energy: energies.get(c.track.id) ?? 0.5, bpm: options.factsOf(c.track).bpm, genre: genresOfTrack(c.track)[0]?.genre })),
     PROFILES[profile].energyArc,
     0,
-    GENRE_TRANSITIONS_ENABLED ? GENRE_FLOW_WEIGHT : 0,
+    GENRE_TRANSITIONS_ENABLED && options.genreFlow ? GENRE_FLOW_WEIGHT : 0,
   );
   const byId = new Map(pool.map((c) => [c.track.id, c.track]));
   const spaced = enforceArtistSpacing(ordered.map((o) => byId.get(o.id)!), tail);

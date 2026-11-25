@@ -110,3 +110,24 @@ describe("which plan belongs to which pair", () => {
     expect(genrePlanSkipsSongSync(true, null, "a", "b")).toBe(false);
   });
 });
+
+describe("a transition the genre layer chose is never described as the person's pick", () => {
+  const args = planArgsFromState(state, {}, current, next);
+
+  it("echo-out, quick-cut and fade carry the genre signal and read as chosen for the genres", () => {
+    for (const style of ["echo-out", "quick-cut", "fade"] as const) {
+      const adjusted = adjustPlanArgsForGenrePlan(args, genrePlan(style));
+      expect(adjusted.chosenByGenre).toBe(true);
+      const planned = planTransition(adjusted);
+      expect(planned.rationale, style).not.toContain("your pick");
+      expect(planned.shortWhy, style).not.toContain("your pick");
+      expect(planned.rationale, style).toContain("genres");
+    }
+  });
+
+  it("a transition the person pinned still says so, and beat-synced plans are not touched", () => {
+    const pinned = planTransition(planArgsFromState({ ...state, forcedTransitionId: "bass-swap" }, {}, current, next));
+    expect(pinned.rationale).toContain("your pick");
+    expect(adjustPlanArgsForGenrePlan(args, genrePlan("long-blend", { keepSync: true })).chosenByGenre).toBeUndefined();
+  });
+});

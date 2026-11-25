@@ -92,7 +92,7 @@ export const GENRE_TRANSITIONS: Readonly<Record<string, GenreTransitionRule>> = 
 
 /** The rule for a genre label; the safe default for one with no entry or no label. */
 export function genreRule(genre: string | null | undefined): GenreTransitionRule {
-  return (genre ? GENRE_TRANSITIONS[genre] : undefined) ?? DEFAULT_GENRE_RULE;
+  return (genre && Object.hasOwn(GENRE_TRANSITIONS, genre) ? GENRE_TRANSITIONS[genre] : undefined) ?? DEFAULT_GENRE_RULE;
 }
 
 /** How the genres' beat reliability sorts (required > preferred > unreliable > none), for how far apart two genres sit. */
@@ -105,8 +105,8 @@ const BEAT_ORDER: Record<BeatSync, number> = { required: 3, preferred: 2, unreli
  */
 export function genreFlowDistance(a: string | null | undefined, b: string | null | undefined, table: Readonly<Record<string, GenreTransitionRule>> = GENRE_TRANSITIONS): number {
   if (!a || !b || a === b) return 0;
+  if (!Object.hasOwn(table, a) || !Object.hasOwn(table, b)) return 0;
   const ra = table[a], rb = table[b];
-  if (!ra || !rb) return 0;
   const sa = new Set(ra.preferredStyles), sb = new Set(rb.preferredStyles);
   const shared = [...sa].filter((s) => sb.has(s)).length;
   const union = new Set([...sa, ...sb]).size;

@@ -44,6 +44,7 @@ import { judgeStemCandidate } from "@/lib/stemPlanner";
 import { SEED_RADIO_ENABLED } from "@/lib/featureFlags";
 import type { PairGenrePlan } from "@/lib/genrePlanApply";
 import { saveInstrumentalMode } from "@/lib/instrumentalMode";
+import { useGenreTransitions } from "@/lib/genreTransitionStore";
 import { RADIO_BATCH, isLoneSongPlay, nextRadioBatch, radioNeedsMore, type RadioFacts } from "@/lib/radio";
 import { VOICE_CUT_DEFAULTS, loadVoiceCutSettings, saveVoiceCutSettings, type VoiceCutSettings } from "@/lib/voiceCutSettings";
 import type { VoiceMap } from "@/lib/voiceMap";
@@ -507,7 +508,7 @@ async function runRadio(seed: Track, get: () => PlayerState, set: (partial: Part
   const similarArtists = await fetchSimilarArtists(seed.artist);
   const s = get();
   if (s.currentTrack?.id !== seed.id) return; // the person moved on while the artists were being looked up
-  const { tracks, enough } = nextRadioBatch(seed, s.localLibrary, { factsOf: radioFactsOf(s.trackAnalysis), similarArtists, exclude: new Set([seed.id]) }, [seed], RADIO_BATCH);
+  const { tracks, enough } = nextRadioBatch(seed, s.localLibrary, { factsOf: radioFactsOf(s.trackAnalysis), similarArtists, exclude: new Set([seed.id]), genreFlow: useGenreTransitions.getState().settings.enabled }, [seed], RADIO_BATCH);
   set({
     queue: tracks,
     radioSession: { seedId: seed.id, playedIds: [], similarArtists },
@@ -1212,7 +1213,7 @@ export const useStore = create<PlayerState>()(
             const s = get();
             const seed = s.localLibrary.find((t) => t.id === nextRadio!.seedId) ?? nextTrack;
             const exclude = new Set([...nextRadio.playedIds, nextTrack.id, ...rest.map((t) => t.id)]);
-            const { tracks: more } = nextRadioBatch(seed, s.localLibrary, { factsOf: radioFactsOf(s.trackAnalysis), similarArtists: nextRadio.similarArtists, exclude }, [nextTrack, ...rest], RADIO_BATCH);
+            const { tracks: more } = nextRadioBatch(seed, s.localLibrary, { factsOf: radioFactsOf(s.trackAnalysis), similarArtists: nextRadio.similarArtists, exclude, genreFlow: useGenreTransitions.getState().settings.enabled }, [nextTrack, ...rest], RADIO_BATCH);
             extendedQueue = [...extendedQueue, ...more];
           }
         }

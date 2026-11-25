@@ -3,7 +3,7 @@
  * process.env.ANTHROPIC_API_KEY, which never reaches the browser. JSON-schema output (a forced tool call), the long fixed instructions cached
  * (prompt caching), a 2-second timeout, and the never-throws contract: any problem gives null and the DJ keeps its local winner.
  */
-import { ASK_TIMEOUT_MS, parsePickAnswer, type PickAnswer, type PickRequest } from "@/lib/transitionChoice";
+import { HAIKU_CALL_TIMEOUT_MS, parsePickAnswer, type PickAnswer, type PickRequest } from "@/lib/transitionChoice";
 
 /** A small, fast model: this is a two-way choice and a sentence. A current id (CLAUDE.md), not a dated snapshot. */
 export const DJ_PICK_MODEL = "claude-haiku-5-5";
@@ -43,7 +43,7 @@ export async function askHaikuToPick(request: PickRequest): Promise<PickAnswer |
         tool_choice: { type: "tool", name: PICK_TOOL.name },
         messages: [{ role: "user", content: JSON.stringify(request) }],
       }),
-      signal: AbortSignal.timeout(ASK_TIMEOUT_MS),
+      signal: AbortSignal.timeout(HAIKU_CALL_TIMEOUT_MS),
     });
     if (!res.ok) {
       console.warn(`[transition-pick] Anthropic API returned ${res.status}`);
