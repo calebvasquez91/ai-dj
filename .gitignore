@@ -52,3 +52,6 @@ next-env.d.ts
 
 # uploaded audio files (local storage backend, dev only)
 /uploads
+
+# the owner's local song list and what is generated from it (the repo is public)
+/data/
