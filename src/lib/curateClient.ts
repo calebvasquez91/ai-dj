@@ -1,5 +1,5 @@
 /**
- * The app's side of "Create with DJ": whether the sheet is open, and the one call to the server that turns a request into a
+ * The app's side of "Vibe Code": whether the sheet is open, and the one call to the server that turns a request into a
  * previewed playlist. Nothing is saved until the person saves it (CreateWithDjSheet.tsx makes it a normal playlist).
  */
 import { create } from "zustand";
@@ -35,7 +35,7 @@ export async function requestCuration(input: CurateInput): Promise<CurateResult>
 
 interface CurateUi {
   open: boolean;
-  /** Starts the sheet with this request filled in (the example chips and "Create with DJ" with no text pass none). */
+  /** Starts the sheet with this request filled in (the example chips and "Vibe Code" with no text pass none). */
   initialRequest: string;
   show: (initialRequest?: string) => void;
   close: () => void;

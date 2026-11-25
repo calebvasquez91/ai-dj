@@ -201,7 +201,7 @@ export default function Home() {
                     <SparklesIcon size={22} />
                   </span>
                 }
-                title="Create with DJ"
+                title="Vibe Code"
                 onClick={() => useCurateUi.getState().show()}
               />
               {likedCount > 0 && (

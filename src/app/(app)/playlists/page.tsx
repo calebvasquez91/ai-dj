@@ -32,7 +32,7 @@ export default function PlaylistsPage() {
         <div className="flex flex-wrap items-center gap-2">
           <Button variant="secondary" onClick={() => useCurateUi.getState().show()}>
             <SparklesIcon size={14} />
-            Create with DJ
+            Vibe Code
           </Button>
           <Button variant="primary" onClick={handleCreate}>
             <PlusIcon size={14} />
