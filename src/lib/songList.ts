@@ -12,7 +12,7 @@ import { MIN_MATCH_SCORE, scoreTrack } from "@/lib/curate/select";
 import { orderByEnergyArc } from "@/lib/curate/energyArc";
 import type { EnergyArc } from "@/lib/curate/profiles";
 import type { CurationSpec } from "@/lib/curate/spec";
-import { artistKeys, buildLibraryIndex, libraryMoods, matchLibrary, titleKey, type LibraryRow } from "@/lib/djLibrary";
+import { artistKeys, buildLibraryIndex, libraryMoods, matchLibrary, titleKey, variantTokens, type LibraryRow } from "@/lib/djLibrary";
 import type { Track } from "@/types/music";
 
 /** One song of the list: its rows merged (a song filed under several playlists is one song). */
@@ -48,7 +48,7 @@ export interface ListSuggestion {
   camelot: string | null;
   energy: number | null;
   moods: string[];
-  /** 0-1, how well it fits the request. */
+  /** 0-1, how well it fits the request, after the energy preference; never below MIN_MATCH_SCORE (curate/select.ts), the bar an uploaded song has to reach. */
   score: number;
 }
 
@@ -81,7 +81,9 @@ export function dedupeSongs(rows: readonly LibraryRow[]): ListSong[] {
     const title = titleKey(row.title);
     const main = artistKeys(row.artist)[0] ?? "";
     if (!title) continue; // a placeholder ("(Any Masego song)") or album entry names no song
-    const key = `${title}|${main}`;
+    // A remix, cover, live take and so on is a different recording from the original (matchLibrary treats it so), so it is a different song here too.
+    const version = [...variantTokens(row.title)].sort().join("+");
+    const key = `${title}|${main}${version ? `|${version}` : ""}`;
     groups.set(key, [...(groups.get(key) ?? []), row]);
   }
   return [...groups.entries()].map(([key, group]) => {
@@ -164,6 +166,8 @@ export function suggestFromList({ spec, songs, owned, arc, seed = 0, limit = MAX
       if (miss > ENERGY_MISS_LIMIT) continue;
       score *= 1 - ENERGY_WEIGHT * miss;
     }
+    // Every suggestion reaches the same bar an uploaded song has to: the energy preference can lower a song's score below it, and then it is not suggested.
+    if (score < MIN_MATCH_SCORE) continue;
     scored.push({ song, score });
   }
   // Best fit first; a seed only reorders songs whose scores are close (the same jitter idea as select.ts), and the key is the final tie-break so the order is repeatable.

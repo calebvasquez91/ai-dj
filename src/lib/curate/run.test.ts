@@ -239,3 +239,15 @@ describe("suggestions from the owner's song list", () => {
     }
   });
 });
+
+describe("a failure in the song list suggestions never stops the playlist", () => {
+  const rnbLibrary = Array.from({ length: 10 }, (_, i) => rnb(`fail-rnb${i}`, { title: `Mine ${i}`, artist: "Someone" }));
+
+  it("still returns the playlist when the list's own rows break the matching or scoring", async () => {
+    const broken = [{ id: "X", playlist: "Workouts", title: null, artist: null, moods: [], year: null, energy: null, genre: "R&B", subGenre: "", bpm: null, camelot: null, explicit: null, durationSec: null }];
+    const r = await runCuration({ request: "90s R&B for a workout" }, deps(rnbLibrary, { loadSongList: async () => broken as never }));
+    expect(r.kind).toBe("preview");
+    expect(r.kind === "preview" && r.preview.tracks.length).toBeGreaterThan(0);
+    expect(r.kind === "preview" && "fromList" in r).toBe(false);
+  });
+});

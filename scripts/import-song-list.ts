@@ -2,11 +2,13 @@
 //
 //   node --env-file=.env node_modules/tsx/dist/cli.mjs scripts/import-song-list.ts            (a dry run: reads the file and the database, writes nothing)
 //   node --env-file=.env node_modules/tsx/dist/cli.mjs scripts/import-song-list.ts --apply    (writes)
+//   ... --apply --prune                                                                         (writes, and deletes rows that are no longer in the file)
 //
 // The table must exist first (prisma/song-list.sql). Without --apply it only reports: how many rows the file has, how many of its genre words the app's genre
-// list recognises, and how many songs are already uploaded (those are left out of the suggestions). With --apply it upserts every row by its list id, so it can
-// be run again after the list changes; it never deletes a row. Only music facts are written: no recommender names and no notes. The same database local dev,
-// previews and production all use. Not part of the build or the tests.
+// list recognises, how many songs are already uploaded (those are left out of the suggestions), and how many rows in the table are no longer in the file. With
+// --apply it upserts every row by its list id, so it can be run again after the list changes. A row that has left the file stays in the table, and keeps being
+// suggested, until the run has --prune as well (the dry run says how many that would delete). Only music facts are written: no recommender names and no notes.
+// The same database local dev, previews and production all use. Not part of the build or the tests.
 import { readFileSync } from "node:fs";
 import { prisma } from "../src/lib/prisma";
 import { normalize } from "../src/lib/genres";
@@ -15,6 +17,7 @@ import { parseLibraryJsonl } from "../src/lib/djLibrary";
 
 const LIBRARY_PATH = "data/dj-library.jsonl";
 const apply = process.argv.includes("--apply");
+const prune = process.argv.includes("--prune");
 
 async function main() {
   const { rows, skipped } = parseLibraryJsonl(readFileSync(LIBRARY_PATH, "utf8"));
@@ -26,8 +29,24 @@ async function main() {
   const owned = ownedSongKeys(rows, songs, tracks);
   console.log(`already uploaded: ${owned.size} songs | would be suggested (not uploaded): ${songs.length - owned.size}`);
 
+  // The ids already in the table (null when the table does not exist yet), so rows that have left the file can be reported and, with --prune, deleted.
+  let stored: string[] | null = null;
+  try {
+    stored = (await prisma.songListEntry.findMany({ select: { id: true } })).map((r) => r.id);
+  } catch {
+    stored = null;
+  }
+  const inFile = new Set(rows.map((r) => r.id));
+  const stale = (stored ?? []).filter((id) => !inFile.has(id));
+  console.log(stored === null ? "table: not found (run prisma/song-list.sql first)" : `table: ${stored.length} rows | rows no longer in the file: ${stale.length}${stale.length > 0 ? (prune ? " (--prune would delete them)" : " (kept; add --prune with --apply to delete them)") : ""}`);
+
   if (!apply) {
     console.log("dry run: nothing written. Add --apply to write the rows (the table must exist: prisma/song-list.sql).");
+    return;
+  }
+  if (stored === null) {
+    console.error("The SongListEntry table does not exist yet: run prisma/song-list.sql first. Nothing was written.");
+    process.exitCode = 1;
     return;
   }
 
@@ -54,6 +73,10 @@ async function main() {
     );
   }
   console.log(`wrote ${rows.length} rows to SongListEntry`);
+  if (prune && stale.length > 0) {
+    const { count } = await prisma.songListEntry.deleteMany({ where: { id: { in: stale } } });
+    console.log(`deleted ${count} rows that are no longer in the file`);
+  }
 }
 
 main()

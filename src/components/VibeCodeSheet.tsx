@@ -178,26 +178,6 @@ function VibeCodeBody({ initialRequest, close }: { initialRequest: string; close
               </div>
             )}
 
-            {result.fromList && result.fromList.length > 0 && (
-              <div className="flex flex-col gap-1.5">
-                <Text variant="heading" as="h3">From your song list</Text>
-                <Text variant="caption">Songs from your own list that fit this and are not in your library yet, in the order the energy should run. Upload them to use them.</Text>
-                <ol className="flex flex-col gap-1" aria-label="Suggestions from your song list">
-                  {result.fromList.map((s) => (
-                    <li key={s.key} className="flex items-center gap-3 rounded-lg bg-surface-raised px-3 py-1.5">
-                      <div className="min-w-0 flex-1">
-                        <p className="truncate text-sm font-medium">{s.title}</p>
-                        <p className="truncate text-xs text-muted">
-                          {[s.artist, s.genre, s.year, s.bpm ? `${Math.round(s.bpm)} BPM` : null, s.camelot, s.moods.length > 0 ? s.moods.join(", ") : null].filter(Boolean).join(" · ")}
-                        </p>
-                      </div>
-                      {s.energy != null && <span className="font-mono text-xs tabular-nums text-muted" title="Energy, 1 to 10 (your list's own estimate)">E{Math.round(s.energy)}</span>}
-                    </li>
-                  ))}
-                </ol>
-              </div>
-            )}
-
             <ol className="flex flex-col gap-1">
               {tracks.map((t, i) => (
                 <li key={t.id} className="flex items-center gap-3 rounded-lg px-2 py-1.5 hover:bg-surface-hover">
@@ -222,6 +202,27 @@ function VibeCodeBody({ initialRequest, close }: { initialRequest: string; close
                 Regenerate
               </button>
             </div>
+
+            {/* After the playlist and its Save button: the playlist is what the person came for. */}
+            {result.fromList && result.fromList.length > 0 && (
+              <div className="flex flex-col gap-1.5">
+                <Text variant="heading" as="h3">From your song list</Text>
+                <Text variant="caption">Songs from your own list that fit this and are not in your library yet, in the order the energy should run. Upload them to use them.</Text>
+                <ol className="flex flex-col gap-1" aria-label="Suggestions from your song list">
+                  {result.fromList.map((s) => (
+                    <li key={s.key} className="flex items-center gap-3 rounded-lg bg-surface-raised px-3 py-1.5">
+                      <div className="min-w-0 flex-1">
+                        <p className="truncate text-sm font-medium">{s.title}</p>
+                        <p className="truncate text-xs text-muted">
+                          {[s.artist, s.genre, s.year, s.bpm ? `${Math.round(s.bpm)} BPM` : null, s.camelot, s.moods.length > 0 ? s.moods.join(", ") : null].filter(Boolean).join(" · ")}
+                        </p>
+                      </div>
+                      {s.energy != null && <span className="font-mono text-xs tabular-nums text-muted" title="Energy, 1 to 10 (your list's own estimate)">E{Math.round(s.energy)}</span>}
+                    </li>
+                  ))}
+                </ol>
+              </div>
+            )}
           </section>
         )}
       </div>

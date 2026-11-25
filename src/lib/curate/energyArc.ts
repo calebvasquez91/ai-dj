@@ -9,7 +9,7 @@
  */
 import { bestTempoRatio } from "@/lib/tempoRatio";
 import { genreFlowDistance } from "@/lib/genreTransitions";
-import { camelotCompatibility } from "@/lib/mix-engine";
+import { camelotCompatibility } from "@/lib/camelot";
 import type { EnergyArc } from "@/lib/curate/profiles";
 
 /** What is known about a track for energy purposes. */

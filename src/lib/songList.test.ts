@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { MAX_LIST_SUGGESTIONS, dedupeSongs, moodEnergyTarget, ownedSongKeys, suggestFromList, type ListSong } from "./songList";
 import { orderByEnergyArc } from "./curate/energyArc";
+import { MIN_MATCH_SCORE } from "./curate/select";
 import type { LibraryRow } from "./djLibrary";
 import type { CurationSpec } from "./curate/spec";
 
@@ -39,6 +40,14 @@ describe("one entry per song", () => {
     expect(yellow.playlists).toEqual(["Sad & Mellow", "Vibes & Wine Down"]);
     expect(yellow).toMatchObject({ energy: 5.5, year: 2000, bpm: 87, camelot: "1B", explicit: false });
     expect(songs[1].explicit).toBe(true);
+  });
+
+  it("keeps a remix and its original apart, as the ownership check does: owning one does not hide the other", () => {
+    const rows = [row({ id: "A", title: "Die For You", artist: "The Weeknd" }), row({ id: "B", title: "Die For You (Remix)", artist: "The Weeknd" }), row({ id: "C", title: "Die For You (Clean)", artist: "The Weeknd" })];
+    const songs = dedupeSongs(rows);
+    expect(songs.map((s) => s.rowIds)).toEqual([["A", "C"], ["B"]]); // a clean edit is the same recording; a remix is not
+    const owned = ownedSongKeys(rows, songs, [{ title: "Die For You (Quick Hit Dirty)", artist: "The Weeknd" }]);
+    expect(songs.filter((s) => !owned.has(s.key)).map((s) => s.title)).toEqual(["Die For You (Remix)"]);
   });
 
   it("says a song is explicit when any row does", () => {
@@ -127,6 +136,12 @@ describe("suggestFromList", () => {
     const sad = songsOf([row({ title: "Soft", genre: "R&B", energy: 3, moods: ["heartbroken"] }), row({ title: "Loud", genre: "R&B", energy: 9, moods: ["heartbroken"] })]);
     const out = suggestFromList({ spec: spec({ genres: ["R&B"], moods: ["sad"] }), songs: sad, owned: new Set(), arc: "steady" });
     expect(titles(out)).toEqual(["Soft"]);
+  });
+
+  it("every suggestion reaches the bar an uploaded song has to, even after the energy preference lowers its score", () => {
+    const songs = songsOf(Array.from({ length: 12 }, (_, i) => row({ title: `Mid ${i}`, genre: "R&B", energy: 5 + (i % 2), year: null, moods: [] })));
+    const out = suggestFromList({ spec: spec({ genres: ["R&B"], moods: ["workout"], eraRange: { from: 1990, to: 1999 } }), songs, owned: new Set(), arc: "steady" });
+    for (const s of out) expect(s.score).toBeGreaterThanOrEqual(MIN_MATCH_SCORE);
   });
 
   it("moodEnergyTarget averages the moods that imply an energy and is null when none does", () => {

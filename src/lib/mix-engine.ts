@@ -8,6 +8,7 @@ import { alignEntryToBar, songMapMatchesBpm } from "@/lib/phrase-align";
 import { estimateStructuralCues } from "@/lib/structural-estimate";
 import { TRANSITION_FX_ENABLED } from "@/lib/transitionFx";
 import { bestTempoRatio } from "@/lib/tempoRatio";
+import { camelotCompatibility } from "@/lib/camelot";
 import { GENRE_TRANSITIONS_ENABLED } from "@/lib/featureFlags";
 import { adjustPlanArgsForGenrePlan, planMatchesPair, type PairGenrePlan } from "@/lib/genrePlanApply";
 
@@ -344,24 +345,8 @@ export function mashupGainCurves(
 
 export const MIN_KEY_CONFIDENCE_FOR_SCORING = 0.15;
 
-function parseCamelotCode(code: string): { number: number; letter: "A" | "B" } | null {
-  const m = code.match(/^(\d{1,2})([AB])$/);
-  if (!m) return null;
-  return { number: parseInt(m[1], 10), letter: m[2] as "A" | "B" };
-}
-
-/** 2 = identical key, 1 = relative major/minor or adjacent on the wheel, 0 = not compatible (or unknown). */
-export function camelotCompatibility(a: string | null, b: string | null): number {
-  if (!a || !b) return 0;
-  const pa = parseCamelotCode(a);
-  const pb = parseCamelotCode(b);
-  if (!pa || !pb) return 0;
-  if (pa.number === pb.number && pa.letter === pb.letter) return 2;
-  if (pa.number === pb.number) return 1;
-  const diff = Math.min((pa.number - pb.number + 12) % 12, (pb.number - pa.number + 12) % 12);
-  if (diff === 1 && pa.letter === pb.letter) return 1;
-  return 0;
-}
+// camelotCompatibility lives in lib/camelot.ts (so the playlist curator can use it without this whole module); re-exported here for the code that imports it from here.
+export { camelotCompatibility };
 
 // ---------------------------------------------------------------------------
 // DJ Set Modes — a vibe/context preset that biases which transition

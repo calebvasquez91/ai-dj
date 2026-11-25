@@ -98,12 +98,17 @@ export async function runCuration(body: CurateRequestBody, deps: CurateDeps): Pr
     const artists = [...new Set(preview.tracks.map((t) => t.artist.trim()).filter(Boolean))];
     discover = await deps.discover(artists, tracks.map((t) => t.artist)).catch(() => []);
   }
+  // The list suggestions are an extra: whatever goes wrong with them (the loader, the matching, the scoring) leaves them out and never stops the playlist.
   let fromList: ListSuggestion[] | undefined;
   if (deps.loadSongList) {
-    const listRows = await deps.loadSongList().catch(() => [] as LibraryRow[]);
-    if (listRows.length > 0) {
-      const songs = dedupeSongs(listRows);
-      fromList = suggestFromList({ spec: preview.spec, songs, owned: ownedSongKeys(listRows, songs, tracks), arc: preview.arc, seed });
+    try {
+      const listRows = await deps.loadSongList();
+      if (listRows.length > 0) {
+        const songs = dedupeSongs(listRows);
+        fromList = suggestFromList({ spec: preview.spec, songs, owned: ownedSongKeys(listRows, songs, tracks), arc: preview.arc, seed });
+      }
+    } catch (err) {
+      console.error("Vibe Code: song list suggestions left out", err instanceof Error ? err.message : err);
     }
   }
   return { kind: "preview", preview, discover, ...(fromList ? { fromList } : {}), usedModel: { spec: usedModelForSpec, refine: refined } };
