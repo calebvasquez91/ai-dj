@@ -38,7 +38,7 @@ function fx(name: string, durationSec: number, extra: Partial<FxSound> = {}): Fx
 }
 const pool = [fx("Riser", 8), fx("Big Impact", 3), fx("Downlifter", 6)];
 
-const args = { title: "Song", songMap: songMap(), durationSec: 200, fromSec: 0, frequency: "frequent" as const, spooky: false, pool };
+const args = { title: "Song", songMap: songMap(), durationSec: 200, fromSec: 0, frequency: "frequent" as const, spooky: false, pool, random: () => 0.5 };
 
 describe("buildFxPlan", () => {
   it("builds the candidates for the DJ and the effects each would become", () => {

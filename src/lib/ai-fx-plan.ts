@@ -10,7 +10,7 @@
  * when there is no key, the call fails, or the client times out waiting. Same shape and never-throws contract as
  * lib/ai-sync.ts, lib/ai-fx.ts and lib/ai-dj.ts.
  */
-import { FX_MAX_PER_SONG, FX_SPACING_SEC, type FxCueKind, type FxRole } from "@/lib/fxCues";
+import { FEATURED_FX_RANK_BONUS, FX_MAX_PER_SONG, FX_SPACING_SEC, isFeaturedFx, type FxCueKind, type FxRole } from "@/lib/fxCues";
 import { askClaudeForJson } from "@/lib/anthropicJson";
 
 export type FxPlanFrequency = "occasional" | "frequent";
@@ -182,11 +182,16 @@ export function applyFxPicks(input: FxPlanInput, pickIds: readonly string[]): Fx
   return kept.sort((a, b) => a.startSec - b.startSec);
 }
 
+/** A candidate's score, with the small lift a featured sound gets so it is not the first dropped when spacing or the cap binds. */
+function strengthOf(c: Pick<FxPlanCandidate, "score" | "fxName">): number {
+  return c.score * (isFeaturedFx({ name: c.fxName }) ? FEATURED_FX_RANK_BONUS : 1);
+}
+
 /** The engineer's own pick when the DJ can't be asked: its strongest candidates that fit the rules, as the DJ would be asked to choose. */
 export function fxPlanLocally(input: FxPlanInput): FxPlanReview {
   const byStrength = [...input.candidates]
     .filter((c) => !(c.vocalOverlap > 0.5 && c.cueKind !== "drop"))
-    .sort((a, b) => b.score - a.score)
+    .sort((a, b) => strengthOf(b) - strengthOf(a))
     .map((c) => c.id);
   const chosen = applyFxPicks(input, byStrength);
   return {

@@ -303,6 +303,51 @@ export const FX_MAX_PER_SONG: Record<AmbienceFrequency, number> = { off: 0, occa
 const SAME_MOMENT_BARS = 2;
 /** How many near-best sounds a cue chooses among, so the same riser doesn't answer every build. */
 const TIE_BREAK_CANDIDATES = 3;
+/**
+ * Sounds that fit a moment equally well (a dozen one-shots can all score the same at a drop) are put in a random order before the best few are kept. Without it the library's
+ * own order decided: the same three always won and a sound added later (the newest upload) was never even a candidate.
+ */
+const TIE_JITTER = 0.02;
+/**
+ * Sounds the listener wants to hear a little more often (matched on the sound's name, any case). For a moment one fits, it is added to the candidates this often when it did not
+ * already rank among them. It still has to fit (no riser's job done by a one-shot) and keeps its own score, so it takes its turn rather than winning every time.
+ */
+export const FEATURED_FX_NAMES = ["fahhhhh"];
+export const FEATURED_FX_CHANCE = 0.25;
+/** A tag that marks any sound as featured too, so a rename in the library does not switch the boost off. */
+export const FEATURED_FX_TAG = "featured";
+/**
+ * A featured sound that was chosen keeps a little more weight when the plan is trimmed to the spacing and the cap (and when the engineer picks for the DJ), so it is not the first to be
+ * dropped just because it scored lower than the ordinary sound next to it.
+ */
+export const FEATURED_FX_RANK_BONUS = 1.15;
+
+/** A name for comparing: lower case, no file extension, letters and digits only ("Fahhhhh!", "fahhhhh (2).wav" and "FAHHHHH" are the same). */
+function plainName(name: string): string {
+  return name
+    .toLowerCase()
+    .replace(/\.(wav|mp3|m4a|aac|ogg|flac)$/, "")
+    .replace(/\(\d+\)\s*$/, "")
+    .replace(/[^a-z0-9]/g, "");
+}
+
+export function isFeaturedFx(fx: { name: string; tags?: readonly string[] }): boolean {
+  if (fx.tags?.some((t) => t.trim().toLowerCase() === FEATURED_FX_TAG)) return true;
+  const plain = plainName(fx.name);
+  return FEATURED_FX_NAMES.some((n) => plainName(n) === plain);
+}
+
+/** A small deterministic random stream from one roll (mulberry32): the tie-break draws once per cue from the caller's dice, not once per sound. */
+function seededRandom(seed: number): () => number {
+  let a = Math.floor(seed * 4294967296) >>> 0;
+  return () => {
+    a = (a + 0x6d2b79f5) >>> 0;
+    let t = a;
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
 
 export interface ProposeFxInput {
   cues: FxCue[];
@@ -321,9 +366,12 @@ export function proposeFx({ cues, pool, songMap, frequency, recentFxIds = [], ra
   const map = songMap;
   const bar = barSec(map);
 
+  const featuredIds = new Set(pool.filter(isFeaturedFx).map((fx) => fx.id));
+  const poolOrder = new Map(pool.map((fx, i) => [fx.id, i]));
   const perCue: FxProposal[] = [];
   for (const cue of cues) {
-    const fits = pool
+    const jitter = seededRandom(random());
+    const ranked = pool
       .map((fx) => {
         const proposal = fitFxToCue(fx, cue, map);
         if (!proposal) return null;
@@ -333,9 +381,16 @@ export function proposeFx({ cues, pool, songMap, frequency, recentFxIds = [], ra
         return { ...proposal, score: proposal.score * staleness };
       })
       .filter((p): p is FxProposal => p !== null && p.score >= MIN_FIT_SCORE)
-      .sort((a, b) => b.score - a.score)
-      .slice(0, TIE_BREAK_CANDIDATES);
+      .map((p) => ({ p, key: p.score + jitter() * TIE_JITTER }))
+      .sort((a, b) => b.key - a.key);
+    let fits = ranked.slice(0, TIE_BREAK_CANDIDATES).map((r) => r.p);
     if (fits.length === 0) continue;
+    if (!fits.some((p) => featuredIds.has(p.fxId)) && random() < FEATURED_FX_CHANCE) {
+      const featured = ranked.find((r) => featuredIds.has(r.p.fxId));
+      if (featured) fits = [...fits.slice(0, TIE_BREAK_CANDIDATES - 1), featured.p];
+    }
+    // Best first, equal scores in the library's order: the tie-break above only chose who is in, and the pick's own roll (not the tie-break's) is what alternates among them.
+    fits.sort((a, b) => b.score - a.score || (poolOrder.get(a.fxId) ?? 0) - (poolOrder.get(b.fxId) ?? 0));
     // Weighted by score squared, so a clearly better sound nearly always wins and near-equals alternate.
     const weights = fits.map((p) => p.score * p.score);
     let roll = random() * weights.reduce((sum, w) => sum + w, 0);
@@ -352,7 +407,8 @@ export function proposeFx({ cues, pool, songMap, frequency, recentFxIds = [], ra
 
   // One FX per moment, then the strongest first within the spacing and the per-song cap.
   const cueAt = new Map(cues.map((c) => [c.id, c.atSec]));
-  const byStrength = [...perCue].sort((a, b) => b.score - a.score);
+  const strength = (p: FxProposal) => p.score * (featuredIds.has(p.fxId) ? FEATURED_FX_RANK_BONUS : 1);
+  const byStrength = [...perCue].sort((a, b) => strength(b) - strength(a));
   const taken: FxProposal[] = [];
   for (const proposal of byStrength) {
     if (taken.length >= FX_MAX_PER_SONG[frequency]) break;

@@ -1,9 +1,11 @@
 import { describe, expect, it } from "vitest";
 import {
+  FEATURED_FX_NAMES,
   FX_END_GUARD_SEC,
   findFxCues,
   fitFxToCue,
   fxRoleOf,
+  isFeaturedFx,
   placeFx,
   proposeFx,
   vocalOverlap,
@@ -359,5 +361,85 @@ describe("proposeFx", () => {
     const lopsided = [fx({ name: "Riser A", durationSec: 16 }), fx({ name: "Riser B", durationSec: 2 })];
     const strong = (value: number) => proposeFx({ cues: riserCues, pool: lopsided, songMap: map, frequency: "frequent", random: () => value })[0].fxId;
     expect(strong(0)).toBe("Riser A");
+  });
+});
+
+describe("which of many equally good sounds is heard", () => {
+  const map = songMap();
+  const dropCues = find().filter((c) => c.kind === "drop");
+  // A dozen one-shots that all fit a drop equally well: only the order they are listed in used to tell them apart.
+  const hits = Array.from({ length: 10 }, (_, i) => fx({ id: `hit-${i}`, name: `Hit ${i}`, durationSec: 1 }));
+  const fah = fx({ id: "fah", name: "fahhhhh", durationSec: 1.9 });
+  const lcg = (seed: number) => () => {
+    seed = (seed * 1664525 + 1013904223) % 4294967296;
+    return seed / 4294967296;
+  };
+  /** How many of `runs` songs have `fxId` among the proposals. */
+  const songsWith = (pool: FxSound[], fxId: string, runs = 600) => {
+    let n = 0;
+    for (let i = 0; i < runs; i++) {
+      const random = lcg(i + 1);
+      if (proposeFx({ cues: dropCues, pool, songMap: map, frequency: "frequent", random }).some((p) => p.fxId === fxId)) n++;
+    }
+    return n;
+  };
+
+  it("a sound listed last among equals is not shut out any more", () => {
+    const pool = [...hits, fx({ id: "last", name: "Hit last", durationSec: 1 })];
+    expect(songsWith(pool, "last")).toBeGreaterThan(0);
+    expect(songsWith(pool, "hit-0")).toBeGreaterThan(0);
+  });
+
+  it("the choice follows the dice: the same roll gives the same sounds, a different roll gives different ones", () => {
+    const pick = (roll: number) => proposeFx({ cues: dropCues, pool: hits, songMap: map, frequency: "frequent", random: () => roll }).map((p) => p.fxId);
+    expect(pick(0.1)).toEqual(pick(0.1));
+    expect(pick(0.1)).not.toEqual(pick(0.9));
+  });
+
+  it("uses the caller's dice once per moment, not once per sound", () => {
+    let draws = 0;
+    const random = () => {
+      draws++;
+      return 0.5;
+    };
+    proposeFx({ cues: dropCues, pool: hits, songMap: map, frequency: "frequent", random });
+    // per cue: one roll for the tie-break order, at most one for the featured chance, one for the pick
+    expect(draws).toBeLessThanOrEqual(dropCues.length * 3);
+  });
+
+  it("a featured sound is recognised by name in any form, or by a 'featured' tag", () => {
+    expect(isFeaturedFx({ name: "Fahhhhh!" })).toBe(true);
+    expect(isFeaturedFx({ name: "fahhhhh (2).wav" })).toBe(true);
+    expect(isFeaturedFx({ name: "Some other sound", tags: ["Featured"] })).toBe(true);
+    expect(isFeaturedFx({ name: "Some other sound", tags: ["boom"] })).toBe(false);
+  });
+
+  it("a sound tagged featured is proposed on a drop like the named one", () => {
+    const tagged = fx({ id: "tagged", name: "Something else", durationSec: 1.9, tags: ["featured"] });
+    expect(songsWith([...hits, tagged], "tagged")).toBeGreaterThan(songsWith([...hits, fx({ id: "plain", name: "plain one", durationSec: 1.9 })], "plain") * 1.3);
+  });
+
+  it("a featured sound is heard more often than the equally good sounds around it, but not every time", () => {
+    const withFeatured = [...hits, fah];
+    const plain = [...hits, fx({ id: "plain", name: "plain one", durationSec: 1.9 })];
+    const featured = songsWith(withFeatured, "fah");
+    const ordinary = songsWith(plain, "plain");
+    expect(isFeaturedFx(fah)).toBe(true);
+    expect(isFeaturedFx(hits[0])).toBe(false);
+    expect(featured).toBeGreaterThan(ordinary * 1.3);
+    expect(featured).toBeLessThan(600 * 0.7);
+  });
+
+  it("a featured sound still has to fit the moment: a build-up wants a riser, not a one-shot", () => {
+    const buildCues = find().filter((c) => c.kind === "build");
+    for (let i = 0; i < 100; i++) {
+      const proposals = proposeFx({ cues: buildCues, pool: [fah, fx({ id: "riser", name: "Riser", durationSec: 8 })], songMap: map, frequency: "frequent", random: lcg(i + 1) });
+      expect(proposals.every((p) => p.fxId !== "fah")).toBe(true);
+    }
+  });
+
+  it("is matched on the name in any case, with stray spaces", () => {
+    expect(isFeaturedFx({ name: "  FAHHHHH " })).toBe(true);
+    expect(FEATURED_FX_NAMES).toContain("fahhhhh");
   });
 });
