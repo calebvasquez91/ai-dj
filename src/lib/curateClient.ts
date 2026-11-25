@@ -1,6 +1,6 @@
 /**
- * The app's side of "Create with DJ": whether the sheet is open, and the one call to the server that turns a request into a
- * previewed playlist. Nothing is saved until the person saves it (CreateWithDjSheet.tsx makes it a normal playlist).
+ * The app's side of "Vibe Code": whether the sheet is open, and the one call to the server that turns a request into a
+ * previewed playlist. Nothing is saved until the person saves it (VibeCodeSheet.tsx makes it a normal playlist).
  */
 import { create } from "zustand";
 import type { CurationPreview } from "@/lib/curate/curate";
@@ -26,16 +26,16 @@ export async function requestCuration(input: CurateInput): Promise<CurateResult>
   try {
     res = await fetch("/api/ai/curate", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ ...input, genreFlow: GENRE_TRANSITIONS_ENABLED && useGenreTransitions.getState().settings.enabled }) });
   } catch {
-    throw new Error("Couldn't reach the DJ. Check your connection and try again.");
+    throw new Error("Couldn't reach Vibe Code. Check your connection and try again.");
   }
   const body = (await res.json().catch(() => null)) as (CurateResult & { error?: string }) | null;
-  if (!res.ok || !body || !("kind" in body)) throw new Error((body as { error?: string } | null)?.error ?? `The DJ couldn't build that (error ${res.status}).`);
+  if (!res.ok || !body || !("kind" in body)) throw new Error((body as { error?: string } | null)?.error ?? `Vibe Code couldn't build that (error ${res.status}).`);
   return body;
 }
 
 interface CurateUi {
   open: boolean;
-  /** Starts the sheet with this request filled in (the example chips and "Create with DJ" with no text pass none). */
+  /** Starts the sheet with this request filled in (the example chips and "Vibe Code" with no text pass none). */
   initialRequest: string;
   show: (initialRequest?: string) => void;
   close: () => void;

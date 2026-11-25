@@ -1,4 +1,4 @@
-// "Create with DJ": a playlist request in words becomes a previewed playlist from the person's own library. The filtering,
+// "Vibe Code": a playlist request in words becomes a previewed playlist from the person's own library. The filtering,
 // scoring and energy plan happen here, on local data (src/lib/curate); Claude only reads the request and refines the order
 // and description, and anything it says is checked. Nothing is saved: the person previews it, then saves it as a normal
 // playlist from the app.
