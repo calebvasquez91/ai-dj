@@ -193,3 +193,61 @@ describe("Discover suggestions", () => {
     expect(fetcher).toHaveBeenCalledTimes(1);
   });
 });
+
+describe("suggestions from the owner's song list", () => {
+  const rnbLibrary = Array.from({ length: 10 }, (_, i) => rnb(`list-rnb${i}`, { title: `Mine ${i}`, artist: "Someone" }));
+  const listRow = (id: string, title: string, artist: string, over: Record<string, unknown> = {}) => ({
+    id,
+    playlist: "Workouts",
+    title,
+    artist,
+    moods: [] as string[],
+    year: 1995,
+    energy: 7,
+    genre: "R&B",
+    subGenre: "",
+    bpm: null,
+    camelot: null,
+    explicit: null,
+    durationSec: null,
+    ...over,
+  });
+
+  it("adds songs from the list that fit and are not uploaded, and leaves out the ones that are", async () => {
+    const rows = [listRow("L1", "Wanted Song", "Wanted Artist"), listRow("L2", "Mine 3", "Someone"), listRow("L3", "Rock Song", "Rocker", { genre: "Rock" })];
+    const r = await runCuration({ request: "90s R&B for a workout" }, deps(rnbLibrary, { loadSongList: async () => rows }));
+    expect(r.kind).toBe("preview");
+    if (r.kind !== "preview") return;
+    const titles = (r.fromList ?? []).map((s) => s.title);
+    expect(titles).toContain("Wanted Song");
+    expect(titles).not.toContain("Mine 3");
+    expect(titles).not.toContain("Rock Song");
+  });
+
+  it("has no list suggestions at all when the person is not given the list", async () => {
+    const r = await runCuration({ request: "90s R&B for a workout" }, deps(rnbLibrary));
+    expect(r.kind === "preview" && "fromList" in r).toBe(false);
+  });
+
+  it("is still a normal preview when the list cannot be read or is empty", async () => {
+    const failing = await runCuration({ request: "90s R&B for a workout" }, deps(rnbLibrary, { loadSongList: async () => Promise.reject(new Error("no table")) }));
+    const empty = await runCuration({ request: "90s R&B for a workout" }, deps(rnbLibrary, { loadSongList: async () => [] }));
+    for (const r of [failing, empty]) {
+      expect(r.kind).toBe("preview");
+      expect(r.kind === "preview" && r.preview.tracks.length).toBeGreaterThan(0);
+      expect(r.kind === "preview" && "fromList" in r).toBe(false);
+    }
+  });
+});
+
+describe("a failure in the song list suggestions never stops the playlist", () => {
+  const rnbLibrary = Array.from({ length: 10 }, (_, i) => rnb(`fail-rnb${i}`, { title: `Mine ${i}`, artist: "Someone" }));
+
+  it("still returns the playlist when the list's own rows break the matching or scoring", async () => {
+    const broken = [{ id: "X", playlist: "Workouts", title: null, artist: null, moods: [], year: null, energy: null, genre: "R&B", subGenre: "", bpm: null, camelot: null, explicit: null, durationSec: null }];
+    const r = await runCuration({ request: "90s R&B for a workout" }, deps(rnbLibrary, { loadSongList: async () => broken as never }));
+    expect(r.kind).toBe("preview");
+    expect(r.kind === "preview" && r.preview.tracks.length).toBeGreaterThan(0);
+    expect(r.kind === "preview" && "fromList" in r).toBe(false);
+  });
+});

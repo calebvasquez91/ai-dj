@@ -16,6 +16,8 @@ import { discoverSuggestions } from "@/lib/curate/discover";
 import { parseRequestWithLlm } from "@/lib/curate/llmSpec";
 import { refineWithClaude } from "@/lib/curate/llmRefine";
 import { runCuration, type CurateRequestBody } from "@/lib/curate/run";
+import { songListLoaderFor } from "@/lib/songListAccess";
+import { loadSongListRows } from "@/lib/songListStore";
 import { meanEnergy } from "@/lib/track-sequencing";
 import type { Track } from "@/types/music";
 
@@ -63,6 +65,9 @@ async function handlePOST(request: Request) {
     },
 
     refine: (text, preview) => refineWithClaude(text, preview),
+
+    // The owner's own song list: suggestions from it are for the admin account only.
+    loadSongList: songListLoaderFor(userId, loadSongListRows),
 
     discover: (seeds, libraryArtists) =>
       discoverSuggestions(seeds, libraryArtists, {

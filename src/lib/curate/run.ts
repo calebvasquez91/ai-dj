@@ -10,6 +10,8 @@ import { finishCuration, refineOrder, selectForCuration, type CurationPreview } 
 import { GENRE_TRANSITIONS_ENABLED } from "@/lib/featureFlags";
 import { GENRE_FLOW_WEIGHT } from "@/lib/genreTransitions";
 import type { DiscoverSuggestion } from "@/lib/curate/discover";
+import type { LibraryRow } from "@/lib/djLibrary";
+import { dedupeSongs, ownedSongKeys, suggestFromList, type ListSuggestion } from "@/lib/songList";
 import { parseRequestLocally, validateSpec, type CurationSpec, type SpecResult } from "@/lib/curate/spec";
 import type { Track } from "@/types/music";
 
@@ -34,11 +36,13 @@ export interface CurateDeps {
   loudnessOf: (trackIds: string[]) => Promise<Map<string, number | null>>;
   refine: (request: string, preview: CurationPreview) => Promise<unknown | null>;
   discover: (seeds: string[], libraryArtists: string[]) => Promise<DiscoverSuggestion[]>;
+  /** The owner's song list, when this person may see suggestions from it (the route passes it for the admin only). Absent: no list suggestions. */
+  loadSongList?: () => Promise<LibraryRow[]>;
 }
 
 export type CurateResponse =
   | { kind: "clarification"; question: string; notes: string[] }
-  | { kind: "preview"; preview: CurationPreview; discover: DiscoverSuggestion[]; usedModel: { spec: boolean; refine: boolean } }
+  | { kind: "preview"; preview: CurationPreview; discover: DiscoverSuggestion[]; /** Songs from the owner's list that fit and are not uploaded; absent when this person has no list. */ fromList?: ListSuggestion[]; usedModel: { spec: boolean; refine: boolean } }
   | { kind: "error"; status: number; error: string };
 
 export async function runCuration(body: CurateRequestBody, deps: CurateDeps): Promise<CurateResponse> {
@@ -94,5 +98,18 @@ export async function runCuration(body: CurateRequestBody, deps: CurateDeps): Pr
     const artists = [...new Set(preview.tracks.map((t) => t.artist.trim()).filter(Boolean))];
     discover = await deps.discover(artists, tracks.map((t) => t.artist)).catch(() => []);
   }
-  return { kind: "preview", preview, discover, usedModel: { spec: usedModelForSpec, refine: refined } };
+  // The list suggestions are an extra: whatever goes wrong with them (the loader, the matching, the scoring) leaves them out and never stops the playlist.
+  let fromList: ListSuggestion[] | undefined;
+  if (deps.loadSongList) {
+    try {
+      const listRows = await deps.loadSongList();
+      if (listRows.length > 0) {
+        const songs = dedupeSongs(listRows);
+        fromList = suggestFromList({ spec: preview.spec, songs, owned: ownedSongKeys(listRows, songs, tracks), arc: preview.arc, seed });
+      }
+    } catch (err) {
+      console.error("Vibe Code: song list suggestions left out", err instanceof Error ? err.message : err);
+    }
+  }
+  return { kind: "preview", preview, discover, ...(fromList ? { fromList } : {}), usedModel: { spec: usedModelForSpec, refine: refined } };
 }

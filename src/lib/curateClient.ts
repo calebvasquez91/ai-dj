@@ -5,13 +5,14 @@
 import { create } from "zustand";
 import type { CurationPreview } from "@/lib/curate/curate";
 import type { DiscoverSuggestion } from "@/lib/curate/discover";
+import type { ListSuggestion } from "@/lib/songList";
 import type { CurationSpec } from "@/lib/curate/spec";
 import { GENRE_TRANSITIONS_ENABLED } from "@/lib/featureFlags";
 import { useGenreTransitions } from "@/lib/genreTransitionStore";
 
 export type CurateResult =
   | { kind: "clarification"; question: string; notes: string[] }
-  | { kind: "preview"; preview: CurationPreview; discover: DiscoverSuggestion[]; usedModel: { spec: boolean; refine: boolean } };
+  | { kind: "preview"; preview: CurationPreview; discover: DiscoverSuggestion[]; fromList?: ListSuggestion[]; usedModel: { spec: boolean; refine: boolean } };
 
 export interface CurateInput {
   request?: string;
