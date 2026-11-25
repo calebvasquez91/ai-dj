@@ -49,6 +49,7 @@ import { withTimeout } from "@/lib/withTimeout";
 import { voiceCutoffSec, voiceMapFromStem } from "@/lib/voiceMap";
 import { DJ_EQ_ENABLED, GENRE_TRANSITIONS_ENABLED, SCRATCH_ENABLED, STUTTER_ENABLED, SONG_SYNC_ENABLED, STEM_FEATURES_ENABLED, VOCAL_MASHUP_ENABLED } from "@/lib/featureFlags";
 import { genrePlanSkipsSongSync } from "@/lib/genrePlanApply";
+import { ALIGNED_MAX_HOLD_MS, incomingIsLoading, incomingIsReady, MAX_INCOMING_HOLD_MS, NATURAL_END_HOLD_LEAD_SEC, needsEntrySeek, shouldHoldForIncoming, shouldPreloadNext, type IncomingState } from "@/lib/nextTrackPreload";
 import { playbackUrl } from "@/lib/instrumentalMode";
 import { runDjEqTick } from "@/lib/djEq";
 import { manualStutter, planStutter, scheduleStutter, STUTTER_MIN_DECK_LEVEL, type StutterMove } from "@/lib/stutter";
@@ -460,6 +461,10 @@ export function DualDeckStage() {
     decks: Record<DeckId, DeckNodes>;
   } | null>(null);
   const loadedTrackId = useRef<Record<DeckId, string | null>>({ A: null, B: null });
+  // The next song, loaded into the idle deck ahead of its transition (preloadNextTrack), so the transition finds it ready instead of starting to fetch it.
+  const preloadedRef = useRef<{ deckId: DeckId; trackId: string; url: string } | null>(null);
+  // When an automatic transition began waiting for that preloaded song to be ready (shouldHoldForIncoming), ms; null when it is not waiting.
+  const incomingHoldSinceRef = useRef<number | null>(null);
   const transitionRef = useRef<ActiveTransition | null>(null);
   // Tracks the last mid-track ambience trigger per-track (reset whenever the
   // active track changes) so shouldTriggerAmbience() can enforce a cooldown.
@@ -2007,6 +2012,105 @@ export function DualDeckStage() {
       return { source, filter, gain };
     }
 
+    /**
+     * Puts a song on the incoming deck. If preloadNextTrack already loaded exactly this song on exactly this deck, the deck is left alone (setting `src` again would start
+     * the download over and throw the preload away); otherwise it is loaded now, as before.
+     */
+    function attachIncomingSource(el: HTMLAudioElement, deckId: DeckId, track: { id: string; sourceUrl: string }) {
+      const url = playUrl(track);
+      const pre = preloadedRef.current;
+      const preloaded = pre !== null && pre.deckId === deckId && pre.trackId === track.id && pre.url === url && el.getAttribute("src") === url;
+      if (!preloaded) el.src = url;
+      preloadedRef.current = null;
+      incomingHoldSinceRef.current = null;
+      loadedTrackId.current[deckId] = track.id;
+    }
+
+    /**
+     * Loads the next song into the idle deck while the playing one is in its last minute and a half, silent and paused. The transition then starts with it already
+     * downloaded and seekable, instead of fetching it while the fade runs (a late start, a dip, a stumble or a jump a moment after the transition began).
+     */
+    function preloadNextTrack() {
+      if (
+        transitionRef.current || mashupRef.current || mashupStartingRef.current || songSyncRef.current || songSyncStartingRef.current || tempoRampRef.current ||
+        tempoRampStartingRef.current || loopRef.current || backspinRef.current || reverseRef.current || vocalMashupPrepRef.current
+      ) return;
+      const state = useStore.getState();
+      const track = state.currentTrack;
+      const nextTrack = state.queue[0];
+      const activeId = activeDeckRef.current;
+      const idleId: DeckId = activeId === "A" ? "B" : "A";
+      const idleEl = deckEl(idleId);
+      const nextIsPreloadable = !!track && !!nextTrack && track.source === "local" && nextTrack.source === "local" && nextTrack.id !== track.id;
+      // The queue changed under a preload (the song was removed, or the next one is not a local file): drop what is loaded rather than keep it buffered for nothing.
+      if (preloadedRef.current && idleEl && (!nextIsPreloadable || nextTrack?.id !== preloadedRef.current.trackId)) {
+        idleEl.pause();
+        idleEl.removeAttribute("src");
+        idleEl.load();
+        preloadedRef.current = null;
+        incomingHoldSinceRef.current = null;
+      }
+      if (!state.isPlaying || !track || !nextTrack || !nextIsPreloadable) return;
+      const activeEl = deckEl(activeId);
+      if (!activeEl || !idleEl || !Number.isFinite(activeEl.duration) || activeEl.duration <= 0) return;
+      if (!shouldPreloadNext(activeEl.duration - activeEl.currentTime, activeEl.currentTime)) return;
+      const url = playUrl(nextTrack);
+      const pre = preloadedRef.current;
+      if (pre && pre.deckId === idleId && pre.trackId === nextTrack.id && pre.url === url && idleEl.getAttribute("src") === url) return;
+      idleEl.pause();
+      idleEl.src = url;
+      idleEl.load();
+      preloadedRef.current = { deckId: idleId, trackId: nextTrack.id, url };
+      incomingHoldSinceRef.current = null;
+    }
+
+    /** What the incoming deck looks like right now for the preloaded song (null when the preloaded song is not the one about to be played, or is not on the deck). */
+    function incomingStateFor(nextTrack: { id: string }, entryOffsetSec: number): { el: HTMLAudioElement; state: IncomingState } | null {
+      const pre = preloadedRef.current;
+      const toDeckId: DeckId = activeDeckRef.current === "A" ? "B" : "A";
+      const toEl = deckEl(toDeckId);
+      if (!pre || pre.trackId !== nextTrack.id || pre.deckId !== toDeckId || !toEl || toEl.getAttribute("src") !== pre.url) return null;
+      const buffered: { start: number; end: number }[] = [];
+      for (let i = 0; i < toEl.buffered.length; i++) buffered.push({ start: toEl.buffered.start(i), end: toEl.buffered.end(i) });
+      return { el: toEl, state: { readyState: toEl.readyState, networkState: toEl.networkState, buffered, durationSec: toEl.duration, entryOffsetSec } };
+    }
+
+    /**
+     * True when the preloaded incoming song is being fetched but is not yet ready to start from its entry point. A start at the playing song's natural end begins earlier
+     * by NATURAL_END_HOLD_LEAD_SEC in that case, so there is room to wait (at the usual moment there is none).
+     */
+    function incomingPending(nextTrack: { id: string }, entryOffsetSec: number): boolean {
+      const inc = incomingStateFor(nextTrack, entryOffsetSec);
+      return !!inc && !incomingIsReady(inc.state) && incomingIsLoading(inc.state);
+    }
+
+    /**
+     * True when an automatic transition should wait a moment longer: the preloaded incoming song is being fetched but is not ready to start from its entry point, and there is
+     * still room to wait. If the entry point is not buffered the deck is moved there now, so the browser fetches it there instead of at the transition's start.
+     */
+    function holdForIncoming(nextTrack: { id: string }, windowSec: number, remainingSec: number, entryOffsetSec: number, maxHoldMs: number = MAX_INCOMING_HOLD_MS): boolean {
+      const inc = incomingStateFor(nextTrack, entryOffsetSec);
+      if (!inc) {
+        incomingHoldSinceRef.current = null;
+        return false;
+      }
+      const ready = incomingIsReady(inc.state);
+      if (ready) {
+        incomingHoldSinceRef.current = null;
+        return false;
+      }
+      if (needsEntrySeek(inc.state, inc.el.currentTime)) {
+        try {
+          inc.el.currentTime = entryOffsetSec;
+        } catch {
+          /* the deck is not seekable yet: the next tick tries again */
+        }
+      }
+      const now = performance.now();
+      if (incomingHoldSinceRef.current == null) incomingHoldSinceRef.current = now;
+      return shouldHoldForIncoming({ ready, loading: incomingIsLoading(inc.state), remainingSec, windowSec, heldMs: now - incomingHoldSinceRef.current, maxHoldMs });
+    }
+
     function startTransition(nextTrack: LocalTrack, plan: TransitionPlan) {
       if (transitionRef.current) return;
       const ctx = audioCtxRef.current;
@@ -2036,8 +2140,7 @@ export function DualDeckStage() {
         plan.effect !== "spin-up" &&
         (plan.tempoSync || plan.category === "tempo-ramp");
 
-      loadedTrackId.current[toDeckId] = nextTrack.id;
-      toEl.src = playUrl(nextTrack);
+      attachIncomingSource(toEl, toDeckId, nextTrack);
       toEl.currentTime = plan.incomingEntryOffsetSec;
       toEl.playbackRate = plan.effect === "spin-up" ? SPIN_UP_MIN_RATE : startsTempoSynced ? plan.tempoRatioStart : 1;
       toNodes.gain.gain.setValueAtTime(0, ctx.currentTime);
@@ -2487,8 +2590,7 @@ export function DualDeckStage() {
       const idleEl = deckEl(m.toDeckId);
       const idleNodes = deckNodesRef.current[m.toDeckId];
       if (ctx && idleEl && idleNodes) {
-        loadedTrackId.current[m.toDeckId] = m.nextTrack.id;
-        idleEl.src = playUrl(m.nextTrack);
+        attachIncomingSource(idleEl, m.toDeckId, m.nextTrack);
         idleEl.currentTime = m.plan.entryOffsetSec + m.trackTimeElapsedSec;
         idleEl.playbackRate = 1;
         idleNodes.gain.gain.cancelScheduledValues(ctx.currentTime);
@@ -2981,9 +3083,8 @@ export function DualDeckStage() {
       const toEl = deckEl(s.toDeckId);
       const toNodes = deckNodesRef.current[s.toDeckId];
       if (!ctx || !toEl || !toNodes) return;
-      loadedTrackId.current[s.toDeckId] = s.nextTrack.id;
       toEl.pause();
-      toEl.src = playUrl(s.nextTrack);
+      attachIncomingSource(toEl, s.toDeckId, s.nextTrack);
       toEl.currentTime = 0;
       toEl.playbackRate = 1;
       toNodes.gain.gain.cancelScheduledValues(ctx.currentTime);
@@ -4270,12 +4371,16 @@ export function DualDeckStage() {
       if (!state.autoDjEnabled) {
         const plan = planSimpleFade(AUTO_DJ_OFF_FADE_SEC);
         const clampedWindow = Math.min(plan.windowSec, duration / 2);
-        if (duration - currentTime <= clampedWindow) {
+        const plainLeadSec = nextTrack.source === "local" && incomingPending(nextTrack, 0) ? NATURAL_END_HOLD_LEAD_SEC : 0;
+        if (duration - currentTime <= clampedWindow + plainLeadSec) {
           if (nextTrack.source !== "local") {
             fadeThenAdvance(clampedWindow);
           } else {
+            if (holdForIncoming(nextTrack, clampedWindow, duration - currentTime, 0)) return;
             startTransition(nextTrack, { ...plan, windowSec: clampedWindow });
           }
+        } else {
+          incomingHoldSinceRef.current = null;
         }
         return;
       }
@@ -4426,7 +4531,9 @@ export function DualDeckStage() {
       // Double Drop and Breakdown Mixing are gated behind MIN_ACTIVE_PLAY_SEC
       // (a floor, not a ceiling) — they're the two *opportunistic* triggers
       // that could otherwise fire well before a track's had any real airtime.
-      const nearNaturalEnd = duration - currentTime <= clampedWindow;
+      // A song that is still being fetched moves the natural-end start earlier by the hold's room (see NATURAL_END_HOLD_LEAD_SEC); a ready one starts at the usual moment.
+      const naturalEndLeadSec = nextTrack.source === "local" && incomingPending(nextTrack, plan.incomingEntryOffsetSec) ? NATURAL_END_HOLD_LEAD_SEC : 0;
+      const nearNaturalEnd = duration - currentTime <= clampedWindow + naturalEndLeadSec;
       const pastActiveCap = currentTime >= MAX_ACTIVE_PLAY_SEC - clampedWindow;
       const voiceCutoffAtSec =
         STEM_FEATURES_ENABLED && state.voiceCut.enabled ? voiceCutoffSec(state.trackVoiceMaps[track.id], duration) : null;
@@ -4493,9 +4600,16 @@ export function DualDeckStage() {
           tempoRampCompletedPairRef.current === pairKey
             ? { ...plan, windowSec: clampedWindow, tempoSync: true, tempoRatioStart: 1 }
             : { ...plan, windowSec: clampedWindow };
+        // The next song should have been loaded ahead (preloadNextTrack): if the browser is still fetching it, wait a moment (while there is room) rather than fade into silence.
+        // A start timed to the playing song's drop or breakdown (and nothing else) waits far less: a late start moves the two songs' drops apart.
+        const alignedOnly = (dropAligned || breakdownOpportunity) && !nearNaturalEnd && !pastActiveCap && !voicesDone;
+        if (holdForIncoming(nextTrack, clampedWindow, duration - currentTime, finalPlan.incomingEntryOffsetSec, alignedOnly ? ALIGNED_MAX_HOLD_MS : MAX_INCOMING_HOLD_MS)) return;
         applyLearningNudge(track, nextTrack, state, currentTime, finalPlan);
         startTransition(nextTrack, finalPlan);
         tempoRampCompletedPairRef.current = null;
+      } else {
+        // No trigger applies (any wait that began has ended without a start): the next wait gets its full time.
+        incomingHoldSinceRef.current = null;
       }
     }
 
@@ -4632,6 +4746,7 @@ export function DualDeckStage() {
                 : activeEl.currentTime
           );
       }
+      preloadNextTrack();
       tryAutoTransition();
       tryAmbience();
       trySpookyFxMoment();
@@ -4898,6 +5013,8 @@ export function DualDeckStage() {
       idleEl.removeAttribute("src");
       idleEl.load();
     }
+    preloadedRef.current = null;
+    incomingHoldSinceRef.current = null;
     resetDeckNodes(idleId, 0);
     loadedTrackId.current[idleId] = null;
 
