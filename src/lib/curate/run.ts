@@ -108,7 +108,7 @@ export async function runCuration(body: CurateRequestBody, deps: CurateDeps): Pr
         fromList = suggestFromList({ spec: preview.spec, songs, owned: ownedSongKeys(listRows, songs, tracks), arc: preview.arc, seed });
       }
     } catch (err) {
-      console.error("Vibe Code: song list suggestions left out", err instanceof Error ? err.message : err);
+      console.error("Create with DJ: song list suggestions left out", err instanceof Error ? err.message : err);
     }
   }
   return { kind: "preview", preview, discover, ...(fromList ? { fromList } : {}), usedModel: { spec: usedModelForSpec, refine: refined } };

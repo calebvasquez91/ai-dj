@@ -23,6 +23,9 @@ export interface PreviewTrack {
   genre?: string;
   /** The song's trusted Camelot key ("8A"), or null; present only when the library load provided keys. Used to keep the model's reorder from putting clashing keys together. */
   camelot?: string | null;
+  /** The song's mood words (lib/moodTags.ts) and release year, when known: shown to the model that orders the playlist, so it can use them with the energy and the key. */
+  moods?: string[];
+  year?: number;
 }
 
 /** How many neighbouring pairs in a playlist clash on key: both songs have a key and the two do not fit (same, relative or adjacent). Pairs with an unknown key do not count. */
@@ -129,7 +132,7 @@ export function finishCuration(inputs: CurationInputs, selection: Selection): Cu
   const byId = new Map(selection.chosen.map((c) => [c.track.id, c]));
   const tracks: PreviewTrack[] = order.map((o) => {
     const c = byId.get(o.id)!;
-    return { id: c.track.id, title: c.track.title, artist: c.track.artist, durationSec: c.track.durationSec, energy: o.energy, bpm: c.bpm, genre: genresOfTrack(c.track)[0]?.genre, ...(camelotOf ? { camelot: o.camelot ?? null } : {}) };
+    return { id: c.track.id, title: c.track.title, artist: c.track.artist, durationSec: c.track.durationSec, energy: o.energy, bpm: c.bpm, genre: genresOfTrack(c.track)[0]?.genre, ...(camelotOf ? { camelot: o.camelot ?? null } : {}), ...(c.track.moods?.length ? { moods: c.track.moods } : {}), ...(c.track.year != null ? { year: c.track.year } : {}) };
   });
   const runtimeSec = tracks.reduce((s, t) => s + (t.durationSec || 0), 0);
   return {

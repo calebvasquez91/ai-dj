@@ -23,14 +23,14 @@ export interface EnergyInput {
 }
 
 /** A rough energy for a genre with nothing else to go on. */
-const GENRE_PRIOR: Readonly<Record<string, number>> = {
+export const GENRE_PRIOR: Readonly<Record<string, number>> = {
   Metal: 0.9, Punk: 0.85, Electronic: 0.75, "Hip-Hop": 0.7, Latin: 0.7, Rock: 0.7, Disco: 0.7, Funk: 0.7, Afrobeats: 0.7, "Reggae/Dancehall": 0.65, Pop: 0.65, "R&B": 0.5, Soul: 0.5,
   Country: 0.5, Alternative: 0.6, World: 0.55, Gospel: 0.5, Blues: 0.4, Folk: 0.35, Jazz: 0.35, Soundtrack: 0.4, Holiday: 0.5, "Children's": 0.5, "Easy Listening": 0.2, Classical: 0.25, "Spoken Word": 0.1,
 };
 
 const clamp01 = (v: number) => Math.min(1, Math.max(0, v));
 /** Tempo as an energy: 70 BPM is slow, 180 is fast. */
-const bpmEnergy = (bpm: number) => clamp01((bpm - 70) / 110);
+export const bpmEnergy = (bpm: number) => clamp01((bpm - 70) / 110);
 
 /** 0-1 energy for each input: loudness by rank among the inputs, blended with tempo; the genre prior (or 0.5) when neither is known. */
 export function estimateEnergies(inputs: readonly EnergyInput[]): Map<string, number> {

@@ -1,6 +1,6 @@
 /**
  * The owner's own song list (data/dj-library.jsonl: one JSON object per song, with a mood list, a year and the playlist it was filed under) matched to the
- * songs that are actually uploaded, so Vibe Code has moods to work with. Pure: reading the file and the database, and the report, are in
+ * songs that are actually uploaded, so Create with DJ has moods to work with. Pure: reading the file and the database, and the report, are in
  * scripts/match-dj-library.ts.
  *
  * What it will and will not do:
