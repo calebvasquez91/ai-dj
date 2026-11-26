@@ -5,6 +5,7 @@ import { eligibleTracks, explicitStatusOf, isHalloweenTrack } from "@/lib/curate
 import { arcFit, arcTargets, estimateEnergies, orderByEnergyArc } from "@/lib/curate/energyArc";
 import { SHORTFALL_RATIO, genreFit, scoreTrack, selectTracks, shortfallOf, wantsHalloween } from "@/lib/curate/select";
 import { describeLocal, finishCuration, refineOrder, selectForCuration, titleFromSpec } from "@/lib/curate/curate";
+import { camelotCompatibility } from "@/lib/camelot";
 import type { GenreTag, GenreTagSource, Track } from "@/types/music";
 
 const tag = (genre: string, confidence = 0.8, subgenre?: string, source: GenreTagSource = "musicbrainz"): GenreTag => ({ genre, ...(subgenre ? { subgenre } : {}), source, confidence, updatedAt: 1 });
@@ -427,5 +428,40 @@ describe("curating end to end", () => {
     expect(markup.title).toBe(p.title);
     expect(markup.description).toBe(p.description);
     expect(refineOrder(p, null)).toEqual(p);
+  });
+});
+
+describe("keys in the playlist order", () => {
+  // Six equally energetic R&B songs, their keys interleaved between two far-apart groups of compatible keys (8A/8B/9A and 3A/3B/4A).
+  const keys = ["8A", "3A", "8B", "3B", "9A", "4A"];
+  const songs = keys.map((_, i) => make({ id: `k${i}`, genres: [tag("R&B", 0.85), tag("R&B", 0.8, undefined, "lastfm")], durationSec: 200, bpm: 100 } as Partial<Track>));
+  const keyOf = new Map(songs.map((s, i) => [s.id, keys[i]]));
+  const request = { spec: { genres: ["R&B"], subgenres: [], moods: [], energyArc: "steady" as const, targetLengthMinutes: 20 }, library: songs, bpmOf: bpmFrom, loudnessOf: () => null };
+  const order = (extra: object = {}) => {
+    const inputs = { ...request, ...extra };
+    return finishCuration(inputs, selectForCuration(inputs)).tracks.map((t) => t.id);
+  };
+  const clashes = (ids: string[]) => ids.slice(1).filter((id, i) => camelotCompatibility(keyOf.get(ids[i]) ?? null, keyOf.get(id) ?? null) === 0).length;
+
+  it("keeps compatible keys next to each other when the energy is the same, so the playlist clashes less", () => {
+    const without = order();
+    const withKeys = order({ camelotOf: (t: Track) => keyOf.get(t.id) ?? null });
+    expect([...withKeys].sort()).toEqual([...without].sort()); // the same songs, only the order differs
+    expect(clashes(withKeys)).toBeLessThan(clashes(without));
+    expect(clashes(withKeys)).toBeLessThanOrEqual(2);
+  });
+
+  it("ignores keys when none is known: no camelotOf, or a camelotOf that knows nothing, gives the order it always gave", () => {
+    expect(order({ camelotOf: () => null })).toEqual(order());
+  });
+
+  it("does not trade the energy arc for a key: songs whose energy sits where the arc wants it stay in that order, whatever their keys", () => {
+    // Each song's energy (from its tempo, with no loudness) is exactly the arc's target for its place, so any reshuffle for the sake of a key would cost energy.
+    const targets = arcTargets("build", songs.length);
+    const onTarget = songs.map((_, i) => make({ id: `e${i}`, genres: [tag("R&B", 0.85), tag("R&B", 0.8, undefined, "lastfm")], durationSec: 200, bpm: 70 + 110 * targets[i] } as Partial<Track>));
+    const keysFor = new Map(onTarget.map((s, i) => [s.id, keys[i]]));
+    const inputs = { ...request, library: onTarget, spec: { ...request.spec, energyArc: "build" as const }, camelotOf: (t: Track) => keysFor.get(t.id) ?? null };
+    const ids = finishCuration(inputs, selectForCuration(inputs)).tracks.map((t) => t.id);
+    expect(ids).toEqual(onTarget.map((s) => s.id));
   });
 });

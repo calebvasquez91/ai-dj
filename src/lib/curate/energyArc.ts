@@ -89,6 +89,12 @@ export interface OrderInput {
 /** How much a tempo jump between neighbours counts against a track next to its energy miss. */
 const TEMPO_WEIGHT = 0.12;
 
+/**
+ * The key weight the curator passes to orderByEnergyArc: how much a key clash between neighbours counts against a track next to its energy miss, smaller than a
+ * tempo jump so the energy arc still comes first. Both the uploaded-song playlists and the song-list suggestions use it.
+ */
+export const ARC_KEY_WEIGHT = 0.08;
+
 /** 0 for the same key, 0.5 for a relative or adjacent one, 1 for a clash; 0 when either key is unknown (nothing to prefer). */
 function keyJump(a: OrderInput | undefined, b: OrderInput | undefined): number {
   if (!a?.camelot || !b?.camelot) return 0;

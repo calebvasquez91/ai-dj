@@ -9,7 +9,7 @@
  */
 import { normalize } from "@/lib/genres";
 import { MIN_MATCH_SCORE, scoreTrack } from "@/lib/curate/select";
-import { orderByEnergyArc } from "@/lib/curate/energyArc";
+import { ARC_KEY_WEIGHT, orderByEnergyArc } from "@/lib/curate/energyArc";
 import type { EnergyArc } from "@/lib/curate/profiles";
 import type { CurationSpec } from "@/lib/curate/spec";
 import { artistKeys, buildLibraryIndex, libraryMoods, matchLibrary, titleKey, variantTokens, type LibraryRow } from "@/lib/djLibrary";
@@ -69,8 +69,6 @@ export function moodEnergyTarget(moods: readonly string[]): number | null {
   const targets = moods.map((m) => MOOD_ENERGY[m]).filter((t): t is number => t != null);
   return targets.length > 0 ? targets.reduce((s, t) => s + t, 0) / targets.length : null;
 }
-/** How much a key clash between neighbours counts against a song next to its energy miss (smaller than a tempo jump). */
-export const SUGGESTION_KEY_WEIGHT = 0.08;
 
 const first = <T>(values: readonly (T | null)[]): T | null => values.find((v): v is T => v != null) ?? null;
 
@@ -185,7 +183,7 @@ export function suggestFromList({ spec, songs, owned, arc, seed = 0, limit = MAX
     arc,
     seed,
     0,
-    SUGGESTION_KEY_WEIGHT
+    ARC_KEY_WEIGHT
   );
   return ordered.map((o) => {
     const { song, score } = byKey.get(o.id)!;

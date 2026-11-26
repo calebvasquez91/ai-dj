@@ -5,7 +5,7 @@
  * that passes checks (see refineOrder), so a failed or odd model answer leaves this result standing. Pure.
  */
 import { genresOfTrack } from "@/lib/genreLibrary";
-import { estimateEnergies, orderByEnergyArc } from "@/lib/curate/energyArc";
+import { ARC_KEY_WEIGHT, estimateEnergies, orderByEnergyArc } from "@/lib/curate/energyArc";
 import { PROFILES, type EnergyArc, type EventProfile } from "@/lib/curate/profiles";
 import { profileOf, selectTracks, shortfallOf, type Selection, type Shortfall } from "@/lib/curate/select";
 import type { CurationSpec } from "@/lib/curate/spec";
@@ -85,6 +85,8 @@ export interface CurationInputs {
   notes?: string[];
   library: readonly Track[];
   bpmOf: (track: Track) => number | null;
+  /** A track's Camelot key ("8A") when the app's own analysis is sure of it (lib/camelot.ts trustedCamelot), else null. Absent: no key is known, and the order ignores keys. Where both neighbours have one, a compatible key is preferred over a clash, after the energy arc and the tempo. */
+  camelotOf?: (track: Track) => string | null;
   /** The loudness (mean waveform level 0-1) of the tracks that were chosen, by id; absent ids are treated as unknown. */
   loudnessOf?: (trackId: string) => number | null;
   seed?: number;
@@ -99,11 +101,17 @@ export function selectForCuration(inputs: Pick<CurationInputs, "spec" | "library
 
 /** Orders a selection along the energy arc and builds the preview. */
 export function finishCuration(inputs: CurationInputs, selection: Selection): CurationPreview {
-  const { spec, library, bpmOf, loudnessOf, seed = 0, genreFlowWeight = 0 } = inputs;
+  const { spec, library, bpmOf, camelotOf, loudnessOf, seed = 0, genreFlowWeight = 0 } = inputs;
   const profile = profileOf(spec);
   const arc: EnergyArc = spec.energyArc ?? profile?.energyArc ?? PROFILES.open.energyArc;
   const energies = estimateEnergies(selection.chosen.map((c) => ({ id: c.track.id, loudness: loudnessOf?.(c.track.id) ?? null, bpm: c.bpm, genre: genresOfTrack(c.track)[0]?.genre })));
-  const order = orderByEnergyArc(selection.chosen.map((c) => ({ id: c.track.id, energy: energies.get(c.track.id) ?? 0.5, bpm: c.bpm, genre: genresOfTrack(c.track)[0]?.genre })), arc, seed, genreFlowWeight);
+  const order = orderByEnergyArc(
+    selection.chosen.map((c) => ({ id: c.track.id, energy: energies.get(c.track.id) ?? 0.5, bpm: c.bpm, genre: genresOfTrack(c.track)[0]?.genre, camelot: camelotOf?.(c.track) ?? null })),
+    arc,
+    seed,
+    genreFlowWeight,
+    camelotOf ? ARC_KEY_WEIGHT : 0
+  );
   const byId = new Map(selection.chosen.map((c) => [c.track.id, c]));
   const tracks: PreviewTrack[] = order.map((o) => {
     const c = byId.get(o.id)!;

@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { describe, expect, it, vi } from "vitest";
 import { runCuration, MAX_REQUEST_CHARS, type CurateDeps } from "@/lib/curate/run";
 import { discoverSuggestions, similarArtists } from "@/lib/curate/discover";
@@ -249,5 +250,34 @@ describe("a failure in the song list suggestions never stops the playlist", () =
     expect(r.kind).toBe("preview");
     expect(r.kind === "preview" && r.preview.tracks.length).toBeGreaterThan(0);
     expect(r.kind === "preview" && "fromList" in r).toBe(false);
+  });
+});
+
+describe("keys reach the playlist order", () => {
+  const library = Array.from({ length: 10 }, (_, i) => rnb(`key-rnb${i}`, { title: `Mine ${i}`, artist: "Someone" }));
+
+  it("asks the library load for each chosen song's key when it provides one, and builds the playlist as usual", async () => {
+    const asked = new Set<string>();
+    const d = deps(library, {
+      loadLibrary: async () => ({
+        tracks: library,
+        bpmOf: () => null,
+        camelotOf: (t: Track) => {
+          asked.add(t.id);
+          return "8A";
+        },
+      }),
+    });
+    const r = await runCuration({ request: "90s R&B for a workout" }, d);
+    expect(r.kind).toBe("preview");
+    expect(r.kind === "preview" && r.preview.tracks.length).toBeGreaterThan(0);
+    expect(asked.size).toBeGreaterThanOrEqual(r.kind === "preview" ? r.preview.tracks.length : 0);
+  });
+
+  it("the curate route gives it only the app's own trusted keys (never a file tag's)", () => {
+    const route = readFileSync(new URL("../../app/api/ai/curate/route.ts", import.meta.url), "utf-8").replace(/\r\n/g, "\n");
+    expect(route).toContain("trustedCamelot(r.camelotKey, r.keyConfidence)");
+    expect(route).toContain("camelotOf: (t) => camelot.get(t.id) ?? null");
+    expect(route).not.toMatch(/tagCamelotKey/);
   });
 });
