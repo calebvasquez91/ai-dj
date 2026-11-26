@@ -13,8 +13,21 @@ import { LikeButton } from "@/components/LikeButton";
 import { NowPlayingTabs } from "@/components/NowPlayingTabs";
 import { GenreBadge } from "@/components/GenreBadge";
 import { GenrePairTag } from "@/components/GenrePairTag";
+import { AudioVisualizer } from "@/components/AudioVisualizer";
+import { ThemeParticleLayer } from "@/components/ThemeParticleLayer";
+import { activeHolidayTheme } from "@/lib/holidayThemes";
 
 const PARTICLE_EMOJIS = ["🍂", "🕸️", "⚡"];
+
+/** Spooky Music's own colour cycle, used for the visualizer while it plays. */
+const SPOOKY_VISUALIZER_PALETTE = ["#ff6b00", "#8b00ff", "#00ff41", "#ff1a1a"];
+
+/** Reads the app's accent colours (plain hex in the stylesheet) for the visualizer; the page's own light or dark values apply. */
+function readAccentPalette(): string[] {
+  const css = getComputedStyle(document.documentElement);
+  const pick = (name: string, fallback: string) => css.getPropertyValue(name).trim() || fallback;
+  return [pick("--accent-teal-bright", "#7dd3fc"), pick("--accent-purple", "#a78bfa"), pick("--accent-pink", "#fb7185")];
+}
 const PARTICLE_LIFETIME_MS = 4000;
 const PARTICLE_MIN_INTERVAL_MS = 2000;
 const PARTICLE_MAX_INTERVAL_MS = 3000;
@@ -43,6 +56,15 @@ export function NowPlayingView() {
   const spooky = useStore((s) => s.activePlaylistTheme === "spooky");
   const volume = useStore((s) => s.volume);
   const setVolume = useStore((s) => s.setVolume);
+  const holiday = useStore((s) => activeHolidayTheme(s.playlists.find((p) => p.id === s.activePlaylistId)));
+
+  // The visualizer's colours: Spooky Music's cycle, a holiday theme's lights, or the app's accents (read when the panel opens, so a light or dark switch is picked up).
+  const [accentPalette, setAccentPalette] = useState<string[]>(["#7dd3fc", "#a78bfa", "#fb7185"]);
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    if (expanded) setAccentPalette(readAccentPalette());
+  }, [expanded]);
+  const visualizerPalette = spooky ? SPOOKY_VISUALIZER_PALETTE : holiday ? (holiday.lights ? [holiday.lights.low, holiday.lights.mid, holiday.lights.high] : [holiday.accent.from, holiday.accent.to]) : accentPalette;
 
   // Nothing left to show full-screen (track ended, nothing queued) — drop
   // back to whatever the user was browsing rather than leaving an empty
@@ -124,6 +146,22 @@ export function NowPlayingView() {
         {spooky && <SpookySparkles />}
       </div>
 
+      {/* The visualizer and the playlist theme's particles: background layers of this panel only. They sit at the same negative level as the backdrops above (later in
+          the order, so over them) and under every word, image and button, and they take no click or touch. They draw only while this panel is open and a song plays. */}
+      <ThemeParticleLayer />
+      <AudioVisualizer active={expanded && isPlaying && Boolean(currentTrack)} palette={visualizerPalette} />
+      {/* A soft scrim over the visualizer (still beneath all content): keeps the muted text readable where a bright line passes behind it. */}
+      <div className="pointer-events-none absolute inset-0 -z-10 bg-background/35" aria-hidden="true" />
+      {particles.length > 0 && (
+        <div className="pointer-events-none absolute inset-0 -z-10 overflow-hidden" aria-hidden="true">
+          {particles.map((p) => (
+            <span key={p.id} className="spooky-particle" style={{ left: `${p.leftPercent}%` }}>
+              {p.emoji}
+            </span>
+          ))}
+        </div>
+      )}
+
       <div className="flex items-center justify-center pt-[max(1rem,env(safe-area-inset-top))] pb-4 px-4 shrink-0">
         {spooky && (
           <span className="absolute right-[max(1rem,env(safe-area-inset-right))] text-xs font-semibold flex items-center gap-1" style={{ color: "#ff8a3d" }}>
@@ -147,16 +185,6 @@ export function NowPlayingView() {
         <div className="mx-auto flex w-full max-w-2xl flex-col items-center gap-4 pl-[max(1rem,env(safe-area-inset-left))] pr-[max(1rem,env(safe-area-inset-right))] sm:pl-[max(1.5rem,env(safe-area-inset-left))] sm:pr-[max(1.5rem,env(safe-area-inset-right))] pb-[max(1.5rem,env(safe-area-inset-bottom))]">
           <div className="relative w-[min(100%,20rem,34dvh)] aspect-square">
             <TrackThumbnailFill thumbnailUrl={currentTrack.thumbnailUrl} title={currentTrack.title} />
-            {particles.map((p) => (
-              <span
-                key={p.id}
-                className="spooky-particle"
-                style={{ left: `${p.leftPercent}%` }}
-                aria-hidden="true"
-              >
-                {p.emoji}
-              </span>
-            ))}
           </div>
 
           <div className="flex items-center gap-3 w-full max-w-md min-w-0">

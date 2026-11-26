@@ -3,16 +3,15 @@
 import { useEffect } from "react";
 import { useStore } from "@/lib/store";
 import { activeHolidayTheme } from "@/lib/holidayThemes";
-import { HolidayParticles } from "@/components/HolidayParticles";
 
 /**
- * While a playlist with a holiday theme is the one playing: tints the app's accent gradient (the play button, the progress fill), recolours the
- * ambient equalizer bars when the theme has its own lights, and runs the theme's light particle effect (a custom theme's only while a song plays). Spooky Music is never a holiday playlist (activeHolidayTheme says no for a system playlist), so its own look is
- * untouched; with no holiday playlist active this renders nothing and changes nothing.
+ * While a playlist with a holiday theme is the one playing: tints the app's accent gradient (the play button, the progress fill) and sets the theme's light colours
+ * (which the Now Playing visualizer reads). The theme's light particles are NOT drawn here any more: they are part of the Now Playing visualizer background
+ * (components/ThemeParticleLayer.tsx), so nothing is ever painted over the page's words or images. Spooky Music is never a holiday playlist (activeHolidayTheme says no
+ * for a system playlist), so its own look is untouched; with no holiday playlist active this changes nothing.
  */
 export function HolidayLayer() {
   const theme = useStore((s) => activeHolidayTheme(s.playlists.find((p) => p.id === s.activePlaylistId)));
-  const playing = useStore((s) => s.isPlaying);
 
   useEffect(() => {
     if (!theme) return;
@@ -33,5 +32,5 @@ export function HolidayLayer() {
     };
   }, [theme]);
 
-  return theme && (!theme.onlyWhilePlaying || playing) ? <HolidayParticles theme={theme} /> : null;
+  return null;
 }
