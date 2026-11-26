@@ -148,7 +148,7 @@ export function NowPlayingView() {
 
       {/* The visualizer and the playlist theme's particles: background layers of this panel only. They sit at the same negative level as the backdrops above (later in
           the order, so over them) and under every word, image and button, and they take no click or touch. They draw only while this panel is open and a song plays. */}
-      <ThemeParticleLayer />
+      <ThemeParticleLayer open={expanded} />
       <AudioVisualizer active={expanded && isPlaying && Boolean(currentTrack)} palette={visualizerPalette} />
       {/* A soft scrim over the visualizer (still beneath all content): keeps the muted text readable where a bright line passes behind it. */}
       <div className="pointer-events-none absolute inset-0 -z-10 bg-background/35" aria-hidden="true" />

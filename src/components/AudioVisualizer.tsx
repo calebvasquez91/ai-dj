@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useStore } from "@/lib/store";
 import {
   EMPTY_BEAT,
@@ -27,8 +27,8 @@ const SYMMETRY = 3;
 const POINTS = 150;
 const SPOKES = 36;
 
-/** The meters read 0-1 of the signal's RMS, which for music sits low: lift it so a loud song fills the figure. */
-const LEVEL_GAIN = 2.4;
+/** A frame is drawn when this much of the frame time has passed, less a little slack: a 60 Hz screen's frames come about 16.7 ms apart, so a strict 33.3 ms test would sometimes skip to 50 ms (20 fps). */
+const FRAME_SLACK_MS = 2;
 
 /**
  * The Now Playing visualizer: glowing ribbons that loop and weave round the centre like an iTunes visualizer, mirrored three ways, leaving fading trails, with
@@ -41,6 +41,15 @@ const LEVEL_GAIN = 2.4;
 export function AudioVisualizer({ active, palette }: { active: boolean; palette: readonly string[] }) {
   const ref = useRef<HTMLCanvasElement>(null);
   const paletteKey = palette.join(",");
+  // Follows the person's reduced-motion setting live (it can change while the page is open).
+  const [reduced, setReduced] = useState(false);
+  useEffect(() => {
+    const query = window.matchMedia("(prefers-reduced-motion: reduce)");
+    const sync = () => setReduced(query.matches);
+    sync();
+    query.addEventListener("change", sync);
+    return () => query.removeEventListener("change", sync);
+  }, []);
 
   useEffect(() => {
     const canvas = ref.current;
@@ -48,10 +57,11 @@ export function AudioVisualizer({ active, palette }: { active: boolean; palette:
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
     const colors: Rgb[] = paletteKey.split(",").map(parseHex);
-    const reduce = window.matchMedia("(prefers-reduced-motion: reduce)");
 
     let width = 0;
     let height = 0;
+    // Resizing a canvas clears it: with reduced motion nothing redraws it, so the still frame is drawn again from here.
+    let redrawStill: () => void = () => {};
     const resize = () => {
       width = canvas.clientWidth;
       height = canvas.clientHeight;
@@ -59,6 +69,7 @@ export function AudioVisualizer({ active, palette }: { active: boolean; palette:
       canvas.width = Math.max(1, Math.round(width * dpr));
       canvas.height = Math.max(1, Math.round(height * dpr));
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      redrawStill();
     };
     resize();
     const observer = new ResizeObserver(resize);
@@ -129,9 +140,12 @@ export function AudioVisualizer({ active, palette }: { active: boolean; palette:
       ctx.globalCompositeOperation = "source-over";
     };
 
-    if (reduce.matches) {
+    if (reduced) {
       // One still frame, no motion: a calm figure so the panel is not bare.
-      if (active) draw(4000, 0.4, 1);
+      if (active) {
+        redrawStill = () => draw(4000, 0.4, 1);
+        redrawStill();
+      }
       return () => observer.disconnect();
     }
     if (!active) {
@@ -147,11 +161,12 @@ export function AudioVisualizer({ active, palette }: { active: boolean; palette:
     let last = 0;
     const frame = (now: number) => {
       raf = requestAnimationFrame(frame);
-      if (now - last < 1000 / FPS) return;
+      if (now - last < 1000 / FPS - FRAME_SLACK_MS) return;
       last = now;
       if (document.visibilityState !== "visible") return;
       const meters = useStore.getState().deckMeterLevel;
-      const raw = Math.min(1, Math.max(meters.A, meters.B) * LEVEL_GAIN);
+      // The deck meters are already lifted (DualDeckStage stores min(1, rms * 2.5)): a second gain here pinned normal music at 1 and left the beat finder a flat line.
+      const raw = Math.min(1, Math.max(meters.A, meters.B));
       level = smoothLevel(level, raw);
       const stepped = stepBeat(beatState, raw, now);
       beatState = stepped.state;
@@ -163,7 +178,7 @@ export function AudioVisualizer({ active, palette }: { active: boolean; palette:
       cancelAnimationFrame(raf);
       observer.disconnect();
     };
-  }, [active, paletteKey]);
+  }, [active, paletteKey, reduced]);
 
   return <canvas ref={ref} aria-hidden="true" data-audio-visualizer="" className={`pointer-events-none absolute inset-0 -z-10 h-full w-full transition-opacity duration-700 ${active ? "opacity-80" : "opacity-0"}`} />;
 }

@@ -8,6 +8,7 @@ import { CreateWithDjSheet } from "@/components/CreateWithDjSheet";
 import { StemAutopilot } from "@/components/StemAutopilot";
 import { VoiceMapLoader } from "@/components/VoiceMapLoader";
 import { STEM_FEATURES_ENABLED, VOCAL_MASHUP_ENABLED } from "@/lib/featureFlags";
+import { MusicWaveBackground } from "@/components/MusicWaveBackground";
 import { SpookyBackdrop } from "@/components/SpookyBackdrop";
 import { Sidebar } from "@/components/Sidebar";
 import { NavRail } from "@/components/NavRail";
@@ -48,6 +49,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
       <KeyboardShortcuts />
       <BackgroundAudio />
       <SpookyBackdrop />
+      <MusicWaveBackground />
       <div className="flex flex-1 min-h-0">
         <NavRail />
         <Sidebar />

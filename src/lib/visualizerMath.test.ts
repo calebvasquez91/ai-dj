@@ -185,17 +185,30 @@ describe("the visualizer is only ever a background: nothing is painted over word
     expect(src).not.toMatch(/(?<!-)\bz-\[?\d+/); // no positive stacking level (only the negative -z-10)
   });
 
-  it("the app shell paints no page-wide wave behind or over the routes any more", () => {
+  it("the page-wide wave is Spooky Music's own: it renders nothing for any other look, and the visualizer is not in the app shell", () => {
     const layout = read("app/(app)/layout.tsx");
-    expect(layout).not.toMatch(/MusicWaveBackground/);
     expect(layout).not.toMatch(/AudioVisualizer/);
+    expect(read("components/MusicWaveBackground.tsx")).toMatch(/if \(!spooky\) return null;/);
     const holiday = read("components/HolidayLayer.tsx");
     expect(holiday).not.toMatch(/HolidayParticles/);
+    expect(holiday).not.toMatch(/--wave-bar/);
+  });
+
+  it("the visualizer takes the deck meter as it is (no second gain) and keeps a frame limiter with slack", () => {
+    const src = read("components/AudioVisualizer.tsx");
+    expect(src).not.toMatch(/LEVEL_GAIN/);
+    expect(src).toMatch(/1000 \/ FPS - FRAME_SLACK_MS/);
+    expect(src).toMatch(/addEventListener\("change"/); // follows the reduced-motion setting live
+  });
+
+  it("the theme particles run only while the Now Playing panel is open", () => {
+    expect(read("components/ThemeParticleLayer.tsx")).toMatch(/open && theme/);
+    expect(read("components/NowPlayingView.tsx")).toMatch(/<ThemeParticleLayer open=\{expanded\} \/>/);
   });
 
   it("the Now Playing panel mounts the visualizer and the theme particles as background layers, and no emoji sit over the artwork", () => {
     const src = read("components/NowPlayingView.tsx");
-    expect(src).toMatch(/<ThemeParticleLayer \/>/);
+    expect(src).toMatch(/<ThemeParticleLayer open=\{expanded\} \/>/);
     expect(src).toMatch(/<AudioVisualizer active=\{expanded && isPlaying/);
     expect(src).toMatch(/pointer-events-none absolute inset-0 -z-10 bg-background\/35/); // the readability scrim sits with the other background layers
     // the spooky emoji live in a -z-10 layer of the panel, not inside the artwork box
