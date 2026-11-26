@@ -79,8 +79,8 @@ function drawShape(ctx: CanvasRenderingContext2D, shape: ParticleShape, size: nu
 }
 
 /**
- * The light particle effect of a holiday theme: a few shapes falling, rising, drifting or bursting over the page, drawn on one canvas behind
- * the controls (it never takes a touch or a click). It is held to a small budget: none at all when the system asks for reduced motion, fewer
+ * The light particle effect of a holiday theme: a few shapes falling, rising, drifting or bursting, drawn on one canvas that fills its container and sits at the back
+ * of it, beneath every word and image (the Now Playing panel mounts it as part of the visualizer background; it never takes a touch or a click). It is held to a small budget: none at all when the system asks for reduced motion, fewer
  * on a weak device, 30 frames a second at most, and it stops while the page is hidden.
  */
 export function HolidayParticles({ theme }: { theme: HolidayTheme }) {
@@ -158,5 +158,5 @@ export function HolidayParticles({ theme }: { theme: HolidayTheme }) {
     };
   }, [theme]);
 
-  return <canvas ref={ref} aria-hidden="true" data-holiday-particles={theme.id} className="pointer-events-none fixed inset-0 z-[5] h-full w-full" />;
+  return <canvas ref={ref} aria-hidden="true" data-holiday-particles={theme.id} className="pointer-events-none absolute inset-0 -z-10 h-full w-full" />;
 }

@@ -3,8 +3,11 @@
 import { useStore } from "@/lib/store";
 
 /**
- * Ambient, decorative equalizer-bar wash pinned to the viewport bottom,
- * behind every route's content (mounted once in the (app) layout). Purely
+ * Spooky Music's ambient, decorative equalizer-bar wash pinned to the viewport
+ * bottom, behind every route's content (mounted once in the (app) layout). It
+ * renders only while Spooky Music is the active playlist theme: every other
+ * look uses the Now Playing visualizer instead (components/AudioVisualizer.tsx),
+ * but the protected Spooky look keeps its bars. Purely
  * atmospheric — the real levels live in Mixer's actual meters — so this
  * never reads track data, just whether *something* is playing.
  *
@@ -50,6 +53,7 @@ export function MusicWaveBackground() {
   // Spooky Music tints the bars orange/purple/green/red (see globals.css).
   const spooky = useStore((s) => s.activePlaylistTheme === "spooky");
 
+  if (!spooky) return null;
   return (
     <div
       className={`music-wave-bg${isPlaying ? " is-playing" : ""}${spooky ? " spooky" : ""}`}
