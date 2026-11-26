@@ -1,5 +1,5 @@
 /**
- * The owner's song list as suggestions in Vibe Code: songs the person wants but has not uploaded, that fit a request. The list has 342 rows (lib/djLibrary.ts reads
+ * The owner's song list as suggestions in Create with DJ: songs the person wants but has not uploaded, that fit a request. The list has 342 rows (lib/djLibrary.ts reads
  * them); this turns them into one entry per song, leaves out the ones that are already uploaded, scores the rest against a request with the same rules the
  * curator uses for the uploaded library (curate/select.ts scoreTrack: genre, mood, era, tempo, event profile), and puts the best in the order the playlist's energy
  * should run, preferring a small tempo step and a compatible Camelot key between neighbours when both are known. Pure.

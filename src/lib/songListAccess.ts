@@ -1,7 +1,7 @@
 /**
  * Two small rules about the owner's song list that must not be wrong, kept apart from the database code so they can be tested:
  *  - who may see suggestions from it (the admin account only: it is a personal list, and the repo and the other accounts are not the owner's), and
- *  - which database errors mean "the table is not there yet" (Vibe Code then simply shows no list section) and which are a real problem (logged, never hidden).
+ *  - which database errors mean "the table is not there yet" (Create with DJ then simply shows no list section) and which are a real problem (logged, never hidden).
  */
 import { isAdmin } from "@/lib/feedbackAdmin";
 
