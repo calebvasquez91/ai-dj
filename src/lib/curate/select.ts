@@ -79,6 +79,9 @@ export function scoreTrack(track: Track, bpm: number | null, spec: CurationSpec,
   const profile = profileOf(spec);
   const parts: { weight: number; value: number }[] = [];
   let yearUnknown = false;
+  // Whether this song's tempo already counted (a tempo the request named, or the occasion's tempo window): the energy fit then leaves the tempo out and goes by genre, so
+  // the tempo is not counted twice.
+  let tempoScored = false;
 
   const wantsGenre = spec.genres.length > 0 || spec.subgenres.length > 0;
   if (wantsGenre) {
@@ -112,16 +115,18 @@ export function scoreTrack(track: Track, bpm: number | null, spec: CurationSpec,
       const fit = bpmFit(bpm, spec.bpmRange);
       if (fit === 0) return null;
       parts.push({ weight: WEIGHTS.bpm, value: fit });
+      tempoScored = true;
     }
   } else if (profile?.bpmRange) {
     parts.push({ weight: WEIGHTS.bpm, value: bpm == null ? 0.5 : bpmFit(bpm, profile.bpmRange) });
+    if (bpm != null) tempoScored = true;
   }
 
   // A mood that implies an energy (pump up: high, rainy day: low) prefers songs whose rough energy fits: from the tempo when it is known, else the genre. A song with neither is
   // neutral, not marked down. (The song-list suggestions turn this off: they have the list's own energy and apply it themselves.)
   const energyTarget = options.useEnergy === false ? null : moodEnergyTarget(spec.moods);
   if (energyTarget != null) {
-    const rough = proxyEnergy(bpm, genresOfTrack(track)[0]?.genre);
+    const rough = proxyEnergy(tempoScored ? null : bpm, genresOfTrack(track)[0]?.genre);
     parts.push({ weight: WEIGHTS.energy, value: rough == null ? 0.5 : Math.max(0, 1 - Math.abs(rough - energyTarget) / ENERGY_FIT_SPAN) });
   }
 

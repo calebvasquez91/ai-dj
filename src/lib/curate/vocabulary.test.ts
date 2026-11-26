@@ -32,13 +32,23 @@ describe("the vocabulary itself", () => {
     }
   });
 
-  it("covers the owner's own playlists: Get You Pumped, Vibes & Wine Down, Parties & BBQ, Car Tunes, Sad & Mellow, Childhood, Lovey Dovey", () => {
-    const from = new Set(VOCABULARY.map((e) => e.from.replace(/ \(.*\)$/, "")));
-    for (const name of ["Get You Pumped", "Vibes & Wine Down", "Parties & BBQ", "Car Tunes", "Sad & Mellow", "Childhood", "Lovey Dovey"]) expect(from.has(name), name).toBe(true);
+  it("covers pumping up, an evening wind-down, parties and barbecues, driving, sad and mellow, childhood throwbacks and love songs", () => {
+    const from = new Set(VOCABULARY.map((e) => e.from));
+    for (const group of ["pump-up wording", "evening wind-down wording", "party and barbecue wording", "car and driving wording", "sad and mellow wording", "childhood and throwback wording", "love and slow-dance wording"]) expect(from.has(group), group).toBe(true);
+  });
+
+  it("names no personal playlist: the source is public", () => {
+    const all = VOCABULARY.map((e) => e.from).join(" ");
+    for (const name of ["Get You Pumped", "Wine Down", "Parties & BBQ", "Car Tunes", "Sad & Mellow", "Lovey Dovey"]) expect(all).not.toContain(name);
   });
 
   it("keeps accented letters and hyphenated words whole, with no invisible characters in the source", () => {
     expect(wordsOf("Lo-Fi caf" + String.fromCharCode(0xe9) + " R&B")).toEqual(["lo-fi", "caf" + String.fromCharCode(0xe9), "r&b"]);
+  });
+
+  it("is shown to the model whole: every phrase the local reader knows, not just the first few of each entry", () => {
+    const prompt = vocabularyPrompt();
+    for (const entry of VOCABULARY) for (const phrase of entry.phrases) expect(prompt, phrase).toContain(`"${phrase}"`);
   });
 
   it("is shown to the model as lines of wording -> moods and occasion", () => {
@@ -82,6 +92,24 @@ describe("what the local reader makes of everyday wording", () => {
     expect(high.moods).toContain("energetic");
     expect(high.profile).toBe("workout");
     expect(parse("hi-nrg classics").spec.subgenres).toContain("Hi-NRG");
+  });
+
+  it("'hi-energy' and 'hi energy' are the dance genre's spelling and are left to the genre reader; 'high energy' is the mood", () => {
+    for (const request of ["80s hi-energy", "hi energy dance"]) {
+      const spec = parse(request).spec;
+      expect(spec.subgenres, request).toContain("Hi-NRG");
+      expect(spec.moods, request).not.toContain("energetic");
+    }
+    expect(parse("high-energy").spec.moods).toContain("energetic");
+  });
+
+  it("'romantic' next to the word 'era' or 'period' in an ordinary request is still the mood; only classical words (or 'romantic era') make it a period", () => {
+    for (const request of ["romantic 80s era slow songs", "romantic songs from the disco era", "romantic motown period"]) {
+      const spec = parse(request).spec;
+      expect(spec.moods, request).toContain("romantic");
+      expect(spec.subgenres, request).not.toContain("Romantic"); // not the classical period (a genre named elsewhere in the request, like disco, is still read)
+    }
+    for (const request of ["romantic era classical", "romantic period music", "romantic piano"]) expect(parse(request).spec.moods, request).not.toContain("romantic");
   });
 
   it("'low energy' is chill, not the opposite", () => {
@@ -151,6 +179,15 @@ describe("a mood that implies an energy prefers songs that fit it", () => {
     const s = spec();
     expect(score(track(), null, s)).toBeGreaterThan(score(track("Folk"), null, s));
     expect(score(track(), null, s)).toBeLessThan(score(track("Metal"), null, s));
+  });
+
+  it("does not count a song's tempo twice: once the occasion's tempo window or a named tempo has scored it, the energy fit goes by genre", () => {
+    const workout = spec({ moods: ["workout"], profile: "workout" }); // the workout window (110-175 BPM) scores the tempo
+    expect(score(track("Metal"), 120, workout)).toBe(score(track("Metal"), 170, workout)); // both inside the window: the tempo no longer moves the energy part
+    const named = spec({ moods: ["energetic"], bpmRange: { min: 100, max: 180 } });
+    expect(score(track("Metal"), 120, named)).toBe(score(track("Metal"), 170, named));
+    // with no window and no named tempo the tempo still counts, as before
+    expect(score(track("Metal"), 170, spec({ moods: ["energetic"] }))).toBeGreaterThan(score(track("Metal"), 120, spec({ moods: ["energetic"] })));
   });
 
   it("does nothing for moods that say nothing about energy, and can be turned off", () => {
