@@ -95,10 +95,14 @@ const TEMPO_WEIGHT = 0.12;
  */
 export const ARC_KEY_WEIGHT = 0.08;
 
-/** 0 for the same key, 0.5 for a relative or adjacent one, 1 for a clash; 0 when either key is unknown (nothing to prefer). */
+/**
+ * What two neighbours' keys cost, in units of the key weight: a clash 1, the same key -0.5 and a relative or adjacent key -0.25 (a reward, so two songs whose keys fit are
+ * kept together rather than split up by an unkeyed song, which would also avoid a clash), and 0 when either key is unknown (nothing to prefer).
+ */
 function keyJump(a: OrderInput | undefined, b: OrderInput | undefined): number {
   if (!a?.camelot || !b?.camelot) return 0;
-  return 1 - camelotCompatibility(a.camelot, b.camelot) / 2;
+  const fit = camelotCompatibility(a.camelot, b.camelot);
+  return fit === 0 ? 1 : -fit / 4;
 }
 
 function tempoJump(a: OrderInput | undefined, b: OrderInput | undefined): number {
@@ -126,8 +130,10 @@ function planCost(order: readonly OrderInput[], targets: readonly number[], genr
  * tracks where that smooths the tempo (octave-aware, so 70 -> 140 is no jump) for little energy cost. O(n^2) at worst:
  * playlists are tens of tracks. A non-zero `seed` shuffles near-equal energies so "Regenerate" can give another order. A non-zero `genreWeight`
  * (genre-aware transitions on) adds a small cost for a genre jump between neighbours, so same-genre songs cluster when the energy scores are close.
- * A non-zero `keyWeight` does the same for Camelot keys (a clash between neighbours costs `keyWeight`, a relative or adjacent key half of it; nothing when either key
- * is unknown). With 0 for both (the default) the order is exactly what it was.
+ * A non-zero `keyWeight` adds a second phase for Camelot keys (a clash between neighbours costs `keyWeight`; the same key earns half of it back and a relative or adjacent
+ * key a quarter; nothing when either key is unknown): after the order above is made, extra swaps are kept where they lower the key cost and the whole plan cost, and,
+ * on a build or wind-down arc, add no step the wrong way. So the key never undoes the energy line, and with no key known, or with 0 for the key weight (the default),
+ * the order is exactly what it was.
  */
 export function orderByEnergyArc(items: readonly OrderInput[], arc: EnergyArc, seed = 0, genreWeight = 0, keyWeight = 0): OrderInput[] {
   const n = items.length;
@@ -144,17 +150,49 @@ export function orderByEnergyArc(items: readonly OrderInput[], arc: EnergyArc, s
   positionsByTarget.forEach(({ position }, rank) => {
     order[position] = byEnergy[rank].item;
   });
+  // Phase 1: the order without any key: exactly the order this function has always made (energy, tempo and, when asked, genre).
   for (let pass = 0; pass < 4; pass++) {
     let improved = false;
     for (let i = 0; i < n; i++) {
       for (let j = i + 1; j < Math.min(n, i + 4); j++) {
-        const before = planCost(order, targets, genreWeight, keyWeight);
+        const before = planCost(order, targets, genreWeight, 0);
         [order[i], order[j]] = [order[j], order[i]];
-        if (planCost(order, targets, genreWeight, keyWeight) < before - 1e-9) improved = true;
+        if (planCost(order, targets, genreWeight, 0) < before - 1e-9) improved = true;
         else [order[i], order[j]] = [order[j], order[i]];
       }
     }
     if (!improved) break;
+  }
+  // Phase 2: only when keys count. Extra swaps that the key made worthwhile: the key cost must fall and the whole plan cost (with the key) must fall, and on a rising (build)
+  // or falling (wind-down) arc the swap must not add a step the wrong way. So the key can only move songs whose energy and tempo cost allows it, never undo the energy line,
+  // and with no key known nothing happens here at all.
+  if (keyWeight > 0) {
+    const monotone = arc === "build" || arc === "wind-down";
+    const dips = () => {
+      let count = 0;
+      for (let k = 1; k < n; k++) if (arc === "build" ? order[k].energy < order[k - 1].energy - 1e-9 : order[k].energy > order[k - 1].energy + 1e-9) count++;
+      return count;
+    };
+    const keyCost = () => {
+      let cost = 0;
+      for (let k = 1; k < n; k++) cost += keyJump(order[k - 1], order[k]);
+      return cost;
+    };
+    for (let pass = 0; pass < 4; pass++) {
+      let improved = false;
+      for (let i = 0; i < n; i++) {
+        for (let j = i + 1; j < Math.min(n, i + 4); j++) {
+          const totalBefore = planCost(order, targets, genreWeight, keyWeight);
+          const keyBefore = keyCost();
+          const dipsBefore = monotone ? dips() : 0;
+          [order[i], order[j]] = [order[j], order[i]];
+          const keep = keyCost() < keyBefore - 1e-9 && planCost(order, targets, genreWeight, keyWeight) < totalBefore - 1e-9 && (!monotone || dips() <= dipsBefore);
+          if (keep) improved = true;
+          else [order[i], order[j]] = [order[j], order[i]];
+        }
+      }
+      if (!improved) break;
+    }
   }
   return order;
 }

@@ -343,7 +343,6 @@ export function mashupGainCurves(
 // than becoming its own TransitionEntry.
 // ---------------------------------------------------------------------------
 
-
 // camelotCompatibility and the key-confidence bar live in lib/camelot.ts (so the playlist curator can use them without this whole module); re-exported here for the code that imports them from here.
 export { camelotCompatibility, MIN_KEY_CONFIDENCE_FOR_SCORING };
 

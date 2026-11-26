@@ -16,7 +16,7 @@ import { discoverSuggestions } from "@/lib/curate/discover";
 import { parseRequestWithLlm } from "@/lib/curate/llmSpec";
 import { refineWithClaude } from "@/lib/curate/llmRefine";
 import { runCuration, type CurateRequestBody } from "@/lib/curate/run";
-import { trustedCamelot } from "@/lib/camelot";
+import { trustedCamelotById } from "@/lib/camelot";
 import { songListLoaderFor } from "@/lib/songListAccess";
 import { loadSongListRows } from "@/lib/songListStore";
 import { meanEnergy } from "@/lib/track-sequencing";
@@ -46,7 +46,7 @@ async function handlePOST(request: Request) {
       ]);
       const bpm = new Map(rows.map((r) => [r.id, r.bpm]));
       // The key the order prefers to keep compatible between neighbours: the app's own analysis, and only when it was sure (the same rule the mixing uses).
-      const camelot = new Map(rows.map((r) => [r.id, trustedCamelot(r.camelotKey, r.keyConfidence)]));
+      const camelot = trustedCamelotById(rows);
       const tracks: Track[] = rows.map((r) => ({ ...toTrackSummary(r, marks.get(r.id)), ...(genres.get(r.id) ?? {}) }));
       return { tracks, bpmOf: (t) => bpm.get(t.id) ?? null, camelotOf: (t) => camelot.get(t.id) ?? null };
     },

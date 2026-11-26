@@ -69,3 +69,11 @@ export function trustedCamelot(camelotKey: string | null | undefined, keyConfide
   const code = camelotKey.trim().toUpperCase();
   return /^(?:1[0-2]|[1-9])[AB]$/.test(code) ? code : null;
 }
+
+/**
+ * The trusted Camelot key of each song, by id: trustedCamelot on the song's own analysis key and confidence. The input shape has no file-tag key, so a tag key cannot be
+ * passed in and used by mistake.
+ */
+export function trustedCamelotById(rows: readonly { id: string; camelotKey: string | null; keyConfidence: number | null }[]): Map<string, string | null> {
+  return new Map(rows.map((r) => [r.id, trustedCamelot(r.camelotKey, r.keyConfidence)]));
+}

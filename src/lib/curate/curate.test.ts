@@ -4,7 +4,7 @@ import { PROFILES, profileFromText } from "@/lib/curate/profiles";
 import { eligibleTracks, explicitStatusOf, isHalloweenTrack } from "@/lib/curate/eligibility";
 import { arcFit, arcTargets, estimateEnergies, orderByEnergyArc } from "@/lib/curate/energyArc";
 import { SHORTFALL_RATIO, genreFit, scoreTrack, selectTracks, shortfallOf, wantsHalloween } from "@/lib/curate/select";
-import { describeLocal, finishCuration, refineOrder, selectForCuration, titleFromSpec } from "@/lib/curate/curate";
+import { describeLocal, finishCuration, keyClashCount, refineOrder, selectForCuration, titleFromSpec, type PreviewTrack } from "@/lib/curate/curate";
 import { camelotCompatibility } from "@/lib/camelot";
 import type { GenreTag, GenreTagSource, Track } from "@/types/music";
 
@@ -463,5 +463,49 @@ describe("keys in the playlist order", () => {
     const inputs = { ...request, library: onTarget, spec: { ...request.spec, energyArc: "build" as const }, camelotOf: (t: Track) => keysFor.get(t.id) ?? null };
     const ids = finishCuration(inputs, selectForCuration(inputs)).tracks.map((t) => t.id);
     expect(ids).toEqual(onTarget.map((s) => s.id));
+  });
+});
+
+describe("the model's reorder and the keys", () => {
+  const t = (id: string, camelot: string | null | undefined): PreviewTrack => ({ id, title: id, artist: "A", durationSec: 200, energy: 0.5, bpm: 100, ...(camelot === undefined ? {} : { camelot }) });
+  const preview = (tracks: PreviewTrack[]) => ({ title: "T", description: "D", tracks, runtimeSec: 0, arc: "steady" as const, profile: null, shortfall: null, unknownYear: 0, unknownRating: 0, notes: [], spec: { genres: [], subgenres: [], moods: [] } });
+  // 8B fits 8A (relative) and 8A fits 9A (adjacent), but 8B and 9A do not fit each other; 3A fits none of them.
+  const plan = preview([t("a", "8B"), t("b", "8A"), t("c", "9A"), t("far", "3A"), t("u", null)]);
+
+  it("counts a clash only where both neighbours have a key and the keys do not fit", () => {
+    expect(keyClashCount(plan.tracks)).toBe(1); // 9A -> 3A; 3A -> (no key) is not a clash
+    expect(keyClashCount([t("x", undefined), t("y", undefined)])).toBe(0);
+    expect(keyClashCount([])).toBe(0);
+  });
+
+  it("takes the model's reorder when it adds no key clash", () => {
+    const reply = { order: ["c", "b", "a", "far", "u"], title: "Mellow" }; // 9A 8A 8B 3A: one clash, as before
+    const out = refineOrder(plan, reply);
+    expect(out.tracks.map((x) => x.id)).toEqual(["c", "b", "a", "far", "u"]);
+    expect(out.title).toBe("Mellow");
+  });
+
+  it("ignores a reorder that adds a key clash, but still takes its title and description", () => {
+    const reply = { order: ["a", "far", "b", "c", "u"], title: "Mellow", description: "Easy does it." }; // 8B 3A 8A 9A: two clashes
+    const out = refineOrder(plan, reply);
+    expect(out.tracks.map((x) => x.id)).toEqual(plan.tracks.map((x) => x.id));
+    expect(out.title).toBe("Mellow");
+    expect(out.description).toBe("Easy does it.");
+  });
+
+  it("does not care about keys when the preview carries none", () => {
+    const bare = preview([t("a", undefined), t("b", undefined), t("c", undefined)]);
+    expect(refineOrder(bare, { order: ["c", "b", "a"] }).tracks.map((x) => x.id)).toEqual(["c", "b", "a"]);
+  });
+
+  it("finishCuration puts each song's key on its preview track only when keys were provided", () => {
+    const songs = ["8A", "3A"].map((_, i) => make({ id: `p${i}`, genres: [tag("R&B", 0.85), tag("R&B", 0.8, undefined, "lastfm")], durationSec: 200, bpm: 100 } as Partial<Track>));
+    const base = { spec: { genres: ["R&B"], subgenres: [], moods: [], targetLengthMinutes: 20 }, library: songs, bpmOf: bpmFrom, loudnessOf: () => null };
+    const without = finishCuration(base, selectForCuration(base)).tracks;
+    expect(without.every((x) => !("camelot" in x))).toBe(true);
+    const keys = new Map([["p0", "8A"], ["p1", null as string | null]]);
+    const withKeys = finishCuration({ ...base, camelotOf: (x: Track) => keys.get(x.id) ?? null }, selectForCuration(base)).tracks;
+    expect(withKeys.find((x) => x.id === "p0")?.camelot).toBe("8A");
+    expect(withKeys.find((x) => x.id === "p1")?.camelot).toBeNull();
   });
 });

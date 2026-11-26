@@ -5,6 +5,7 @@
  * that passes checks (see refineOrder), so a failed or odd model answer leaves this result standing. Pure.
  */
 import { genresOfTrack } from "@/lib/genreLibrary";
+import { camelotCompatibility } from "@/lib/camelot";
 import { ARC_KEY_WEIGHT, estimateEnergies, orderByEnergyArc } from "@/lib/curate/energyArc";
 import { PROFILES, type EnergyArc, type EventProfile } from "@/lib/curate/profiles";
 import { profileOf, selectTracks, shortfallOf, type Selection, type Shortfall } from "@/lib/curate/select";
@@ -20,6 +21,19 @@ export interface PreviewTrack {
   energy: number;
   bpm: number | null;
   genre?: string;
+  /** The song's trusted Camelot key ("8A"), or null; present only when the library load provided keys. Used to keep the model's reorder from putting clashing keys together. */
+  camelot?: string | null;
+}
+
+/** How many neighbouring pairs in a playlist clash on key: both songs have a key and the two do not fit (same, relative or adjacent). Pairs with an unknown key do not count. */
+export function keyClashCount(tracks: readonly Pick<PreviewTrack, "camelot">[]): number {
+  let clashes = 0;
+  for (let i = 1; i < tracks.length; i++) {
+    const a = tracks[i - 1].camelot;
+    const b = tracks[i].camelot;
+    if (a && b && camelotCompatibility(a, b) === 0) clashes++;
+  }
+  return clashes;
 }
 
 export interface CurationPreview {
@@ -115,7 +129,7 @@ export function finishCuration(inputs: CurationInputs, selection: Selection): Cu
   const byId = new Map(selection.chosen.map((c) => [c.track.id, c]));
   const tracks: PreviewTrack[] = order.map((o) => {
     const c = byId.get(o.id)!;
-    return { id: c.track.id, title: c.track.title, artist: c.track.artist, durationSec: c.track.durationSec, energy: o.energy, bpm: c.bpm, genre: genresOfTrack(c.track)[0]?.genre };
+    return { id: c.track.id, title: c.track.title, artist: c.track.artist, durationSec: c.track.durationSec, energy: o.energy, bpm: c.bpm, genre: genresOfTrack(c.track)[0]?.genre, ...(camelotOf ? { camelot: o.camelot ?? null } : {}) };
   });
   const runtimeSec = tracks.reduce((s, t) => s + (t.durationSec || 0), 0);
   return {
@@ -149,7 +163,9 @@ export function refineOrder(preview: CurationPreview, raw: unknown): CurationPre
     const same = ids.size === preview.tracks.length && preview.tracks.every((t) => ids.has(t.id));
     if (same) {
       const byId = new Map(preview.tracks.map((t) => [t.id, t]));
-      tracks = (r.order as string[]).map((id) => byId.get(id)!);
+      const reordered = (r.order as string[]).map((id) => byId.get(id)!);
+      // The model may reorder for flow, but not back into key clashes the plan had avoided: a reorder that adds any is not used.
+      if (keyClashCount(reordered) <= keyClashCount(preview.tracks)) tracks = reordered;
     }
   }
   return { ...preview, title: title ?? preview.title, description: description ?? preview.description, tracks };

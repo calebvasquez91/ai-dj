@@ -202,3 +202,36 @@ describe("orderByEnergyArc with a key weight", () => {
     expect(orderByEnergyArc(unknown, "steady", 0, 0, 0.5).map((i) => i.id)).toEqual(orderByEnergyArc(unknown, "steady").map((i) => i.id));
   });
 });
+
+describe("orderByEnergyArc: the key only breaks near-ties", () => {
+  it("rewards songs whose keys fit: two keyed songs are kept together instead of being split up by an unkeyed one", () => {
+    const items = [
+      { id: "A", energy: 0.5, bpm: null, camelot: "8A" },
+      { id: "u1", energy: 0.5, bpm: null, camelot: null },
+      { id: "B", energy: 0.5, bpm: null, camelot: "8B" },
+      { id: "u2", energy: 0.5, bpm: null, camelot: null },
+    ];
+    const ids = orderByEnergyArc(items, "steady", 0, 0, 0.08).map((i) => i.id);
+    expect(Math.abs(ids.indexOf("A") - ids.indexOf("B"))).toBe(1);
+    // with no key weight nothing moves them
+    expect(orderByEnergyArc(items, "steady").map((i) => i.id)).toEqual(["A", "u1", "B", "u2"]);
+  });
+
+  it("never puts a dip in a rising or falling line for the sake of a key, even when many orders have the same energy cost", () => {
+    // Every energy sits below the arc's targets, so the energy cost is the same for any order: only the key could move them, and it must not.
+    const keys = ["8A", "3A", "8B", "3B", "9A", "4A"];
+    const items = keys.map((camelot, i) => ({ id: `s${i}`, energy: 0.1 + i * 0.12, bpm: null, camelot }));
+    for (const arc of ["build", "wind-down"] as const) {
+      const energies = orderByEnergyArc(items, arc, 0, 0, 0.08).map((i) => i.energy);
+      const sorted = [...energies].sort((a, b) => (arc === "build" ? a - b : b - a));
+      expect(energies).toEqual(sorted);
+    }
+  });
+
+  it("still lets the key reorder equal-energy songs on a steady arc", () => {
+    const items = ["8A", "3A", "8B", "3B", "9A", "4A"].map((camelot, i) => ({ id: `s${i}`, energy: 0.5, bpm: null, camelot }));
+    const clashes = (ids: string[]) => ids.slice(1).filter((id, i) => Math.abs(Number(items.find((x) => x.id === id)!.camelot.slice(0, -1)) - Number(items.find((x) => x.id === ids[i])!.camelot.slice(0, -1))) > 1).length;
+    const keyed = orderByEnergyArc(items, "steady", 0, 0, 0.08).map((i) => i.id);
+    expect(clashes(keyed)).toBeLessThan(clashes(orderByEnergyArc(items, "steady").map((i) => i.id)));
+  });
+});
