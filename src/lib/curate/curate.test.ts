@@ -509,3 +509,16 @@ describe("the model's reorder and the keys", () => {
     expect(withKeys.find((x) => x.id === "p1")?.camelot).toBeNull();
   });
 });
+
+describe("preview tracks carry the metadata the model orders by", () => {
+  const rnbTags = [tag("R&B", 0.85), tag("R&B", 0.8, undefined, "lastfm")];
+  it("a song's moods and year are on its preview track when it has them, and absent when it has none", () => {
+    const rich = make({ id: "rich", genres: rnbTags, durationSec: 200, bpm: 100, moods: ["sad", "chill"], year: 1994 } as Partial<Track>);
+    const bare = make({ id: "bare", genres: rnbTags, durationSec: 200, bpm: 100 } as Partial<Track>);
+    const inputs = { spec: { genres: ["R&B"], subgenres: [], moods: [], targetLengthMinutes: 20 }, library: [rich, bare], bpmOf: bpmFrom, loudnessOf: () => null };
+    const tracks = finishCuration(inputs, selectForCuration(inputs)).tracks;
+    expect(tracks.find((x) => x.id === "rich")).toMatchObject({ moods: ["sad", "chill"], year: 1994 });
+    const plain = tracks.find((x) => x.id === "bare")!;
+    expect("moods" in plain || "year" in plain).toBe(false);
+  });
+});

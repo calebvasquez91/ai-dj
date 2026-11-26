@@ -8,6 +8,7 @@
 import { genreLabels, GENRES } from "@/lib/genres";
 import { moodIds } from "@/lib/moodTags";
 import { ENERGY_ARCS, PROFILES } from "@/lib/curate/profiles";
+import { vocabularyPrompt } from "@/lib/curate/vocabulary";
 import { GENRE_LLM_MODEL, taxonomyPrompt } from "@/lib/genre/llmReconciler";
 import type { Fetcher } from "@/lib/genre/types";
 
@@ -19,7 +20,8 @@ Put a decade as eraRange (the 90s is 1990 to 1999). Put a stated tempo as bpmRan
 Set explicitPolicy to "clean-only" only if they ask for clean, radio-friendly or family-friendly music; otherwise leave it out.
 Set profile to the occasion if one is named (a workout, a dinner party, a wedding...) and energyArc only if they describe how the energy should move.
 If the request names no genre, mood, decade, tempo or occasion at all, give no filters and put one short question in "clarification" that would let you build it. Otherwise leave "clarification" out.
-Do not ask more than one question. Do not quote lyrics.`;
+Do not ask more than one question. Do not quote lyrics.
+Read how the person words things with the vocabulary you are given (it comes from how this app's owner files their own music): a phrase on that list means the moods and occasion beside it, whatever a genre name might suggest. "high energy" is the energetic mood, never the Hi-NRG subgenre; "mellow" is the chill mood, never the Easy Listening genre.`;
 
 export function specToolSchema() {
   const subgenres = GENRES.flatMap((g) => g.subgenres.map((s) => s.label)).filter((v, i, a) => a.indexOf(v) === i);
@@ -64,7 +66,7 @@ export async function parseRequestWithLlm(request: string, { fetcher, apiKey, mo
         max_tokens: 500,
         system: [
           { type: "text", text: SYSTEM },
-          { type: "text", text: `Taxonomy (genre: subgenres):\n${taxonomyPrompt()}\n\nMoods: ${moodIds().join(", ")}`, cache_control: { type: "ephemeral" } },
+          { type: "text", text: `Taxonomy (genre: subgenres):\n${taxonomyPrompt()}\n\nMoods: ${moodIds().join(", ")}\n\nVocabulary (wording -> moods and occasion):\n${vocabularyPrompt()}`, cache_control: { type: "ephemeral" } },
         ],
         tools: [specToolSchema()],
         tool_choice: { type: "tool", name: TOOL },

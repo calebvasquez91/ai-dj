@@ -26,4 +26,17 @@ describe("what the model is told about keys", () => {
     expect(await refineWithClaude("chill", preview([track("a"), track("b")]))).toBeNull();
     expect(askClaudeForJson).not.toHaveBeenCalled();
   });
+
+  it("tells the model what was asked for and sends each track's moods and year, so it can order by them as well as energy", async () => {
+    const withMeta: PreviewTrack = { ...track("a", "8A"), moods: ["sad", "chill"], year: 1994 };
+    const p = preview([withMeta, track("b"), track("c"), track("d")]);
+    p.spec = { genres: ["R&B"], subgenres: [], moods: ["sad"], eraRange: { from: 1990, to: 1999 }, explicitPolicy: "clean-only" };
+    await refineWithClaude("sad 90s r&b, clean", p);
+    const request = vi.mocked(askClaudeForJson).mock.calls[0][0];
+    expect(request.system).toMatch(/"asked" says what the person asked for/);
+    expect(request.system).toMatch(/Never change which tracks are in the list/);
+    const user = request.user as { asked: unknown; tracks: { id: string; moods: string[]; year: number | null }[] };
+    expect(user.asked).toEqual({ genres: ["R&B"], subgenres: [], moods: ["sad"], era: { from: 1990, to: 1999 }, cleanOnly: true });
+    expect(user.tracks.map((t) => [t.id, t.moods, t.year])).toEqual([["a", ["sad", "chill"], 1994], ["b", [], null], ["c", [], null], ["d", [], null]]);
+  });
 });

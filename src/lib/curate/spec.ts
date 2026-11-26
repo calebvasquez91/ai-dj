@@ -8,6 +8,7 @@
 import { GENRES, findNode, normalize } from "@/lib/genres";
 import { isMoodId, normalizeMood } from "@/lib/moodTags";
 import { isEnergyArc, isProfileId, profileFromText, type EnergyArc, type ProfileId } from "@/lib/curate/profiles";
+import { readVocabulary, wordsOf } from "@/lib/curate/vocabulary";
 
 export type ExplicitPolicy = "any" | "clean-only";
 
@@ -157,11 +158,6 @@ function lengthMinutes(text: string): number | undefined {
   return /^h/.test(m[2]) ? Math.round(n * 60) : Math.round(n);
 }
 
-/** Splits into words keeping "r&b", "hip-hop" and "lo-fi" whole. */
-function wordsOf(text: string): string[] {
-  return text.toLowerCase().replace(/[^a-z0-9&'À-ɏ/+-]+/g, " ").trim().split(/\s+/).filter(Boolean);
-}
-
 /** Words that are genre or mood aliases but, in a sentence, are ordinary words (so not read as a genre). */
 const FILLER = new Set(["for", "a", "an", "the", "and", "or", "of", "with", "to", "my", "me", "some", "that", "is", "in", "on", "at", "it", "i", "want", "make", "create", "build", "give", "playlist", "songs", "song", "music", "tracks", "mix", "only", "just", "no", "not", "hits", "classic", "heavy", "alternative", "dance", "club", "hard", "raw", "blue", "love", "easy", "smooth", "work", "drive", "car", "night", "fun", "bright", "run", "good", "great", "best", "new", "old", "time"]);
 
@@ -175,8 +171,11 @@ export function parseRequestLocally(text: string): SpecResult {
   const tokens = wordsOf(lower);
   const genres: string[] = [];
   const subgenres: string[] = [];
-  const moods: string[] = [];
-  const used = new Array<boolean>(tokens.length).fill(false);
+  // The vocabulary reads first (lib/curate/vocabulary.ts): the way people word a request ("wine down", "high energy", "mellow") means a mood or an occasion, and its words
+  // are taken out of the genre reading so none is mistaken for a genre ("high energy" is not the Hi-NRG subgenre).
+  const vocab = readVocabulary(tokens, lower);
+  const moods: string[] = [...vocab.moods];
+  const used = [...vocab.used];
 
   for (let size = 3; size >= 1; size--) {
     for (let i = 0; i + size <= tokens.length; i++) {
@@ -209,7 +208,11 @@ export function parseRequestLocally(text: string): SpecResult {
   if (/\b(clean( only| versions?)?|no explicit|not explicit|radio[- ]?friendly|family[- ]?friendly|kid[- ]?(?:safe|friendly)|safe for work|censored)\b/.test(lower)) raw.explicitPolicy = "clean-only";
   const minutes = lengthMinutes(lower);
   if (minutes) raw.targetLengthMinutes = minutes;
-  const profile = profileFromText(lower);
+  // An occasion named in so many words wins; else the one a vocabulary phrase points to. Words the vocabulary used are left out of the search (so "after work" is not "work").
+  const profile = (vocab.hits.length > 0 ? profileFromText(vocab.remainder) : profileFromText(lower)) ?? vocab.profile;
   if (profile) raw.profile = profile;
-  return validateSpec(raw);
+  const result = validateSpec(raw);
+  // A note only where the wording differs from the mood: "wine down" as chill and dinner is worth saying, "romantic" as romantic is not.
+  for (const hit of vocab.hits) if (!(hit.moods.length === 1 && hit.moods[0] === hit.phrase)) result.notes.push(`Read "${hit.phrase}" as ${hit.moods.join(" and ")}.`);
+  return result;
 }

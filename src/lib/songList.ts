@@ -10,6 +10,7 @@
 import { normalize } from "@/lib/genres";
 import { MIN_MATCH_SCORE, scoreTrack } from "@/lib/curate/select";
 import { ARC_KEY_WEIGHT, orderByEnergyArc } from "@/lib/curate/energyArc";
+import { ENERGY_MISS_LIMIT, ENERGY_WEIGHT, MOOD_ENERGY, moodEnergyTarget } from "@/lib/curate/moodEnergy";
 import type { EnergyArc } from "@/lib/curate/profiles";
 import type { CurationSpec } from "@/lib/curate/spec";
 import { artistKeys, buildLibraryIndex, libraryMoods, matchLibrary, titleKey, variantTokens, type LibraryRow } from "@/lib/djLibrary";
@@ -55,20 +56,9 @@ export interface ListSuggestion {
 /** The most suggestions shown for one request. */
 export const MAX_LIST_SUGGESTIONS = 12;
 
-/**
- * The energy (0-1) a mood asks for, for the moods that clearly imply one. A request for these moods prefers songs whose own energy (the list's 1-10 estimate) is near
- * it: a workout should not be handed a sad ballad because both are R&B. Moods that say nothing about energy (nostalgic, romantic, road-trip...) are not here.
- */
-export const MOOD_ENERGY: Readonly<Record<string, number>> = { workout: 0.85, energetic: 0.85, aggressive: 0.85, party: 0.8, chill: 0.3, sad: 0.3, dreamy: 0.35, dinner: 0.35, focus: 0.4, sleep: 0.15 };
-/** A song whose energy is further than this from what the request's moods ask for is left out; nearer, the miss lowers its score by ENERGY_WEIGHT times the miss. */
-export const ENERGY_MISS_LIMIT = 0.4;
-export const ENERGY_WEIGHT = 0.6;
 
-/** The energy the request's moods ask for: the average of those that imply one, or null when none does. */
-export function moodEnergyTarget(moods: readonly string[]): number | null {
-  const targets = moods.map((m) => MOOD_ENERGY[m]).filter((t): t is number => t != null);
-  return targets.length > 0 ? targets.reduce((s, t) => s + t, 0) / targets.length : null;
-}
+// Re-exported: the mood-to-energy table lives in curate/moodEnergy.ts, where the curator's own scoring uses it too.
+export { ENERGY_MISS_LIMIT, ENERGY_WEIGHT, MOOD_ENERGY, moodEnergyTarget };
 
 const first = <T>(values: readonly (T | null)[]): T | null => values.find((v): v is T => v != null) ?? null;
 
@@ -155,7 +145,7 @@ export function suggestFromList({ spec, songs, owned, arc, seed = 0, limit = MAX
   for (const song of songs) {
     if (owned.has(song.key)) continue;
     if (spec.explicitPolicy === "clean-only" && song.explicit === true) continue;
-    const result = scoreTrack(asTrack(song), song.bpm, spec);
+    const result = scoreTrack(asTrack(song), song.bpm, spec, { useEnergy: false });
     if (!result || result.score < MIN_MATCH_SCORE) continue;
     let score = result.score;
     // A song with no energy in the list is not marked down for it: there is nothing to compare.

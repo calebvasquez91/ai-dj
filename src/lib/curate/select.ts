@@ -15,6 +15,7 @@ import { bestTempoRatio } from "@/lib/tempoRatio";
 import { eligibleTracks, explicitStatusOf, type EligibleResult } from "@/lib/curate/eligibility";
 import { DEFAULT_TARGET_MINUTES, type CurationSpec } from "@/lib/curate/spec";
 import { PROFILES, type EventProfile } from "@/lib/curate/profiles";
+import { moodEnergyTarget, proxyEnergy } from "@/lib/curate/moodEnergy";
 import type { Track } from "@/types/music";
 
 /** A track below this combined score is not a match. */
@@ -23,7 +24,9 @@ const MAX_CANDIDATES = 300;
 /** A shortfall is reported when the matching tracks cover less than this share of the length asked for. */
 export const SHORTFALL_RATIO = 0.9;
 
-const WEIGHTS = { genre: 0.5, mood: 0.2, era: 0.15, bpm: 0.15 } as const;
+const WEIGHTS = { genre: 0.5, mood: 0.2, era: 0.15, bpm: 0.15, energy: 0.2 } as const;
+/** How far (0-1) a song's rough energy may be from what the request's moods ask for before it counts as no fit at all. */
+const ENERGY_FIT_SPAN = 0.5;
 
 export interface TrackFacts {
   bpm: number | null;
@@ -72,7 +75,7 @@ export function genreFit(track: Pick<Track, "genreTags" | "genre" | "subgenres">
 }
 
 /** The score of one track for a spec, or null when it fails something the request insists on. */
-export function scoreTrack(track: Track, bpm: number | null, spec: CurationSpec): { score: number; yearUnknown: boolean } | null {
+export function scoreTrack(track: Track, bpm: number | null, spec: CurationSpec, options: { useEnergy?: boolean } = {}): { score: number; yearUnknown: boolean } | null {
   const profile = profileOf(spec);
   const parts: { weight: number; value: number }[] = [];
   let yearUnknown = false;
@@ -112,6 +115,14 @@ export function scoreTrack(track: Track, bpm: number | null, spec: CurationSpec)
     }
   } else if (profile?.bpmRange) {
     parts.push({ weight: WEIGHTS.bpm, value: bpm == null ? 0.5 : bpmFit(bpm, profile.bpmRange) });
+  }
+
+  // A mood that implies an energy (pump up: high, rainy day: low) prefers songs whose rough energy fits: from the tempo when it is known, else the genre. A song with neither is
+  // neutral, not marked down. (The song-list suggestions turn this off: they have the list's own energy and apply it themselves.)
+  const energyTarget = options.useEnergy === false ? null : moodEnergyTarget(spec.moods);
+  if (energyTarget != null) {
+    const rough = proxyEnergy(bpm, genresOfTrack(track)[0]?.genre);
+    parts.push({ weight: WEIGHTS.energy, value: rough == null ? 0.5 : Math.max(0, 1 - Math.abs(rough - energyTarget) / ENERGY_FIT_SPAN) });
   }
 
   if (parts.length === 0) return { score: 0.5 + (track.playPreference === "must" ? 0.05 : 0), yearUnknown };
