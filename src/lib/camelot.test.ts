@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { PITCH_CLASSES, camelotCompatibility, camelotForKey, camelotRank } from "./camelot";
-import { camelotCompatibility as fromMixEngine } from "./mix-engine";
+import { MIN_KEY_CONFIDENCE_FOR_SCORING, PITCH_CLASSES, camelotCompatibility, camelotForKey, camelotRank, trustedCamelot, trustedCamelotById } from "./camelot";
+import { camelotCompatibility as fromMixEngine, MIN_KEY_CONFIDENCE_FOR_SCORING as mixEngineMinKeyConfidence } from "./mix-engine";
 
 describe("camelotForKey", () => {
   it("maps keys to the wheel", () => {
@@ -44,5 +44,40 @@ describe("camelotCompatibility", () => {
 
   it("is still exported from the mixing engine, as the same function, for the code that imports it from there", () => {
     expect(fromMixEngine).toBe(camelotCompatibility);
+  });
+});
+
+describe("trustedCamelot", () => {
+  it("uses the app's own key only when its confidence reaches the bar the mixing uses, and only a real Camelot code", () => {
+    expect(trustedCamelot("8A", 0.6)).toBe("8A");
+    expect(trustedCamelot(" 8a ", MIN_KEY_CONFIDENCE_FOR_SCORING)).toBe("8A");
+    expect(trustedCamelot("8A", MIN_KEY_CONFIDENCE_FOR_SCORING - 0.01)).toBeNull();
+    expect(trustedCamelot("8A", null)).toBeNull();
+    expect(trustedCamelot("8A", undefined)).toBeNull();
+    expect(trustedCamelot(null, 0.9)).toBeNull();
+    expect(trustedCamelot("13A", 0.9)).toBeNull();
+    expect(trustedCamelot("A minor", 0.9)).toBeNull();
+    expect(trustedCamelot("8A", Number.NaN)).toBeNull();
+  });
+
+  it("the confidence bar is the one the mixing engine exports", () => {
+    expect(mixEngineMinKeyConfidence).toBe(MIN_KEY_CONFIDENCE_FOR_SCORING);
+    expect(MIN_KEY_CONFIDENCE_FOR_SCORING).toBe(0.15);
+  });
+});
+
+describe("trustedCamelotById", () => {
+  it("gives each song its trusted analysis key, null where it is missing or not sure, and never reads a file tag's key", () => {
+    const rows = [
+      { id: "sure", camelotKey: "8A", keyConfidence: 0.7 },
+      { id: "unsure", camelotKey: "8A", keyConfidence: 0.05 },
+      { id: "nokey", camelotKey: null, keyConfidence: 0.9 },
+      { id: "noconf", camelotKey: "5B", keyConfidence: null },
+    ];
+    const map = trustedCamelotById(rows);
+    expect([...map.entries()]).toEqual([["sure", "8A"], ["unsure", null], ["nokey", null], ["noconf", null]]);
+    // a row that also carries a file-tag key (as a database row does): it is ignored, because only the analysis fields are read
+    const withTag = [{ id: "tagged", camelotKey: null, keyConfidence: null, tagCamelotKey: "9A" }];
+    expect(trustedCamelotById(withTag).get("tagged")).toBeNull();
   });
 });

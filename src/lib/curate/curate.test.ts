@@ -4,7 +4,8 @@ import { PROFILES, profileFromText } from "@/lib/curate/profiles";
 import { eligibleTracks, explicitStatusOf, isHalloweenTrack } from "@/lib/curate/eligibility";
 import { arcFit, arcTargets, estimateEnergies, orderByEnergyArc } from "@/lib/curate/energyArc";
 import { SHORTFALL_RATIO, genreFit, scoreTrack, selectTracks, shortfallOf, wantsHalloween } from "@/lib/curate/select";
-import { describeLocal, finishCuration, refineOrder, selectForCuration, titleFromSpec } from "@/lib/curate/curate";
+import { describeLocal, finishCuration, keyClashCount, refineOrder, selectForCuration, titleFromSpec, type PreviewTrack } from "@/lib/curate/curate";
+import { camelotCompatibility } from "@/lib/camelot";
 import type { GenreTag, GenreTagSource, Track } from "@/types/music";
 
 const tag = (genre: string, confidence = 0.8, subgenre?: string, source: GenreTagSource = "musicbrainz"): GenreTag => ({ genre, ...(subgenre ? { subgenre } : {}), source, confidence, updatedAt: 1 });
@@ -427,5 +428,84 @@ describe("curating end to end", () => {
     expect(markup.title).toBe(p.title);
     expect(markup.description).toBe(p.description);
     expect(refineOrder(p, null)).toEqual(p);
+  });
+});
+
+describe("keys in the playlist order", () => {
+  // Six equally energetic R&B songs, their keys interleaved between two far-apart groups of compatible keys (8A/8B/9A and 3A/3B/4A).
+  const keys = ["8A", "3A", "8B", "3B", "9A", "4A"];
+  const songs = keys.map((_, i) => make({ id: `k${i}`, genres: [tag("R&B", 0.85), tag("R&B", 0.8, undefined, "lastfm")], durationSec: 200, bpm: 100 } as Partial<Track>));
+  const keyOf = new Map(songs.map((s, i) => [s.id, keys[i]]));
+  const request = { spec: { genres: ["R&B"], subgenres: [], moods: [], energyArc: "steady" as const, targetLengthMinutes: 20 }, library: songs, bpmOf: bpmFrom, loudnessOf: () => null };
+  const order = (extra: object = {}) => {
+    const inputs = { ...request, ...extra };
+    return finishCuration(inputs, selectForCuration(inputs)).tracks.map((t) => t.id);
+  };
+  const clashes = (ids: string[]) => ids.slice(1).filter((id, i) => camelotCompatibility(keyOf.get(ids[i]) ?? null, keyOf.get(id) ?? null) === 0).length;
+
+  it("keeps compatible keys next to each other when the energy is the same, so the playlist clashes less", () => {
+    const without = order();
+    const withKeys = order({ camelotOf: (t: Track) => keyOf.get(t.id) ?? null });
+    expect([...withKeys].sort()).toEqual([...without].sort()); // the same songs, only the order differs
+    expect(clashes(withKeys)).toBeLessThan(clashes(without));
+    expect(clashes(withKeys)).toBeLessThanOrEqual(2);
+  });
+
+  it("ignores keys when none is known: no camelotOf, or a camelotOf that knows nothing, gives the order it always gave", () => {
+    expect(order({ camelotOf: () => null })).toEqual(order());
+  });
+
+  it("does not trade the energy arc for a key: songs whose energy sits where the arc wants it stay in that order, whatever their keys", () => {
+    // Each song's energy (from its tempo, with no loudness) is exactly the arc's target for its place, so any reshuffle for the sake of a key would cost energy.
+    const targets = arcTargets("build", songs.length);
+    const onTarget = songs.map((_, i) => make({ id: `e${i}`, genres: [tag("R&B", 0.85), tag("R&B", 0.8, undefined, "lastfm")], durationSec: 200, bpm: 70 + 110 * targets[i] } as Partial<Track>));
+    const keysFor = new Map(onTarget.map((s, i) => [s.id, keys[i]]));
+    const inputs = { ...request, library: onTarget, spec: { ...request.spec, energyArc: "build" as const }, camelotOf: (t: Track) => keysFor.get(t.id) ?? null };
+    const ids = finishCuration(inputs, selectForCuration(inputs)).tracks.map((t) => t.id);
+    expect(ids).toEqual(onTarget.map((s) => s.id));
+  });
+});
+
+describe("the model's reorder and the keys", () => {
+  const t = (id: string, camelot: string | null | undefined): PreviewTrack => ({ id, title: id, artist: "A", durationSec: 200, energy: 0.5, bpm: 100, ...(camelot === undefined ? {} : { camelot }) });
+  const preview = (tracks: PreviewTrack[]) => ({ title: "T", description: "D", tracks, runtimeSec: 0, arc: "steady" as const, profile: null, shortfall: null, unknownYear: 0, unknownRating: 0, notes: [], spec: { genres: [], subgenres: [], moods: [] } });
+  // 8B fits 8A (relative) and 8A fits 9A (adjacent), but 8B and 9A do not fit each other; 3A fits none of them.
+  const plan = preview([t("a", "8B"), t("b", "8A"), t("c", "9A"), t("far", "3A"), t("u", null)]);
+
+  it("counts a clash only where both neighbours have a key and the keys do not fit", () => {
+    expect(keyClashCount(plan.tracks)).toBe(1); // 9A -> 3A; 3A -> (no key) is not a clash
+    expect(keyClashCount([t("x", undefined), t("y", undefined)])).toBe(0);
+    expect(keyClashCount([])).toBe(0);
+  });
+
+  it("takes the model's reorder when it adds no key clash", () => {
+    const reply = { order: ["c", "b", "a", "far", "u"], title: "Mellow" }; // 9A 8A 8B 3A: one clash, as before
+    const out = refineOrder(plan, reply);
+    expect(out.tracks.map((x) => x.id)).toEqual(["c", "b", "a", "far", "u"]);
+    expect(out.title).toBe("Mellow");
+  });
+
+  it("ignores a reorder that adds a key clash, but still takes its title and description", () => {
+    const reply = { order: ["a", "far", "b", "c", "u"], title: "Mellow", description: "Easy does it." }; // 8B 3A 8A 9A: two clashes
+    const out = refineOrder(plan, reply);
+    expect(out.tracks.map((x) => x.id)).toEqual(plan.tracks.map((x) => x.id));
+    expect(out.title).toBe("Mellow");
+    expect(out.description).toBe("Easy does it.");
+  });
+
+  it("does not care about keys when the preview carries none", () => {
+    const bare = preview([t("a", undefined), t("b", undefined), t("c", undefined)]);
+    expect(refineOrder(bare, { order: ["c", "b", "a"] }).tracks.map((x) => x.id)).toEqual(["c", "b", "a"]);
+  });
+
+  it("finishCuration puts each song's key on its preview track only when keys were provided", () => {
+    const songs = ["8A", "3A"].map((_, i) => make({ id: `p${i}`, genres: [tag("R&B", 0.85), tag("R&B", 0.8, undefined, "lastfm")], durationSec: 200, bpm: 100 } as Partial<Track>));
+    const base = { spec: { genres: ["R&B"], subgenres: [], moods: [], targetLengthMinutes: 20 }, library: songs, bpmOf: bpmFrom, loudnessOf: () => null };
+    const without = finishCuration(base, selectForCuration(base)).tracks;
+    expect(without.every((x) => !("camelot" in x))).toBe(true);
+    const keys = new Map([["p0", "8A"], ["p1", null as string | null]]);
+    const withKeys = finishCuration({ ...base, camelotOf: (x: Track) => keys.get(x.id) ?? null }, selectForCuration(base)).tracks;
+    expect(withKeys.find((x) => x.id === "p0")?.camelot).toBe("8A");
+    expect(withKeys.find((x) => x.id === "p1")?.camelot).toBeNull();
   });
 });

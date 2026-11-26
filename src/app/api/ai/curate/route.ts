@@ -16,6 +16,7 @@ import { discoverSuggestions } from "@/lib/curate/discover";
 import { parseRequestWithLlm } from "@/lib/curate/llmSpec";
 import { refineWithClaude } from "@/lib/curate/llmRefine";
 import { runCuration, type CurateRequestBody } from "@/lib/curate/run";
+import { trustedCamelotById } from "@/lib/camelot";
 import { songListLoaderFor } from "@/lib/songListAccess";
 import { loadSongListRows } from "@/lib/songListStore";
 import { meanEnergy } from "@/lib/track-sequencing";
@@ -44,8 +45,10 @@ async function handlePOST(request: Request) {
         loadUserTrackData(userId),
       ]);
       const bpm = new Map(rows.map((r) => [r.id, r.bpm]));
+      // The key the order prefers to keep compatible between neighbours: the app's own analysis, and only when it was sure (the same rule the mixing uses).
+      const camelot = trustedCamelotById(rows);
       const tracks: Track[] = rows.map((r) => ({ ...toTrackSummary(r, marks.get(r.id)), ...(genres.get(r.id) ?? {}) }));
-      return { tracks, bpmOf: (t) => bpm.get(t.id) ?? null };
+      return { tracks, bpmOf: (t) => bpm.get(t.id) ?? null, camelotOf: (t) => camelot.get(t.id) ?? null };
     },
 
     // The waveform is the heavy column, so it is read only for the tracks that were chosen.

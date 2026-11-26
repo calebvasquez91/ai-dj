@@ -32,7 +32,7 @@ export interface CurateRequestBody {
 
 export interface CurateDeps {
   parseWithLlm: (text: string) => Promise<unknown | null>;
-  loadLibrary: () => Promise<{ tracks: Track[]; bpmOf: (track: Track) => number | null }>;
+  loadLibrary: () => Promise<{ tracks: Track[]; bpmOf: (track: Track) => number | null; /** A track's trusted Camelot key (lib/camelot.ts trustedCamelot), for the order; absent: keys are ignored. */ camelotOf?: (track: Track) => string | null }>;
   loudnessOf: (trackIds: string[]) => Promise<Map<string, number | null>>;
   refine: (request: string, preview: CurationPreview) => Promise<unknown | null>;
   discover: (seeds: string[], libraryArtists: string[]) => Promise<DiscoverSuggestion[]>;
@@ -76,11 +76,11 @@ export async function runCuration(body: CurateRequestBody, deps: CurateDeps): Pr
     ({ spec, notes } = result);
   }
 
-  const { tracks, bpmOf } = await deps.loadLibrary();
+  const { tracks, bpmOf, camelotOf } = await deps.loadLibrary();
   const selection = selectForCuration({ spec, library: tracks, bpmOf, seed });
   const loudness = await deps.loudnessOf(selection.chosen.map((c) => c.track.id));
   const genreFlowWeight = GENRE_TRANSITIONS_ENABLED && body.genreFlow === true ? GENRE_FLOW_WEIGHT : 0;
-  const inputs = { spec, notes, library: tracks, bpmOf, loudnessOf: (id: string) => loudness.get(id) ?? null, seed, genreFlowWeight };
+  const inputs = { spec, notes, library: tracks, bpmOf, camelotOf, loudnessOf: (id: string) => loudness.get(id) ?? null, seed, genreFlowWeight };
   let preview = finishCuration(inputs, selection);
 
   let refined = false;

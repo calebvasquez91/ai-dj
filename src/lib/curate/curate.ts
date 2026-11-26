@@ -5,7 +5,8 @@
  * that passes checks (see refineOrder), so a failed or odd model answer leaves this result standing. Pure.
  */
 import { genresOfTrack } from "@/lib/genreLibrary";
-import { estimateEnergies, orderByEnergyArc } from "@/lib/curate/energyArc";
+import { camelotCompatibility } from "@/lib/camelot";
+import { ARC_KEY_WEIGHT, estimateEnergies, orderByEnergyArc } from "@/lib/curate/energyArc";
 import { PROFILES, type EnergyArc, type EventProfile } from "@/lib/curate/profiles";
 import { profileOf, selectTracks, shortfallOf, type Selection, type Shortfall } from "@/lib/curate/select";
 import type { CurationSpec } from "@/lib/curate/spec";
@@ -20,6 +21,19 @@ export interface PreviewTrack {
   energy: number;
   bpm: number | null;
   genre?: string;
+  /** The song's trusted Camelot key ("8A"), or null; present only when the library load provided keys. Used to keep the model's reorder from putting clashing keys together. */
+  camelot?: string | null;
+}
+
+/** How many neighbouring pairs in a playlist clash on key: both songs have a key and the two do not fit (same, relative or adjacent). Pairs with an unknown key do not count. */
+export function keyClashCount(tracks: readonly Pick<PreviewTrack, "camelot">[]): number {
+  let clashes = 0;
+  for (let i = 1; i < tracks.length; i++) {
+    const a = tracks[i - 1].camelot;
+    const b = tracks[i].camelot;
+    if (a && b && camelotCompatibility(a, b) === 0) clashes++;
+  }
+  return clashes;
 }
 
 export interface CurationPreview {
@@ -85,6 +99,8 @@ export interface CurationInputs {
   notes?: string[];
   library: readonly Track[];
   bpmOf: (track: Track) => number | null;
+  /** A track's Camelot key ("8A") when the app's own analysis is sure of it (lib/camelot.ts trustedCamelot), else null. Absent: no key is known, and the order ignores keys. Where both neighbours have one, a compatible key is preferred over a clash, after the energy arc and the tempo. */
+  camelotOf?: (track: Track) => string | null;
   /** The loudness (mean waveform level 0-1) of the tracks that were chosen, by id; absent ids are treated as unknown. */
   loudnessOf?: (trackId: string) => number | null;
   seed?: number;
@@ -99,15 +115,21 @@ export function selectForCuration(inputs: Pick<CurationInputs, "spec" | "library
 
 /** Orders a selection along the energy arc and builds the preview. */
 export function finishCuration(inputs: CurationInputs, selection: Selection): CurationPreview {
-  const { spec, library, bpmOf, loudnessOf, seed = 0, genreFlowWeight = 0 } = inputs;
+  const { spec, library, bpmOf, camelotOf, loudnessOf, seed = 0, genreFlowWeight = 0 } = inputs;
   const profile = profileOf(spec);
   const arc: EnergyArc = spec.energyArc ?? profile?.energyArc ?? PROFILES.open.energyArc;
   const energies = estimateEnergies(selection.chosen.map((c) => ({ id: c.track.id, loudness: loudnessOf?.(c.track.id) ?? null, bpm: c.bpm, genre: genresOfTrack(c.track)[0]?.genre })));
-  const order = orderByEnergyArc(selection.chosen.map((c) => ({ id: c.track.id, energy: energies.get(c.track.id) ?? 0.5, bpm: c.bpm, genre: genresOfTrack(c.track)[0]?.genre })), arc, seed, genreFlowWeight);
+  const order = orderByEnergyArc(
+    selection.chosen.map((c) => ({ id: c.track.id, energy: energies.get(c.track.id) ?? 0.5, bpm: c.bpm, genre: genresOfTrack(c.track)[0]?.genre, camelot: camelotOf?.(c.track) ?? null })),
+    arc,
+    seed,
+    genreFlowWeight,
+    camelotOf ? ARC_KEY_WEIGHT : 0
+  );
   const byId = new Map(selection.chosen.map((c) => [c.track.id, c]));
   const tracks: PreviewTrack[] = order.map((o) => {
     const c = byId.get(o.id)!;
-    return { id: c.track.id, title: c.track.title, artist: c.track.artist, durationSec: c.track.durationSec, energy: o.energy, bpm: c.bpm, genre: genresOfTrack(c.track)[0]?.genre };
+    return { id: c.track.id, title: c.track.title, artist: c.track.artist, durationSec: c.track.durationSec, energy: o.energy, bpm: c.bpm, genre: genresOfTrack(c.track)[0]?.genre, ...(camelotOf ? { camelot: o.camelot ?? null } : {}) };
   });
   const runtimeSec = tracks.reduce((s, t) => s + (t.durationSec || 0), 0);
   return {
@@ -141,7 +163,9 @@ export function refineOrder(preview: CurationPreview, raw: unknown): CurationPre
     const same = ids.size === preview.tracks.length && preview.tracks.every((t) => ids.has(t.id));
     if (same) {
       const byId = new Map(preview.tracks.map((t) => [t.id, t]));
-      tracks = (r.order as string[]).map((id) => byId.get(id)!);
+      const reordered = (r.order as string[]).map((id) => byId.get(id)!);
+      // The model may reorder for flow, but not back into key clashes the plan had avoided: a reorder that adds any is not used.
+      if (keyClashCount(reordered) <= keyClashCount(preview.tracks)) tracks = reordered;
     }
   }
   return { ...preview, title: title ?? preview.title, description: description ?? preview.description, tracks };

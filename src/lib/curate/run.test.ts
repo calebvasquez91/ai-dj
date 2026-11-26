@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+import { camelotCompatibility } from "@/lib/camelot";
 import { describe, expect, it, vi } from "vitest";
 import { runCuration, MAX_REQUEST_CHARS, type CurateDeps } from "@/lib/curate/run";
 import { discoverSuggestions, similarArtists } from "@/lib/curate/discover";
@@ -249,5 +251,40 @@ describe("a failure in the song list suggestions never stops the playlist", () =
     expect(r.kind).toBe("preview");
     expect(r.kind === "preview" && r.preview.tracks.length).toBeGreaterThan(0);
     expect(r.kind === "preview" && "fromList" in r).toBe(false);
+  });
+});
+
+describe("keys reach the playlist order", () => {
+  // Six equally energetic R&B songs with keys interleaved between two far-apart groups; their order can only be decided by the keys.
+  const keys = ["8A", "3A", "8B", "3B", "9A", "4A"];
+  const library = keys.map((_, i) => rnb(`key-rnb${i}`, { title: `Mine ${i}`, artist: "Someone" }));
+  const keyOf = new Map(library.map((t, i) => [t.id, keys[i]]));
+  const withKeys = { loadLibrary: async () => ({ tracks: library, bpmOf: () => 100, camelotOf: (t: Track) => keyOf.get(t.id) ?? null }) };
+  const withoutKeys = { loadLibrary: async () => ({ tracks: library, bpmOf: () => 100 }) };
+  const clashes = (ids: string[]) => ids.slice(1).filter((id, i) => camelotCompatibility(keyOf.get(ids[i]) ?? null, keyOf.get(id) ?? null) === 0).length;
+  const ids = async (extra: Partial<CurateDeps>) => {
+    const r = await runCuration({ request: "R&B" }, deps(library, extra));
+    return r.kind === "preview" ? r.preview.tracks.map((t) => t.id) : [];
+  };
+
+  it("a library load that provides keys gives a playlist with fewer key clashes than one that does not, of the same songs", async () => {
+    const keyed = await ids(withKeys);
+    const plain = await ids(withoutKeys);
+    expect(keyed.length).toBe(6);
+    expect([...keyed].sort()).toEqual([...plain].sort());
+    expect(clashes(keyed)).toBeLessThan(clashes(plain));
+  });
+
+  it("puts each song's key on its preview track when keys are provided, and not otherwise", async () => {
+    const keyed = await runCuration({ request: "R&B" }, deps(library, withKeys));
+    const plain = await runCuration({ request: "R&B" }, deps(library, withoutKeys));
+    expect(keyed.kind === "preview" && keyed.preview.tracks.every((t) => t.camelot === keyOf.get(t.id))).toBe(true);
+    expect(plain.kind === "preview" && plain.preview.tracks.some((t) => "camelot" in t)).toBe(false);
+  });
+
+  it("the curate route builds its keys with trustedCamelotById, which only reads the analysis key and its confidence (never a file tag's)", () => {
+    const route = readFileSync(new URL("../../app/api/ai/curate/route.ts", import.meta.url), "utf-8").replace(/\r\n/g, "\n");
+    expect(route).toContain("trustedCamelotById(rows)");
+    expect(route).not.toMatch(/tagCamelotKey/);
   });
 });

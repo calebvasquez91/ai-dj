@@ -56,3 +56,24 @@ export function camelotCompatibility(a: string | null, b: string | null): number
   if (diff === 1 && pa.letter === pb.letter) return 1;
   return 0;
 }
+
+/** A detected key below this confidence is not trusted for harmonic decisions (the bar the mixing engine, mashups and sync all use). */
+export const MIN_KEY_CONFIDENCE_FOR_SCORING = 0.15;
+
+/**
+ * The Camelot code to use for a song's key in a harmonic decision, or null: only the app's own analysis counts, and only when it was sure enough. A key read from the
+ * file's own tag (Track.tagCamelotKey) is never used: it is whatever someone typed, and the mixing deliberately never reads it either.
+ */
+export function trustedCamelot(camelotKey: string | null | undefined, keyConfidence: number | null | undefined): string | null {
+  if (!camelotKey || keyConfidence == null || !(keyConfidence >= MIN_KEY_CONFIDENCE_FOR_SCORING)) return null;
+  const code = camelotKey.trim().toUpperCase();
+  return /^(?:1[0-2]|[1-9])[AB]$/.test(code) ? code : null;
+}
+
+/**
+ * The trusted Camelot key of each song, by id: trustedCamelot on the song's own analysis key and confidence. The input shape has no file-tag key, so a tag key cannot be
+ * passed in and used by mistake.
+ */
+export function trustedCamelotById(rows: readonly { id: string; camelotKey: string | null; keyConfidence: number | null }[]): Map<string, string | null> {
+  return new Map(rows.map((r) => [r.id, trustedCamelot(r.camelotKey, r.keyConfidence)]));
+}

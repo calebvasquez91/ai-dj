@@ -8,7 +8,7 @@ import { alignEntryToBar, songMapMatchesBpm } from "@/lib/phrase-align";
 import { estimateStructuralCues } from "@/lib/structural-estimate";
 import { TRANSITION_FX_ENABLED } from "@/lib/transitionFx";
 import { bestTempoRatio } from "@/lib/tempoRatio";
-import { camelotCompatibility } from "@/lib/camelot";
+import { camelotCompatibility, MIN_KEY_CONFIDENCE_FOR_SCORING } from "@/lib/camelot";
 import { GENRE_TRANSITIONS_ENABLED } from "@/lib/featureFlags";
 import { adjustPlanArgsForGenrePlan, planMatchesPair, type PairGenrePlan } from "@/lib/genrePlanApply";
 
@@ -343,10 +343,8 @@ export function mashupGainCurves(
 // than becoming its own TransitionEntry.
 // ---------------------------------------------------------------------------
 
-export const MIN_KEY_CONFIDENCE_FOR_SCORING = 0.15;
-
-// camelotCompatibility lives in lib/camelot.ts (so the playlist curator can use it without this whole module); re-exported here for the code that imports it from here.
-export { camelotCompatibility };
+// camelotCompatibility and the key-confidence bar live in lib/camelot.ts (so the playlist curator can use them without this whole module); re-exported here for the code that imports them from here.
+export { camelotCompatibility, MIN_KEY_CONFIDENCE_FOR_SCORING };
 
 // ---------------------------------------------------------------------------
 // DJ Set Modes — a vibe/context preset that biases which transition
