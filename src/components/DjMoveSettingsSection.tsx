@@ -2,7 +2,7 @@
 
 import { useEffect } from "react";
 import { useDjMoves } from "@/lib/djMovesStore";
-import { DJ_EQ_ENABLED, SCRATCH_ENABLED, STUTTER_ENABLED } from "@/lib/featureFlags";
+import { DJ_EQ_ENABLED, SCRATCH_ENABLED, SEED_RADIO_ENABLED, STUTTER_ENABLED } from "@/lib/featureFlags";
 
 function Toggle({ label, checked, onChange }: { label: string; checked: boolean; onChange: (on: boolean) => void }) {
   return (
@@ -23,20 +23,21 @@ function Slider({ label, value, onChange }: { label: string; value: number; onCh
 }
 
 /**
- * Settings for the DJ moves: a switch for each that is available (its feature flag is on), a frequency slider for stutter and scratch, and the
- * scratch volume. Renders nothing while all three flags are off. Manual EQ on the DJ board is unaffected by any of this.
+ * Settings for the DJ moves: a switch for each that is available (its feature flag is on), a frequency slider for stutter and scratch, the
+ * scratch volume, and seed radio's automatic start. Every switch starts off. Renders nothing while all four flags are off. Manual EQ on the DJ board is unaffected by any of this.
  */
 export function DjMoveSettingsSection() {
   const settings = useDjMoves((s) => s.settings);
   const update = useDjMoves((s) => s.update);
   const load = useDjMoves((s) => s.load);
   useEffect(load, [load]);
-  if (!DJ_EQ_ENABLED && !STUTTER_ENABLED && !SCRATCH_ENABLED) return null;
+  if (!DJ_EQ_ENABLED && !STUTTER_ENABLED && !SCRATCH_ENABLED && !SEED_RADIO_ENABLED) return null;
   return (
     <section className="flex flex-col gap-2" aria-labelledby="dj-moves-heading">
       <h2 id="dj-moves-heading" className="text-sm font-semibold text-muted">
         DJ moves
       </h2>
+      {SEED_RADIO_ENABLED && <Toggle label="Radio: after a song played on its own, keep playing songs that go with it" checked={settings.autoRadio} onChange={(autoRadio) => update({ autoRadio })} />}
       {DJ_EQ_ENABLED && <Toggle label="DJ EQ moves (you can still use manual EQ)" checked={settings.djEq} onChange={(djEq) => update({ djEq })} />}
       {STUTTER_ENABLED && (
         <>

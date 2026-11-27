@@ -110,6 +110,8 @@ describe("Instrumental mode (playbackUrl)", () => {
   const state = { instrumentalMode: true, instrumentalAvailability: { a: "https://blob/a-instrumental.wav" } };
 
   it("plays the song itself while the feature is off, whatever the setting", async () => {
+    vi.resetModules();
+    vi.doMock("@/lib/featureFlags", async (orig) => ({ ...(await orig<typeof import("@/lib/featureFlags")>()), VOCAL_SPLIT_ENABLED: false }));
     const { playbackUrl } = await import("./instrumentalMode");
     expect(playbackUrl({ id: "a", sourceUrl: "https://blob/a.mp3" }, state)).toBe("https://blob/a.mp3");
   });

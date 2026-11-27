@@ -33,6 +33,8 @@ export type PlannerSyncReport = Pick<SyncReport, "bpmDelta" | "trackA_bpm" | "te
 export interface PlannerOptions {
   /** Tools whose own flag is on. Default: read from lib/featureFlags.ts. A tool not in here never appears in a plan. */
   enabledTools?: ReadonlySet<TransitionTool>;
+  /** Whether the transition engine can play a scratch or instrumental bridge. Default: ENGINE_RUNS_BRIDGES (false): a bridge is planned and tested but not handed to the engine, so planning one would leave the pair on the ordinary morph instead of the cut it outranked. */
+  bridgesRunnable?: boolean;
   /** Whether vocal separation is on (a vocal swap needs it). Default: VOCAL_SPLIT_ENABLED. */
   vocalSplit?: boolean;
   /** False when the two songs' vocal activity has no gap in the window to hand the vocal over in (lib/vocalSwap.ts planVocalSwap returned null): the swap is then not offered. Default true (unknown is not a veto). */
@@ -98,6 +100,9 @@ const STYLE_BARS: Record<TransitionStyle, { min: number; max: number; default: n
   "filter-sweep": { min: 4, max: 16, default: 8 },
   "bass-swap": { min: 8, max: 32, default: 16 },
 };
+
+/** Whether the transition engine plays a scratch or an instrumental bridge. It does not yet (genrePlanApply.ts hands the engine nothing for them), so the planner never picks one. Set true when the engine is handed bridges. */
+export const ENGINE_RUNS_BRIDGES = false;
 
 /** The tools that are on, from the flags. */
 export function enabledToolsFromFlags(): Set<TransitionTool> {
@@ -199,6 +204,7 @@ export function rankTransitions(trackA: PlannerTrack, trackB: PlannerTrack, repo
   const table = options.rules ?? GENRE_TRANSITIONS;
   const tools = options.enabledTools ?? enabledToolsFromFlags();
   const vocalSplit = options.vocalSplit ?? flags.VOCAL_SPLIT_ENABLED;
+  const bridgesRunnable = options.bridgesRunnable ?? ENGINE_RUNS_BRIDGES;
   const genresA = genresOfTrack(trackA);
   const genresB = genresOfTrack(trackB);
   const nameA = genresA[0] ?? "Unknown";
@@ -214,6 +220,7 @@ export function rankTransitions(trackA: PlannerTrack, trackB: PlannerTrack, repo
   const usable = (style: TransitionStyle): boolean => {
     const needs = STYLE_TOOL[style];
     if (needs && !tools.has(needs)) return false;
+    if ((style === "scratch-bridge" || style === "instrumental-bridge") && !bridgesRunnable) return false;
     if (style === "vocal-swap" && (!vocalSplit || options.vocalSwapFeasible === false)) return false;
     if (noBeat && !BEATLESS_STYLES.has(style)) return false;
     if (unreliable && (style === "long-blend" || style === "bass-swap" || style === "filter-sweep")) return false;
