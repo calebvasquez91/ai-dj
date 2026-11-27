@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { fallbackAnalysis, type TrackAnalysis } from "./audio-analysis-core";
 import { adjustPlanArgsForGenrePlan, barsToSec, genrePlanSkipsSongSync, isBeatSyncedBlend, planMatchesPair, type PairGenrePlan } from "./genrePlanApply";
 import { planArgsFromState, planTransition, type PlanningState } from "./mix-engine";
@@ -76,8 +76,11 @@ describe("handing a genre plan to the existing transition engine", () => {
   });
 });
 
-describe("planArgsFromState with the flag off (the default)", () => {
-  it("ignores a genre plan entirely: the arguments are exactly what they were", () => {
+describe("planArgsFromState with the flag off", () => {
+  it("ignores a genre plan entirely: the arguments are exactly what they were", async () => {
+    vi.resetModules();
+    vi.doMock("@/lib/featureFlags", async (orig) => ({ ...(await orig<typeof import("@/lib/featureFlags")>()), GENRE_TRANSITIONS_ENABLED: false }));
+    const { planArgsFromState } = await import("./mix-engine");
     const without = planArgsFromState(state, {}, current, next);
     for (const style of ["echo-out", "quick-cut", "fade", "long-blend"] as const) {
       expect(planArgsFromState({ ...state, genrePlan: pair(genrePlan(style)) }, {}, current, next)).toEqual(without);
