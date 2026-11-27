@@ -3,6 +3,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 vi.mock("@/lib/featureFlags", async (importOriginal) => ({ ...(await importOriginal<typeof import("@/lib/featureFlags")>()), SEED_RADIO_ENABLED: true }));
 
 import { useStore } from "./store";
+import { useDjMoves } from "./djMovesStore";
+import { DJ_MOVE_DEFAULTS } from "./djMoveSettings";
 import { RADIO_MAX_ARTIST_RUN, RADIO_MIN_AHEAD } from "./radio";
 import type { Track } from "@/types/music";
 
@@ -27,12 +29,25 @@ const flush = () => new Promise((r) => setTimeout(r, 20));
 
 beforeEach(() => {
   useStore.setState(initial, true);
+  useDjMoves.setState({ settings: { ...DJ_MOVE_DEFAULTS, autoRadio: true }, loaded: true });
   vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({ artists: ["artist 3"] }), { status: 200 })));
 });
 afterEach(() => vi.unstubAllGlobals());
 
 describe("seed radio in the store (SEED_RADIO_ENABLED on)", () => {
   const library = Array.from({ length: 80 }, () => song());
+
+  it("a song played on its own starts no radio until the automatic start is switched on in Settings, but the Radio button still does", async () => {
+    useDjMoves.setState({ settings: { ...DJ_MOVE_DEFAULTS, autoRadio: false }, loaded: true });
+    useStore.setState({ localLibrary: library });
+    useStore.getState().playTrackList([library[0]], 0);
+    await flush();
+    expect(useStore.getState().currentTrack?.id).toBe(library[0].id);
+    expect(useStore.getState().radioSession).toBeNull();
+    useStore.getState().startRadio(library[0]);
+    await flush();
+    expect(useStore.getState().radioSession?.seedId).toBe(library[0].id);
+  });
 
   it("playing one song on its own starts a radio: it plays, and songs that go with it queue behind", async () => {
     useStore.setState({ localLibrary: library });

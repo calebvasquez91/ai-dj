@@ -67,7 +67,7 @@ describe("resolveTransition: which style a pair of genres gets", () => {
 
 describe("resolveTransition: tempo and key gaps", () => {
   it("bridges a pair too far apart for both genres with an instrumental bridge when that tool is on", () => {
-    const plan = resolveTransition(tagged("Pop"), tagged("Pop"), report({ trackA_bpm: 100, bpmDelta: 14 }), undefined, { enabledTools: ALL_TOOLS });
+    const plan = resolveTransition(tagged("Pop"), tagged("Pop"), report({ trackA_bpm: 100, bpmDelta: 14 }), undefined, { enabledTools: ALL_TOOLS, bridgesRunnable: true });
     expect(plan.style).toBe("instrumental-bridge");
     expect(plan.reason).toBe("tempo gap of 14 BPM");
     expect(plan.keepSync).toBe(false);
@@ -75,8 +75,17 @@ describe("resolveTransition: tempo and key gaps", () => {
 
   it("uses a scratch bridge when only scratch is on, and a quick cut when no bridge tool is", () => {
     const gap = report({ trackA_bpm: 100, bpmDelta: 14 });
-    expect(resolveTransition(tagged("Pop"), tagged("Pop"), gap, undefined, { enabledTools: new Set<TransitionTool>(["scratch"]) }).style).toBe("scratch-bridge");
-    expect(resolveTransition(tagged("Pop"), tagged("Pop"), gap, undefined, { enabledTools: NO_TOOLS }).style).toBe("quick-cut");
+    expect(resolveTransition(tagged("Pop"), tagged("Pop"), gap, undefined, { enabledTools: new Set<TransitionTool>(["scratch"]), bridgesRunnable: true }).style).toBe("scratch-bridge");
+    expect(resolveTransition(tagged("Pop"), tagged("Pop"), gap, undefined, { enabledTools: NO_TOOLS, bridgesRunnable: true }).style).toBe("quick-cut");
+  });
+
+  it("never plans a bridge the engine cannot play: with every tool on, a hard pair gets the quick cut that executes", () => {
+    const gap = report({ trackA_bpm: 100, bpmDelta: 14 });
+    const plan = resolveTransition(tagged("Pop"), tagged("Pop"), gap, undefined, { enabledTools: ALL_TOOLS });
+    expect(plan.style).toBe("quick-cut");
+    for (const ranked of rankTransitions(tagged("Pop"), tagged("Pop"), gap, undefined, { enabledTools: ALL_TOOLS })) {
+      expect(["scratch-bridge", "instrumental-bridge"]).not.toContain(ranked.style);
+    }
   });
 
   it("does not bridge when only one genre is bothered by the gap (the other tolerates it)", () => {

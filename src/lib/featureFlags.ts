@@ -38,8 +38,10 @@ export const SYNC_TEST_ENABLED = false;
  */
 export const VOCAL_MASHUP_ENABLED = process.env.NEXT_PUBLIC_VOCAL_MASHUP === "on";
 
-// ---- The new DJ abilities. Each has its own switch, all off until it has been checked on real playback, so one can be turned on without turning on
+// ---- The new DJ abilities. Each has its own switch, so one can be turned on without turning on
 // ---- another (and without touching the paused transition effects: TRANSITION_FX_ENABLED in lib/syncEngine.ts is a separate flag and stays as it is).
+// ---- On now: seed radio (its automatic start is a Settings switch, off by default), stutter, scratching over a song, DJ EQ and echo-out (the three DJ-move switches in Settings are off by default).
+// ---- Still off: instrumental bridges (nothing in the deck plays one yet) and vocal split (no scheduler builds the instrumentals yet).
 // ---- Every DJ move is locked to the master clock and the beat grid, rate-limited and gated by energy; none of them is ever random.
 
 /** Seed radio (lib/radio.ts): playing one song on its own queues songs that go with it, kept topped up; "Start radio" on a song. */
@@ -49,13 +51,13 @@ export const STUTTER_ENABLED = true;
 /** Scratching (lib/scratch.ts): beat-quantised scratch patterns over a song, and as a transition bridge. */
 export const SCRATCH_ENABLED = true;
 /** Instrumental bridges (lib/instrumentalBridge.ts): a song morphs into an instrumental, which morphs into the next song. */
-export const INSTRUMENTAL_BRIDGE_ENABLED = true;
+export const INSTRUMENTAL_BRIDGE_ENABLED = false;
 /** DJ EQ moves (lib/djEq.ts): low cuts, bass returns, high lifts and bass swaps on beat and phrase boundaries. */
 export const DJ_EQ_ENABLED = true;
 /** Echo-out (lib/echoOut.ts): a song that ends abruptly echoes into silence, holds 3 to 5 seconds, and the next starts at its peak. */
 export const ECHO_OUT_ENABLED = true;
 
-// ---- Genre-aware transitions and vocal/instrumental separation. Both off until verified on real playback; with both off the app behaves exactly as before.
+// ---- Genre-aware transitions (on; each browser still has its own switch in Settings, off by default) and vocal/instrumental separation (off until an instrumental build job is scheduled).
 
 /**
  * Genre-aware transitions (lib/genreTransitions.ts, lib/transitionPlanner.ts): the DJ and the Audio Engineer pick which transition style and tools to
@@ -63,4 +65,4 @@ export const ECHO_OUT_ENABLED = true;
  */
 export const GENRE_TRANSITIONS_ENABLED = true;
 /** Vocal / instrumental separation (vocals.wav + instrumental.wav per track, vocal activity timeline, vocal swap, "Instrumental mode"). Playback inside the app only; never offered for download. */
-export const VOCAL_SPLIT_ENABLED = true;
+export const VOCAL_SPLIT_ENABLED = false;

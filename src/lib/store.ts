@@ -46,6 +46,7 @@ import type { PairGenrePlan } from "@/lib/genrePlanApply";
 import { saveInstrumentalMode } from "@/lib/instrumentalMode";
 import { useGenreTransitions } from "@/lib/genreTransitionStore";
 import { RADIO_BATCH, isLoneSongPlay, nextRadioBatch, radioNeedsMore, type RadioFacts } from "@/lib/radio";
+import { useDjMoves } from "@/lib/djMovesStore";
 import { VOICE_CUT_DEFAULTS, loadVoiceCutSettings, saveVoiceCutSettings, type VoiceCutSettings } from "@/lib/voiceCutSettings";
 import type { VoiceMap } from "@/lib/voiceMap";
 
@@ -472,6 +473,13 @@ const playlistAddQueues = new Map<string, Promise<unknown>>();
 /** Set while startRadio puts its own seed on, so that play does not start a second radio. */
 const radioStartGuard = { on: false };
 
+/** Whether this browser has the automatic radio start switched on in Settings (off until the person turns it on). Reads the saved setting first, since Settings may not have been opened this session. */
+function autoRadioOn(): boolean {
+  const moves = useDjMoves.getState();
+  moves.load();
+  return useDjMoves.getState().settings.autoRadio;
+}
+
 /** What the radio knows about a song besides its tags, from its analysis when it has one. */
 function radioFactsOf(analysis: Record<string, TrackAnalysis>) {
   return (t: Track): RadioFacts => {
@@ -659,8 +667,9 @@ export const useStore = create<PlayerState>()(
           activePlaylistTheme: sourcePlaylistTheme,
           activePlaylistId: sourcePlaylistId,
         });
-        // One song played on its own, from no playlist or list: the DJ keeps going with songs that go with it (seed radio, when switched on).
-        if (SEED_RADIO_ENABLED && !radioStartGuard.on && isLoneSongPlay(tracks, sourcePlaylistId) && tracks[startIndex]) get().startRadio(tracks[startIndex]);
+        // One song played on its own, from no playlist or list: the DJ keeps going with songs that go with it (seed radio), but only when the person has switched
+        // that on in Settings. The "Radio" button on a song starts one whatever this setting says.
+        if (SEED_RADIO_ENABLED && !radioStartGuard.on && isLoneSongPlay(tracks, sourcePlaylistId) && tracks[startIndex] && autoRadioOn()) get().startRadio(tracks[startIndex]);
       },
 
       startRadio: (seed) => {

@@ -76,6 +76,36 @@ describe("handing a genre plan to the existing transition engine", () => {
   });
 });
 
+describe("planArgsFromState with the flag on", () => {
+  const load = async () => {
+    vi.resetModules();
+    vi.doMock("@/lib/featureFlags", async (orig) => ({ ...(await orig<typeof import("@/lib/featureFlags")>()), GENRE_TRANSITIONS_ENABLED: true }));
+    return (await import("./mix-engine")).planArgsFromState;
+  };
+
+  it("hands a plan made for exactly this pair to the engine: an echo-out pins the engine's echo-out, a quick-cut a short phrase blend", async () => {
+    const planArgs = await load();
+    const without = planArgs(state, {}, current, next);
+    const echo = planArgs({ ...state, genrePlan: pair(genrePlan("echo-out")) }, {}, current, next);
+    expect(echo.forceTransitionId).toBe("echo-out");
+    expect(echo.chosenByGenre).toBe(true);
+    const cut = planArgs({ ...state, genrePlan: pair(genrePlan("quick-cut", { bars: 2 })) }, {}, current, next);
+    expect(cut.forceTransitionId).toBe("phrase-blend");
+    expect(cut).not.toEqual(without);
+  });
+
+  it("leaves the arguments alone for a plan made for another pair, for a beat-synced blend, and when the person pinned a transition", async () => {
+    const planArgs = await load();
+    const without = planArgs(state, {}, current, next);
+    const other: PairGenrePlan = { ...pair(genrePlan("echo-out")), fromId: "x", toId: "y" };
+    expect(planArgs({ ...state, genrePlan: other }, {}, current, next)).toEqual(without);
+    expect(planArgs({ ...state, genrePlan: pair(genrePlan("long-blend", { keepSync: true })) }, {}, current, next)).toEqual(without);
+    const pinned = planArgs({ ...state, forcedTransitionId: "phrase-blend", genrePlan: pair(genrePlan("echo-out")) }, {}, current, next);
+    expect(pinned.forceTransitionId).toBe("phrase-blend");
+    expect(pinned.chosenByGenre).toBeUndefined();
+  });
+});
+
 describe("planArgsFromState with the flag off", () => {
   it("ignores a genre plan entirely: the arguments are exactly what they were", async () => {
     vi.resetModules();

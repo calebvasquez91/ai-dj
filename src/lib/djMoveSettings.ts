@@ -5,6 +5,8 @@
 export interface DjMoveSettings {
   djEq: boolean;
   stutter: boolean;
+  /** Seed radio's automatic start: a song played on its own (no playlist) keeps going with songs that go with it. The "Radio" button on a song works either way. */
+  autoRadio: boolean;
   /** 0 (rarely) to 1 (as often as the rules allow). */
   stutterFrequency: number;
   scratch: boolean;
@@ -14,11 +16,13 @@ export interface DjMoveSettings {
   scratchFrequency: number;
 }
 
+/** Every switch starts off: these moves change what a person hears, so each is something they turn on in Settings. */
 export const DJ_MOVE_DEFAULTS: DjMoveSettings = {
-  djEq: true,
-  stutter: true,
+  djEq: false,
+  stutter: false,
+  autoRadio: false,
   stutterFrequency: 0.5,
-  scratch: true,
+  scratch: false,
   scratchVolume: 0.7,
   scratchFrequency: 0.5,
 };
@@ -36,6 +40,7 @@ export function parseDjMoveSettings(raw: string | null | undefined): DjMoveSetti
     return {
       djEq: bool(v.djEq, DJ_MOVE_DEFAULTS.djEq),
       stutter: bool(v.stutter, DJ_MOVE_DEFAULTS.stutter),
+      autoRadio: bool(v.autoRadio, DJ_MOVE_DEFAULTS.autoRadio),
       stutterFrequency: clamp01(v.stutterFrequency, DJ_MOVE_DEFAULTS.stutterFrequency),
       scratch: bool(v.scratch, DJ_MOVE_DEFAULTS.scratch),
       scratchVolume: clamp01(v.scratchVolume, DJ_MOVE_DEFAULTS.scratchVolume),
