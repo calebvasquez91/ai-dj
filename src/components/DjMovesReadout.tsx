@@ -1,5 +1,6 @@
 "use client";
 
+import { StutterNoteSelect } from "@/components/StutterNoteSelect";
 import { useDjMoves, type DjMoveKind } from "@/lib/djMovesStore";
 import { DJ_EQ_ENABLED, ECHO_OUT_ENABLED, INSTRUMENTAL_BRIDGE_ENABLED, SCRATCH_ENABLED, STUTTER_ENABLED } from "@/lib/featureFlags";
 import { useEffect } from "react";
@@ -36,9 +37,12 @@ export function DjMovesReadout() {
         ))}
       </ul>
       {STUTTER_ENABLED && (
-        <button type="button" className="btn-outline !text-xs self-start" onClick={requestManualStutter} title="Stutter the playing song on the next beat">
-          Stutter now
-        </button>
+        <div className="flex flex-wrap items-end gap-3">
+          <StutterNoteSelect />
+          <button type="button" className="btn-outline !text-xs" onClick={requestManualStutter} title="Stutter the playing song on the next beat">
+            Stutter now
+          </button>
+        </div>
       )}
     </section>
   );

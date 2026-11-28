@@ -52,7 +52,7 @@ import { genrePlanSkipsSongSync } from "@/lib/genrePlanApply";
 import { ALIGNED_MAX_HOLD_MS, incomingIsLoading, incomingIsReady, MAX_INCOMING_HOLD_MS, NATURAL_END_HOLD_LEAD_SEC, needsEntrySeek, shouldHoldForIncoming, shouldPreloadNext, type IncomingState } from "@/lib/nextTrackPreload";
 import { playbackUrl } from "@/lib/instrumentalMode";
 import { runDjEqTick } from "@/lib/djEq";
-import { manualStutter, planStutter, scheduleStutter, STUTTER_MIN_DECK_LEVEL, type StutterMove } from "@/lib/stutter";
+import { manualStutter, planStutter, scheduleStutter, stutterNoteFor, STUTTER_MIN_DECK_LEVEL, type StutterMove } from "@/lib/stutter";
 import { planScratchOverSong } from "@/lib/scratch";
 import { playScratch } from "@/lib/scratchAudio";
 import { useDjMoveLoop } from "@/components/useDjMoveLoop";
@@ -1084,7 +1084,7 @@ export function DualDeckStage() {
         moves.setReadout("stutter", move.reason);
       };
       if (manual) {
-        const move = manualStutter({ analysis, currentTimeSec: el.currentTime, durationSec, genre, mode: store.djMode });
+        const move = manualStutter({ analysis, currentTimeSec: el.currentTime, durationSec, genre, mode: store.djMode, note: stutterNoteFor(moves.settings.stutterNote) });
         if (move) run(move);
         return;
       }
@@ -1097,6 +1097,7 @@ export function DualDeckStage() {
         genre,
         mode: store.djMode,
         frequency: moves.settings.stutterFrequency,
+        note: stutterNoteFor(moves.settings.stutterNote),
       });
       if (move) run(move);
     },

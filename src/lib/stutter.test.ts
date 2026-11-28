@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { manualStutter, noteForIntensity, STUTTER_END_GUARD_SEC, planStutter, scheduleStutter, STUTTER_BEATS, STUTTER_MIN_GAP_BARS, stutterGapBars, type StutterContext } from "./stutter";
+import { manualStutter, noteForIntensity, STUTTER_END_GUARD_SEC, planStutter, scheduleStutter, STUTTER_BEATS, STUTTER_MIN_GAP_BARS, stutterGapBars, stutterNoteFor, type StutterContext } from "./stutter";
 import { barsToSec, isOnBeat } from "./djMoves";
 import type { ParamLike } from "./djEq";
 import type { TrackAnalysis } from "./audio-analysis";
@@ -131,6 +131,38 @@ describe("scheduleStutter: automation on the audio clock", () => {
     const t = target();
     scheduleStutter(t, move, 10, 20, restore);
     expect(t.delayTime.calls[0]).toEqual(["cancel", 20]);
+  });
+});
+
+describe("the stutter note a person picks", () => {
+  it("stutterNoteFor turns a Settings value into a fixed note, and auto or anything else into null", () => {
+    expect(stutterNoteFor("1/4")).toBe("1/4");
+    expect(stutterNoteFor("1/8")).toBe("1/8");
+    expect(stutterNoteFor("1/16")).toBe("1/16");
+    expect(stutterNoteFor("auto")).toBeNull();
+    expect(stutterNoteFor("1/3")).toBeNull();
+    expect(stutterNoteFor(undefined)).toBeNull();
+  });
+  it("an automatic stutter repeats the picked note instead of the occasion's, still two beats long and on the beat", () => {
+    const a = analysis();
+    // Hip-Hop at a party would choose 1/16 (see the first test); a picked 1/4 wins over it.
+    for (const [note, beats] of [["1/4", 1], ["1/8", 0.5], ["1/16", 0.25]] as const) {
+      const m = planStutter(ctx({ analysis: a, currentTimeSec: 200.1, note }))!;
+      expect(m.note).toBe(note);
+      expect(m.sliceSec).toBeCloseTo(beats * BEAT, 6);
+      expect(m.repeats).toBe(Math.round(STUTTER_BEATS / beats));
+      expect(m.sliceSec * m.repeats).toBeCloseTo(STUTTER_BEATS * BEAT, 6);
+      expect(isOnBeat(a, m.startSec)).toBe(true);
+      expect(m.reason).toContain(`${note} in a peak`);
+    }
+  });
+  it("a null note leaves the choice to the occasion and genre", () => {
+    expect(planStutter(ctx({ currentTimeSec: 200.1, note: null }))!.note).toBe("1/16");
+  });
+  it("the button uses the picked note too", () => {
+    const a = analysis();
+    expect(manualStutter({ analysis: a, currentTimeSec: 10.1, mode: "party", genre: "Hip-Hop", note: "1/4" })!.note).toBe("1/4");
+    expect(manualStutter({ analysis: a, currentTimeSec: 10.1, mode: "party", genre: "Hip-Hop", note: null })!.note).toBe("1/16");
   });
 });
 
