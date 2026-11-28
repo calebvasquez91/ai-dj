@@ -24,7 +24,20 @@ export const STUTTER_END_GUARD_SEC = 30;
 export const STUTTER_MIN_DECK_LEVEL = 0.95;
 
 export type StutterNote = "1/4" | "1/8" | "1/16";
+/** How many beats one slice of each note lasts. The one place the notes are listed: STUTTER_NOTES, the Settings choices and their labels all follow it. */
 const NOTE_BEATS: Record<StutterNote, number> = { "1/4": 1, "1/8": 0.5, "1/16": 0.25 };
+/** The notes a person can pick, longest slice first (the keys of NOTE_BEATS, in the order written). */
+export const STUTTER_NOTES = Object.keys(NOTE_BEATS) as StutterNote[];
+/** The longest slice a stutter may repeat, seconds: the deck's stutter delay line holds one second (createDelay(1) in DualDeckStage), and a longer delay time is clamped. */
+export const STUTTER_MAX_SLICE_SEC = 0.95;
+
+/** `note`, or the next shorter one when a slice of it would not fit the delay line at this beat length (a quarter note on a song under about 63 BPM). */
+export function fitNoteToDelayLine(note: StutterNote, beatSec: number): StutterNote {
+  for (let i = STUTTER_NOTES.indexOf(note); i < STUTTER_NOTES.length; i++) {
+    if (NOTE_BEATS[STUTTER_NOTES[i]] * beatSec <= STUTTER_MAX_SLICE_SEC) return STUTTER_NOTES[i];
+  }
+  return STUTTER_NOTES[STUTTER_NOTES.length - 1];
+}
 
 export interface StutterMove {
   startSec: number;
@@ -47,11 +60,18 @@ export interface StutterContext {
   mode?: DjSetMode | null;
   /** 0 (rarely) to 1 (as often as the rules allow). */
   frequency: number;
+  /** The note the person picked in Settings. Null or absent: the occasion and genre choose it (noteForIntensity). */
+  note?: StutterNote | null;
 }
 
 /** The note for an intensity: a harder occasion and genre choose the finer slice. */
 export function noteForIntensity(intensity: number): StutterNote {
   return intensity >= 0.8 ? "1/16" : intensity >= 0.5 ? "1/8" : "1/4";
+}
+
+/** The note a Settings value asks for: the fixed note, or null for "auto" (the occasion and genre choose). */
+export function stutterNoteFor(setting: string | null | undefined): StutterNote | null {
+  return (STUTTER_NOTES as readonly string[]).includes(setting ?? "") ? (setting as StutterNote) : null;
 }
 
 /** The gap between stutters in bars: 16 at full frequency for a favoured genre, up to 64 at none, and longer again for a genre that is not favoured. */
@@ -73,7 +93,7 @@ export function planStutter(ctx: StutterContext): StutterMove | null {
 
   const beat = beatLengthSec(bpm);
   const intensity = modeIntensity(ctx.mode) * genreMoveWeight(ctx.genre);
-  const note = noteForIntensity(intensity);
+  const note = fitNoteToDelayLine(ctx.note ?? noteForIntensity(intensity), beat);
   const slice = NOTE_BEATS[note] * beat;
   const repeats = Math.round((STUTTER_BEATS * beat) / slice);
   const build = (startSec: number, where: StutterMove["where"], tail: string): StutterMove => ({
@@ -102,15 +122,15 @@ export function planStutter(ctx: StutterContext): StutterMove | null {
   return null;
 }
 
-/** The stutter of the button on the DJ board: on the next beat, whatever the energy or the gap (a person pressed it), with the note the occasion calls for. */
-export function manualStutter(ctx: Pick<StutterContext, "analysis" | "currentTimeSec" | "genre" | "mode"> & { durationSec?: number }): StutterMove | null {
+/** The stutter of the button on the DJ board: on the next beat, whatever the energy or the gap (a person pressed it), with the note the person picked, else the one the occasion calls for. */
+export function manualStutter(ctx: Pick<StutterContext, "analysis" | "currentTimeSec" | "genre" | "mode" | "note"> & { durationSec?: number }): StutterMove | null {
   const { analysis, currentTimeSec: now } = ctx;
   if (analysis.fallback || !(analysis.bpm > 0)) return null;
   if (ctx.durationSec != null && ctx.durationSec - now < STUTTER_END_GUARD_SEC) return null;
   const start = nextBoundary(analysis, now, "beat");
   if (start == null) return null;
   const beat = beatLengthSec(analysis.bpm);
-  const note = noteForIntensity(modeIntensity(ctx.mode) * genreMoveWeight(ctx.genre));
+  const note = fitNoteToDelayLine(ctx.note ?? noteForIntensity(modeIntensity(ctx.mode) * genreMoveWeight(ctx.genre)), beat);
   const slice = NOTE_BEATS[note] * beat;
   return { startSec: start, note, sliceSec: slice, repeats: Math.round((STUTTER_BEATS * beat) / slice), durationSec: STUTTER_BEATS * beat, where: "peak", reason: `manual ${note} stutter on the next beat` };
 }

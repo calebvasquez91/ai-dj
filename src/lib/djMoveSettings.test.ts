@@ -21,6 +21,12 @@ describe("parseDjMoveSettings", () => {
     expect(parseDjMoveSettings(JSON.stringify({ autoRadio: true })).autoRadio).toBe(true);
     expect(parseDjMoveSettings(JSON.stringify({ autoRadio: "yes" })).autoRadio).toBe(false);
   });
+  it("reads the stutter note, defaulting to auto for a missing or unknown one", () => {
+    expect(DJ_MOVE_DEFAULTS.stutterNote).toBe("auto");
+    for (const n of ["auto", "1/4", "1/8", "1/16"]) expect(parseDjMoveSettings(JSON.stringify({ stutterNote: n })).stutterNote).toBe(n);
+    for (const bad of ["1/3", 4, null, "AUTO"]) expect(parseDjMoveSettings(JSON.stringify({ stutterNote: bad })).stutterNote).toBe("auto");
+    expect(parseDjMoveSettings(JSON.stringify({ stutter: true })).stutterNote).toBe("auto");
+  });
   it("keeps sliders between 0 and 1 and ignores values of the wrong type", () => {
     const s = parseDjMoveSettings(JSON.stringify({ stutterFrequency: 5, scratchVolume: -2, scratchFrequency: "loud", djEq: "yes" }));
     expect(s.stutterFrequency).toBe(1);

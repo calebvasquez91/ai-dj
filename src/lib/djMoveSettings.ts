@@ -2,6 +2,12 @@
 // preferences. A move only ever runs when its own feature flag (lib/featureFlags.ts) is on AND the person has it on here; these switches do
 // nothing while a flag is off. Pure parsing here; the browser store is lib/djMovesStore.ts.
 
+import { STUTTER_NOTES, type StutterNote } from "@/lib/stutter";
+
+/** The stutter note a person picks: a fixed slice, or "auto" to let the DJ mode and genre choose (lib/stutter.ts noteForIntensity). The notes come from stutter.ts, so there is one list. */
+export type StutterNoteSetting = "auto" | StutterNote;
+export const STUTTER_NOTE_SETTINGS: readonly StutterNoteSetting[] = ["auto", ...STUTTER_NOTES];
+
 export interface DjMoveSettings {
   djEq: boolean;
   stutter: boolean;
@@ -9,6 +15,8 @@ export interface DjMoveSettings {
   autoRadio: boolean;
   /** 0 (rarely) to 1 (as often as the rules allow). */
   stutterFrequency: number;
+  /** Which note a stutter repeats; "auto" leaves it to the DJ mode and the song's genre. Applies to the automatic stutters and to the "Stutter now" button. */
+  stutterNote: StutterNoteSetting;
   scratch: boolean;
   /** 0-1: how loud scratches are. */
   scratchVolume: number;
@@ -22,6 +30,7 @@ export const DJ_MOVE_DEFAULTS: DjMoveSettings = {
   stutter: false,
   autoRadio: false,
   stutterFrequency: 0.5,
+  stutterNote: "auto",
   scratch: false,
   scratchVolume: 0.7,
   scratchFrequency: 0.5,
@@ -42,6 +51,7 @@ export function parseDjMoveSettings(raw: string | null | undefined): DjMoveSetti
       stutter: bool(v.stutter, DJ_MOVE_DEFAULTS.stutter),
       autoRadio: bool(v.autoRadio, DJ_MOVE_DEFAULTS.autoRadio),
       stutterFrequency: clamp01(v.stutterFrequency, DJ_MOVE_DEFAULTS.stutterFrequency),
+      stutterNote: STUTTER_NOTE_SETTINGS.includes(v.stutterNote as StutterNoteSetting) ? (v.stutterNote as StutterNoteSetting) : DJ_MOVE_DEFAULTS.stutterNote,
       scratch: bool(v.scratch, DJ_MOVE_DEFAULTS.scratch),
       scratchVolume: clamp01(v.scratchVolume, DJ_MOVE_DEFAULTS.scratchVolume),
       scratchFrequency: clamp01(v.scratchFrequency, DJ_MOVE_DEFAULTS.scratchFrequency),

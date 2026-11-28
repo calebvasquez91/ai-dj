@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect } from "react";
+import { StutterNoteSelect } from "@/components/StutterNoteSelect";
 import { useDjMoves } from "@/lib/djMovesStore";
 import { DJ_EQ_ENABLED, SCRATCH_ENABLED, SEED_RADIO_ENABLED, STUTTER_ENABLED } from "@/lib/featureFlags";
 
@@ -43,6 +44,7 @@ export function DjMoveSettingsSection() {
         <>
           <Toggle label="Stutter" checked={settings.stutter} onChange={(stutter) => update({ stutter })} />
           <Slider label="Stutter frequency" value={settings.stutterFrequency} onChange={(stutterFrequency) => update({ stutterFrequency })} />
+          <StutterNoteSelect />
         </>
       )}
       {SCRATCH_ENABLED && (
