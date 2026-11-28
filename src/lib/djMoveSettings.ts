@@ -2,9 +2,11 @@
 // preferences. A move only ever runs when its own feature flag (lib/featureFlags.ts) is on AND the person has it on here; these switches do
 // nothing while a flag is off. Pure parsing here; the browser store is lib/djMovesStore.ts.
 
-/** The stutter note a person picks: a fixed slice, or "auto" to let the occasion and genre choose (lib/stutter.ts noteForIntensity). */
-export type StutterNoteSetting = "auto" | "1/4" | "1/8" | "1/16";
-export const STUTTER_NOTE_SETTINGS: readonly StutterNoteSetting[] = ["auto", "1/4", "1/8", "1/16"];
+import { STUTTER_NOTES, type StutterNote } from "@/lib/stutter";
+
+/** The stutter note a person picks: a fixed slice, or "auto" to let the DJ mode and genre choose (lib/stutter.ts noteForIntensity). The notes come from stutter.ts, so there is one list. */
+export type StutterNoteSetting = "auto" | StutterNote;
+export const STUTTER_NOTE_SETTINGS: readonly StutterNoteSetting[] = ["auto", ...STUTTER_NOTES];
 
 export interface DjMoveSettings {
   djEq: boolean;
@@ -13,7 +15,7 @@ export interface DjMoveSettings {
   autoRadio: boolean;
   /** 0 (rarely) to 1 (as often as the rules allow). */
   stutterFrequency: number;
-  /** Which note a stutter repeats; "auto" leaves it to the song's occasion and genre. Applies to the automatic stutters and to the "Stutter now" button. */
+  /** Which note a stutter repeats; "auto" leaves it to the DJ mode and the song's genre. Applies to the automatic stutters and to the "Stutter now" button. */
   stutterNote: StutterNoteSetting;
   scratch: boolean;
   /** 0-1: how loud scratches are. */

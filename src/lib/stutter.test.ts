@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { manualStutter, noteForIntensity, STUTTER_END_GUARD_SEC, planStutter, scheduleStutter, STUTTER_BEATS, STUTTER_MIN_GAP_BARS, stutterGapBars, stutterNoteFor, type StutterContext } from "./stutter";
+import { fitNoteToDelayLine, manualStutter, noteForIntensity, STUTTER_END_GUARD_SEC, STUTTER_MAX_SLICE_SEC, planStutter, scheduleStutter, STUTTER_BEATS, STUTTER_MIN_GAP_BARS, stutterGapBars, stutterNoteFor, type StutterContext } from "./stutter";
 import { barsToSec, isOnBeat } from "./djMoves";
 import type { ParamLike } from "./djEq";
 import type { TrackAnalysis } from "./audio-analysis";
@@ -163,6 +163,26 @@ describe("the stutter note a person picks", () => {
     const a = analysis();
     expect(manualStutter({ analysis: a, currentTimeSec: 10.1, mode: "party", genre: "Hip-Hop", note: "1/4" })!.note).toBe("1/4");
     expect(manualStutter({ analysis: a, currentTimeSec: 10.1, mode: "party", genre: "Hip-Hop", note: null })!.note).toBe("1/16");
+  });
+});
+
+describe("a slice never outgrows the deck's one-second delay line", () => {
+  it("fitNoteToDelayLine keeps a note that fits and steps down to the next shorter one that does", () => {
+    expect(fitNoteToDelayLine("1/4", 0.5)).toBe("1/4");
+    expect(fitNoteToDelayLine("1/4", 60 / 70)).toBe("1/4"); // 70 BPM: 0.857 s, the slowest tempo the automatic stutters run at
+    expect(fitNoteToDelayLine("1/4", 60 / 55)).toBe("1/8"); // 55 BPM: a quarter is 1.09 s, an eighth 0.55 s
+    expect(fitNoteToDelayLine("1/4", 60 / 25)).toBe("1/16"); // 25 BPM: a quarter 2.4 s, an eighth 1.2 s, a sixteenth 0.6 s
+    expect(fitNoteToDelayLine("1/8", 60 / 40)).toBe("1/8");
+    expect(fitNoteToDelayLine("1/16", 60 / 10)).toBe("1/16"); // nothing shorter to step to
+  });
+  it("the button on a slow song with 1/4 picked repeats a shorter note, and the readout names the note it used", () => {
+    const a = analysis({ bpm: 55 });
+    const m = manualStutter({ analysis: a, currentTimeSec: 10.1, note: "1/4" });
+    expect(m).not.toBeNull();
+    expect(m!.sliceSec).toBeLessThanOrEqual(STUTTER_MAX_SLICE_SEC);
+    expect(m!.note).toBe("1/8");
+    expect(m!.reason).toContain("manual 1/8 stutter");
+    expect(m!.sliceSec * m!.repeats).toBeCloseTo(m!.durationSec, 6);
   });
 });
 

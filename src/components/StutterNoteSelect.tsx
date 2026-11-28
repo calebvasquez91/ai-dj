@@ -4,14 +4,14 @@ import { useDjMoves } from "@/lib/djMovesStore";
 import { STUTTER_NOTE_SETTINGS, type StutterNoteSetting } from "@/lib/djMoveSettings";
 
 const LABELS: Record<StutterNoteSetting, string> = {
-  auto: "Auto (follows the song and mood)",
+  auto: "Auto (follows the genre and DJ mode)",
   "1/4": "1/4 note (slowest repeat)",
   "1/8": "1/8 note",
   "1/16": "1/16 note (fastest repeat)",
 };
 
 /**
- * Picks which note a stutter repeats: a quarter, eighth or sixteenth of a beat-note, or Auto to let the song's occasion and genre choose. It sets the same
+ * Picks which note a stutter repeats: a quarter, eighth or sixteenth of a beat-note, or Auto to let the DJ mode and the song's genre choose. It sets the same
  * Settings value in both places it is shown (Settings and beside the "Stutter now" button), and applies to the automatic stutters and the button alike.
  */
 export function StutterNoteSelect({ className = "" }: { className?: string }) {
